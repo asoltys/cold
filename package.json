@@ -17,6 +17,8 @@
 		"@sveltejs/adapter-auto": "^6.0.0",
 		"@sveltejs/kit": "^2.22.0",
 		"@sveltejs/vite-plugin-svelte": "^6.0.0",
+		"@tailwindcss/forms": "^0.5.9",
+		"@tailwindcss/typography": "^0.5.15",
 		"@tailwindcss/vite": "^4.0.0",
 		"prettier": "^3.4.2",
 		"prettier-plugin-svelte": "^3.3.3",
@@ -28,6 +30,10 @@
 		"vite": "^7.0.4"
 	},
 	"dependencies": {
-		"@scure/bip39": "^1.6.0"
+		"@scure/base": "^1.2.6",
+		"@scure/bip32": "^1.7.0",
+		"@scure/bip39": "^1.6.0",
+		"@scure/btc-signer": "^1.8.1",
+		"daisyui": "^5.0.46"
 	}
 }
