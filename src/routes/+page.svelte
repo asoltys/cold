@@ -41,7 +41,7 @@
 	let utxos = [];
 
 	let api = 'https://mempool.space/api';
-	let amt = $state(800);
+	let amt = $state();
 	// let destination = $state('bc1qqz6nlwxwmfqw0v864p5sggqst2xf0mevtyc579');
 	// let password = $state('123');
 	// let mnemonic = $state(
