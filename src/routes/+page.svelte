@@ -243,10 +243,7 @@
 {:else if typeof balance !== 'undefined'}
 	<div class="flex items-center gap-2">
 		<div>
-			Balance: {balance} sats
-			{#if pending}
-				<span class="text-orange-600">({pending} pending)</span>
-			{/if}
+			Balance: {balance + pending} sats
 		</div>
 		{#if balance + pending > 0}
 			<button type="submit" class="btn ml-auto" onclick={() => (withdrawing = true)}>
@@ -257,7 +254,12 @@
 {/if}
 
 {#if txid}
-	<a href={`https://mempool.space/tx/${txid}`}>{txid}</a>
+	<div class="flex">
+		<div>Transaction completed!</div>
+		<div class="ml-auto">
+			<a href={`https://mempool.space/tx/${txid}`} class="btn">Details</a>
+		</div>
+	</div>
 {:else if withdrawing}
 	<input class="input w-full" placeholder="Destination address" bind:value={destination} />
 
