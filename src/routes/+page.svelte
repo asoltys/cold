@@ -7,8 +7,17 @@
 	import { focus } from '$lib';
 	import { generateMnemonic, mnemonicToSeedSync } from '@scure/bip39';
 	import { wordlist } from '@scure/bip39/wordlists/english';
+	import Copy from '$lib/Copy.svelte';
+
+	import 'iconify-icon';
 
 	import { getAddress, p2wpkh } from '@scure/btc-signer/payment';
+
+	const pastePassword = async () => {
+		password = await navigator.clipboard.readText();
+	};
+
+	const toggleReveal = () => (reveal = !reveal);
 
 	let NET = 'bitcoin';
 	const versions = {
@@ -52,6 +61,7 @@
 	let password = $state();
 	let mnemonic = $state();
 	let withdrawing = $state();
+	let reveal = $state(false);
 
 	let balance = $state();
 	let pending = $state();
@@ -217,23 +227,40 @@
 	<div class="flex items-center gap-2">
 		<textarea use:focus class="textarea grow" placeholder="Seed phrase" bind:value={mnemonic}
 		></textarea>
-		<button type="button" class="btn flex gap-1" onclick={generate}>
-			<img src="/random.svg" class="w-8" />
-			<div>Generate</div>
+		<button type="button" class="btn" onclick={generate}>
+			<iconify-icon icon="ph:dice-five-bold" width={32} />
 		</button>
 	</div>
 
-	<input class="input w-full" placeholder="Passphrase" bind:value={password} />
+	<div class="flex">
+		{#if reveal}
+			<input class="input w-full" placeholder="Passphrase" bind:value={password} />
+		{:else}
+			<input type="password" class="input w-full" placeholder="Passphrase" bind:value={password} />
+		{/if}
 
-	{#if address}
-		<div class="flex items-center gap-2">
-			<div>
-				Address: {address}
+		<button type="button" class="btn" onclick={toggleReveal}>
+			<iconify-icon icon={reveal ? 'ph:eye-bold' : 'ph:eye-slash-bold'} width={32} />
+		</button>
+
+		<Copy bind:text={password} />
+
+		<button type="button" class="btn" onclick={pastePassword}>
+			<iconify-icon icon="ph:clipboard-text-bold" width={32} />
+		</button>
+	</div>
+
+	<div>
+		{#if address}
+			<div class="flex items-center gap-2 break-all">
+				<div>
+					Address: {address}
+				</div>
+
+				<button type="submit" class="btn ml-auto"> Check balance </button>
 			</div>
-
-			<button type="submit" class="btn ml-auto"> Check balance </button>
-		</div>
-	{/if}
+		{/if}
+	</div>
 </form>
 
 {#if loading}
