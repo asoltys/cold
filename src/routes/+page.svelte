@@ -17,6 +17,10 @@
 		password = await navigator.clipboard.readText();
 	};
 
+	const pasteSeed = async () => {
+		mnemonic = await navigator.clipboard.readText();
+	};
+
 	const togglePassword = () => (revealPassword = !revealPassword);
 	const toggleSeed = () => (revealSeed = !revealSeed);
 
@@ -238,6 +242,10 @@
 		<button type="button" class="btn" onclick={toggleSeed}>
 			<iconify-icon icon={revealSeed ? 'ph:eye-bold' : 'ph:eye-slash-bold'} width={32} />
 		</button>
+		<Copy bind:text={mnemonic} />
+		<button type="button" class="btn" onclick={pasteSeed}>
+      <iconify-icon icon="ph:clipboard-text-bold" width={32} />
+		</button>
 		<button type="button" class="btn" onclick={generate}>
 			<iconify-icon icon="ph:dice-five-bold" width={32} />
 		</button>
@@ -265,8 +273,10 @@
 		{#if address}
 			<div class="flex items-center gap-2 break-all">
 				<div>
-					Address: {address}
+					{address}
 				</div>
+
+        <Copy bind:text={address} />
 
 				<button type="submit" class="btn ml-auto"> Check balance </button>
 			</div>
