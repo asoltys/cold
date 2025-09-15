@@ -17,7 +17,8 @@
 		password = await navigator.clipboard.readText();
 	};
 
-	const toggleReveal = () => (reveal = !reveal);
+	const togglePassword = () => (revealPassword = !revealPassword);
+	const toggleSeed = () => (revealSeed = !revealSeed);
 
 	let NET = 'bitcoin';
 	const versions = {
@@ -58,10 +59,11 @@
 	// );
 	// let withdrawing = $state(true);
 	let destination = $state();
-	let password = $state();
-	let mnemonic = $state();
+	let password = $state('');
+	let mnemonic = $state('');
 	let withdrawing = $state();
-	let reveal = $state(false);
+	let revealPassword = $state(false);
+	let revealSeed = $state(true);
 
 	let balance = $state();
 	let pending = $state();
@@ -91,9 +93,11 @@
 
 	let node = $derived.by(() => {
 		if (!mnemonic) return;
-		const seed = mnemonicToSeedSync(mnemonic, password);
-		const root = HDKey.fromMasterSeed(seed, versions);
-		return root.derive(`m/84'/0'/0'/0/0`);
+		try {
+			const seed = mnemonicToSeedSync(mnemonic.trim(), password.trim());
+			const root = HDKey.fromMasterSeed(seed, versions);
+			return root.derive(`m/84'/0'/0'/0/0`);
+		} catch (e) {}
 	});
 
 	let address = $derived(node ? p2wpkh(node.publicKey).address : undefined);
@@ -225,22 +229,29 @@
 
 <form class="space-y-5" onsubmit={checkBalance}>
 	<div class="flex items-center gap-2">
-		<textarea use:focus class="textarea grow" placeholder="Seed phrase" bind:value={mnemonic}
-		></textarea>
+		{#if revealSeed}
+			<textarea use:focus class="textarea grow" placeholder="Seed phrase" bind:value={mnemonic}
+			></textarea>
+		{:else}
+			<input type="password" class="input grow" placeholder="Seed phrase" bind:value={mnemonic} />
+		{/if}
+		<button type="button" class="btn" onclick={toggleSeed}>
+			<iconify-icon icon={revealSeed ? 'ph:eye-bold' : 'ph:eye-slash-bold'} width={32} />
+		</button>
 		<button type="button" class="btn" onclick={generate}>
 			<iconify-icon icon="ph:dice-five-bold" width={32} />
 		</button>
 	</div>
 
 	<div class="flex">
-		{#if reveal}
+		{#if revealPassword}
 			<input class="input w-full" placeholder="Passphrase" bind:value={password} />
 		{:else}
 			<input type="password" class="input w-full" placeholder="Passphrase" bind:value={password} />
 		{/if}
 
-		<button type="button" class="btn" onclick={toggleReveal}>
-			<iconify-icon icon={reveal ? 'ph:eye-bold' : 'ph:eye-slash-bold'} width={32} />
+		<button type="button" class="btn" onclick={togglePassword}>
+			<iconify-icon icon={revealPassword ? 'ph:eye-bold' : 'ph:eye-slash-bold'} width={32} />
 		</button>
 
 		<Copy bind:text={password} />

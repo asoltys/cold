@@ -11,7 +11,7 @@
 	<div class="flex items-center justify-center gap-2">
 		<img src="/bitcoin.svg" />
 		<div>
-			<a href="/" class="mx-auto text-2xl">Bitcoin Wallet</a>
+			<a href="/" class="mx-auto text-2xl">Adamant</a>
 		</div>
 	</div>
 
