@@ -232,53 +232,78 @@
 </script>
 
 <form class="space-y-5" onsubmit={checkBalance}>
-	<div class="flex items-center gap-2">
+	<div class="flex flex-wrap gap-2">
 		{#if revealSeed}
-			<textarea use:focus class="textarea grow" placeholder="Seed phrase" bind:value={mnemonic}
+			<textarea
+				use:focus
+				class="textarea w-full min-w-[200px] sm:w-auto"
+				placeholder="Seed phrase"
+				bind:value={mnemonic}
 			></textarea>
 		{:else}
-			<input type="password" class="input grow" placeholder="Seed phrase" bind:value={mnemonic} />
+			<input
+				type="password"
+				class="input w-full min-w-[200px] grow sm:w-auto"
+				placeholder="Seed phrase"
+				bind:value={mnemonic}
+			/>
 		{/if}
-		<button type="button" class="btn" onclick={toggleSeed}>
-			<iconify-icon icon={revealSeed ? 'ph:eye-bold' : 'ph:eye-slash-bold'} width={32} />
-		</button>
-		<Copy bind:text={mnemonic} />
-		<button type="button" class="btn" onclick={pasteSeed}>
-      <iconify-icon icon="ph:clipboard-text-bold" width={32} />
-		</button>
-		<button type="button" class="btn" onclick={generate}>
-			<iconify-icon icon="ph:dice-five-bold" width={32} />
-		</button>
+		<div class="flex flex-wrap w-full justify-center sm:w-auto">
+			<button type="button" class="btn !w-auto grow" onclick={toggleSeed}>
+				<iconify-icon icon={revealSeed ? 'ph:eye-bold' : 'ph:eye-slash-bold'} width={32} />
+			</button>
+			<Copy bind:text={mnemonic} />
+			<button type="button" class="btn !w-auto grow" onclick={pasteSeed}>
+				<iconify-icon icon="ph:clipboard-text-bold" width={32} />
+			</button>
+			<button type="button" class="btn !w-auto grow" onclick={generate}>
+				<iconify-icon icon="ph:dice-five-bold" width={32} />
+			</button>
+		</div>
 	</div>
 
-	<div class="flex">
+	<div class="flex flex-wrap gap-2">
 		{#if revealPassword}
-			<input class="input w-full" placeholder="Passphrase" bind:value={password} />
+			<input
+				class="input w-full min-w-[200px] sm:w-auto"
+				placeholder="Passphrase"
+				bind:value={password}
+			/>
 		{:else}
-			<input type="password" class="input w-full" placeholder="Passphrase" bind:value={password} />
+			<input
+				type="password"
+				class="input w-full min-w-[200px] sm:w-auto"
+				placeholder="Passphrase"
+				bind:value={password}
+			/>
 		{/if}
 
-		<button type="button" class="btn" onclick={togglePassword}>
-			<iconify-icon icon={revealPassword ? 'ph:eye-bold' : 'ph:eye-slash-bold'} width={32} />
-		</button>
+		<div class="flex w-full justify-center sm:w-auto">
+			<button type="button" class="btn !w-auto grow" onclick={togglePassword}>
+				<iconify-icon icon={revealPassword ? 'ph:eye-bold' : 'ph:eye-slash-bold'} width={32} />
+			</button>
 
-		<Copy bind:text={password} />
+			<Copy bind:text={password} />
 
-		<button type="button" class="btn" onclick={pastePassword}>
-			<iconify-icon icon="ph:clipboard-text-bold" width={32} />
-		</button>
+			<button type="button" class="btn !w-auto grow" onclick={pastePassword}>
+				<iconify-icon icon="ph:clipboard-text-bold" width={32} />
+			</button>
+		</div>
 	</div>
 
 	<div>
 		{#if address}
-			<div class="flex items-center gap-2 break-all">
+			<div class="flex flex-wrap items-center gap-2 break-all text-base">
 				<div>
 					{address}
 				</div>
 
-        <Copy bind:text={address} />
-
-				<button type="submit" class="btn ml-auto"> Check balance </button>
+				<div class="flex w-full justify-center sm:w-auto">
+					<Copy bind:text={address} />
+					<button type="submit" class="btn !w-auto grow ml-auto">
+						<iconify-icon icon="ph:coins-bold" width={32} />
+					</button>
+				</div>
 			</div>
 		{/if}
 	</div>

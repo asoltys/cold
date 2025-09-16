@@ -8,8 +8,8 @@
 	};
 </script>
 
-<div data-tip="Copied!" class:tooltip={justCopied}>
-	<button type="button" class="btn" onclick={copy}>
+<div data-tip="Copied!" class:tooltip={justCopied} class="grow !w-auto">
+	<button type="button" class="btn w-full" onclick={copy}>
 		<iconify-icon icon="ph:copy-bold" width={32} />
 	</button>
 </div>
