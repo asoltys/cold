@@ -661,7 +661,8 @@ function sendForm() {
           h('input', { type: 'number', min: '1', placeholder: 'sat/vB', value: s.customFee, onInput: (e) => (s.customFee = e.target.value) }),
           h('span', { class: 'small muted', style: 'align-self:center' }, 'sat/vB')
         ),
-      h('div', { class: 'small faint mt8' }, `Selected rate: ${currentFeeRate()} sat/vB`)
+      s.feeChoice !== 'custom' &&
+        h('div', { class: 'small faint mt8' }, `Selected rate: ${currentFeeRate()} sat/vB`)
     ),
     coinControl(),
     ui.sendError && h('div', { class: 'notice err' }, ui.sendError),
