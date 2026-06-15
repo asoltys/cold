@@ -147,22 +147,22 @@ export class Api {
     return { fastestFee: 20, halfHourFee: 10, hourFee: 5, economyFee: 2, minimumFee: 1 };
   }
 
+  // Broadcast to ALL explorers in parallel (not via the throttle — a send is
+  // urgent) so the tx is visible regardless of which explorer the recipient
+  // watches. Resolves with the txid if any accept it; rejects only if all fail.
   async broadcast(hexTx) {
-    let lastErr;
-    for (const base of this._hosts) {
-      try {
-        const res = await this.#run(base + '/tx', { method: 'POST', body: hexTx });
-        const body = await res.text();
-        if (!res.ok) {
-          lastErr = new Error(body || `${res.status} broadcast failed`);
-          continue;
-        }
-        return body.trim(); // txid
-      } catch (e) {
-        lastErr = e;
-      }
-    }
-    throw lastErr;
+    if (this.offline) throw new Error('offline');
+    const attempts = this._hosts.map(async (base) => {
+      const res = await fetch(base + '/tx', { method: 'POST', body: hexTx });
+      const body = await res.text();
+      if (res.status === 429) this.#penalize();
+      if (!res.ok) throw new Error(body || `${res.status} broadcast failed`);
+      return body.trim(); // txid
+    });
+    const results = await Promise.allSettled(attempts);
+    const ok = results.find((r) => r.status === 'fulfilled');
+    if (ok) return ok.value;
+    throw (results.find((r) => r.status === 'rejected') || {}).reason || new Error('broadcast failed');
   }
 }
 
