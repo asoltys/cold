@@ -17,7 +17,13 @@ import { p2wpkh } from '@scure/btc-signer/payment';
 
 import { Api, pool } from './api.js';
 
-const GAP_LIMIT = 20; // BIP44 standard gap limit
+// The BIP44 standard gap limit is 20, but that means ~40 address lookups per
+// scan. We can safely use a much smaller limit because this wallet only ever
+// exposes ONE unused receive address at a time (freshReceive = first unused;
+// there is no "generate another address" button). That keeps used addresses
+// contiguous, so the gap between them is never more than 1 — a limit of 5 is a
+// comfortable safety margin while cutting scan requests ~4x.
+const GAP_LIMIT = 5;
 
 const NETS = {
   mainnet: { net: btc.NETWORK, coin: 0 },

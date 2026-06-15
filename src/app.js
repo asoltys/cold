@@ -506,7 +506,7 @@ function receiveTab() {
     ),
     h('div', { class: 'path' }, `m/84'/${coin}'/0'/0/${fresh.index}`),
     h('p', { class: 'small muted center', style: 'margin:0' },
-      'A fresh address is shown for better privacy. After a payment arrives, scan again to advance to a new one.'),
+      'A fresh address is shown for better privacy. When it receives a payment, a new one appears automatically.'),
     addressBook()
   );
 }
