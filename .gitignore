@@ -1,12 +1,7 @@
 node_modules
 
-# Output
-.output
-.vercel
-.netlify
-.wrangler
-/.svelte-kit
-/build
+# Build output (single-file wallet; rebuild with `bun run build`)
+/dist
 
 # OS
 .DS_Store
@@ -15,9 +10,3 @@ Thumbs.db
 # Env
 .env
 .env.*
-!.env.example
-!.env.test
-
-# Vite
-vite.config.js.timestamp-*
-vite.config.ts.timestamp-*
