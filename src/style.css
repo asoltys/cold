@@ -207,6 +207,15 @@ textarea { resize: vertical; min-height: 84px; font-family: var(--mono); font-si
 }
 .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 .words .w.masked .t { color: var(--faint); letter-spacing: 2px; }
+
+/* Clickable unit labels (BTC/sats) — look like text, toggle the global unit. */
+.unit-tag {
+  background: none; border: 0; padding: 0; margin: 0; font: inherit; cursor: pointer;
+  color: var(--muted); font-weight: 600;
+  border-bottom: 1px dotted var(--line-strong);
+}
+.unit-tag:hover { background: none; color: var(--accent-ink); border-bottom-color: var(--accent); }
+.unit-tag:active { transform: none; }
 .divider { height: 1px; background: var(--line); margin: 16px 0; border: 0; }
 hr.divider { margin: 16px 0; }
 .linklike { background: none; border: 0; padding: 0; color: var(--accent-ink); font-weight: 600; cursor: pointer; }

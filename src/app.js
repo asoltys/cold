@@ -42,8 +42,7 @@ const ui = {
 
 function blankSend() {
   return {
-    address: '',
-    amount: '',
+    recipients: [{ address: '', amount: '' }],
     unit: 'btc',
     max: false,
     feeChoice: 'halfHourFee',
@@ -119,6 +118,34 @@ function download(filename, text, mime = 'application/json') {
 
 function copyBtn(text, label = 'Copy') {
   return h('button', { class: 'btn-sm', onClick: () => copy(text) }, label);
+}
+
+// ---------------------------------------------------------------- display unit
+// Global BTC/sats preference, persisted in localStorage across refreshes and
+// logouts. Every unit label on the site is clickable to toggle it.
+const UNIT_KEY = 'btc-wallet-unit';
+let unit = (() => {
+  try {
+    return localStorage.getItem(UNIT_KEY) === 'sats' ? 'sats' : 'btc';
+  } catch {
+    return 'btc';
+  }
+})();
+
+function toggleUnit() {
+  unit = unit === 'btc' ? 'sats' : 'btc';
+  try {
+    localStorage.setItem(UNIT_KEY, unit);
+  } catch {}
+  render();
+}
+
+const unitLabel = () => (unit === 'sats' ? 'sats' : 'BTC');
+const fmtAmount = (sats) => (unit === 'sats' ? fmtSats(sats) : fmtBtc(sats));
+
+// A clickable unit label. cls lets callers inherit surrounding sizing.
+function unitTag(cls = '') {
+  return h('button', { type: 'button', class: 'unit-tag ' + cls, title: 'Switch BTC / sats', onClick: toggleUnit }, unitLabel());
 }
 
 // ================================================================ UNLOCK
@@ -538,13 +565,13 @@ function balanceCard() {
     'div',
     { class: 'card balance' },
     h('div', { class: 'small faint', style: 'text-transform:uppercase;letter-spacing:.05em' }, 'Total balance'),
-    h('div', { class: 'amt', style: firstLoad ? 'opacity:.3' : '' }, fmtBtc(wallet.total), h('span', { class: 'unit' }, 'BTC')),
+    h('div', { class: 'amt', style: firstLoad ? 'opacity:.3' : '' }, fmtAmount(wallet.total), ' ', unitTag('unit')),
     h(
       'div',
       { class: 'split' },
-      h('div', {}, h('div', { class: 'k' }, 'Confirmed'), h('div', { class: 'v' }, fmtSats(wallet.confirmed) + ' sats')),
+      h('div', {}, h('div', { class: 'k' }, 'Confirmed'), h('div', { class: 'v' }, fmtAmount(wallet.confirmed), ' ', unitTag())),
       wallet.pending > 0 &&
-        h('div', {}, h('div', { class: 'k' }, 'Pending'), h('div', { class: 'v pending' }, fmtSats(wallet.pending) + ' sats'))
+        h('div', {}, h('div', { class: 'k' }, 'Pending'), h('div', { class: 'v pending' }, fmtAmount(wallet.pending), ' ', unitTag()))
     )
   );
 }
@@ -597,6 +624,48 @@ function sendTab() {
   return sendForm();
 }
 
+// One recipient: address + amount. Max is only offered for a single recipient.
+function recipientRow(s, r, i) {
+  const single = s.recipients.length === 1;
+  const maxOn = single && s.max;
+  return h(
+    'div',
+    { class: 'col gap6' },
+    h('div', { class: 'input-group' },
+      h('input', {
+        type: 'text', class: 'mono-input grow', placeholder: 'bc1q…',
+        autocapitalize: 'none', autocomplete: 'off', spellcheck: 'false', value: r.address,
+        onInput: (e) => (r.address = e.target.value),
+      }),
+      !single && h('button', { type: 'button', class: 'btn-sm', title: 'Remove', onClick: () => { s.recipients.splice(i, 1); render(); } }, '✕')
+    ),
+    h('div', { class: 'input-group' },
+      h('input', {
+        type: 'number', step: unit === 'sats' ? '1' : '0.00000001', min: '0',
+        placeholder: unit === 'sats' ? '0' : '0.00000000',
+        disabled: maxOn,
+        value: maxOn
+          ? (unit === 'sats' ? String(estimatedMaxSats()) : fmtBtc(estimatedMaxSats()))
+          : r.amount,
+        onInput: (e) => {
+          let v = e.target.value;
+          // Chrome emits scientific notation when stepping tiny BTC amounts.
+          if (v && /e/i.test(v)) {
+            const n = Number(v);
+            if (isFinite(n)) {
+              v = unit === 'sats' ? String(Math.round(n)) : n.toFixed(8).replace(/\.?0+$/, '');
+              e.target.value = v;
+            }
+          }
+          r.amount = v;
+        },
+      }),
+      h('button', { type: 'button', class: 'btn-sm', title: 'Switch BTC / sats', onClick: toggleUnit }, unitLabel()),
+      single && h('button', { type: 'button', class: s.max ? 'btn-primary' : '', onClick: () => { s.max = !s.max; render(); } }, 'Max')
+    )
+  );
+}
+
 function sendForm() {
   const s = ui.send;
   const feeOpts = [
@@ -609,51 +678,17 @@ function sendForm() {
     'div',
     { class: 'card col' },
     h(
-      'label',
+      'div',
       { class: 'field' },
-      h('span', { class: 'lab' }, 'Recipient address'),
-      h('input', {
-        type: 'text', class: 'mono-input', placeholder: 'bc1q…',
-        autocapitalize: 'none', autocomplete: 'off', spellcheck: 'false', value: s.address,
-        onInput: (e) => (s.address = e.target.value),
-      })
-    ),
-    h(
-      'label',
-      { class: 'field' },
-      h('span', { class: 'lab' }, 'Amount'),
-      h(
-        'div',
-        { class: 'input-group' },
-        h('input', {
-          type: 'number', step: s.unit === 'sats' ? '1' : '0.00000001', min: '0',
-          placeholder: s.unit === 'sats' ? '0' : '0.00000000',
-          disabled: s.max,
-          value: s.max
-            ? (s.unit === 'sats' ? String(estimatedMaxSats()) : fmtBtc(estimatedMaxSats()))
-            : s.amount,
-          onInput: (e) => {
-            let v = e.target.value;
-            // Chrome emits scientific notation (e.g. "1e-8") when stepping tiny
-            // BTC amounts — normalize it back to a plain decimal string.
-            if (v && /e/i.test(v)) {
-              const n = Number(v);
-              if (isFinite(n)) {
-                v = s.unit === 'sats' ? String(Math.round(n)) : n.toFixed(8).replace(/\.?0+$/, '');
-                e.target.value = v;
-              }
-            }
-            s.amount = v;
-          },
-        }),
-        h(
-          'div',
-          { class: 'seg' },
-          h('button', { type: 'button', class: s.unit === 'btc' ? 'active' : '', onClick: () => { s.unit = 'btc'; render(); } }, 'BTC'),
-          h('button', { type: 'button', class: s.unit === 'sats' ? 'active' : '', onClick: () => { s.unit = 'sats'; render(); } }, 'sats')
-        ),
-        h('button', { type: 'button', class: s.max ? 'btn-primary' : '', onClick: () => { s.max = !s.max; render(); } }, 'Max')
-      )
+      h('span', { class: 'lab' }, s.recipients.length > 1 ? 'Recipients' : 'Recipient'),
+      h('div', { class: 'col', style: 'gap:14px' },
+        s.recipients.map((r, i) => recipientRow(s, r, i))
+      ),
+      s.recipients.length < 10 &&
+        h('button', {
+          type: 'button', class: 'linklike small mt8',
+          onClick: () => { s.recipients.push({ address: '', amount: '' }); s.max = false; render(); },
+        }, '+ Add recipient')
     ),
     h(
       'div',
@@ -723,7 +758,7 @@ function coinControl() {
         h('div', { class: 'mono small break' }, shortAddr(u.address, 14, 10)),
         h('div', { class: 'path' }, `${u.chain}/${u.index} · ${shortTxid(u.txid)}:${u.vout}`)
       ),
-      h('div', { class: 'amount small' }, fmtBtc(u.value))
+      h('div', { class: 'amount small' }, fmtAmount(u.value))
     );
   });
   return h(
@@ -733,7 +768,7 @@ function coinControl() {
     h('div', { class: 'list' }, rows),
     h('div', { class: 'row between small' },
       h('span', { class: 'muted' }, `${s.coins.size} selected`),
-      h('span', { class: 'amount' }, fmtBtc(selTotal) + ' BTC')
+      h('span', { class: 'amount' }, fmtAmount(selTotal), ' ', unitTag())
     )
   );
 }
@@ -765,7 +800,6 @@ function reviewSend() {
   ui.sendError = '';
   try {
     const s = ui.send;
-    if (!s.address.trim()) throw new Error('Enter a recipient address.');
     const feeRate = currentFeeRate();
     let coinIds = null;
     if (s.manual) {
@@ -773,13 +807,19 @@ function reviewSend() {
       if (!coinIds.length) throw new Error('Select at least one coin to spend.');
     }
     let recipients, sendMax = false;
-    if (s.max) {
-      recipients = [{ address: s.address.trim(), amount: 0 }];
+    if (s.max && s.recipients.length === 1) {
+      const addr = s.recipients[0].address.trim();
+      if (!addr) throw new Error('Enter a recipient address.');
+      recipients = [{ address: addr, amount: 0 }];
       sendMax = true;
     } else {
-      const sats = parseAmount(s.amount, s.unit);
-      if (!sats || sats <= 0) throw new Error('Enter a valid amount.');
-      recipients = [{ address: s.address.trim(), amount: sats }];
+      recipients = s.recipients.map((r, i) => {
+        const addr = r.address.trim();
+        if (!addr) throw new Error(`Enter an address for recipient ${i + 1}.`);
+        const sats = parseAmount(r.amount, unit);
+        if (!sats || sats <= 0) throw new Error(`Enter a valid amount for recipient ${i + 1}.`);
+        return { address: addr, amount: sats };
+      });
     }
     ui.draft = wallet.buildTx({ recipients, feeRate, coinIds, sendMax });
   } catch (e) {
@@ -792,11 +832,7 @@ function reviewSend() {
 function reviewView() {
   const d = ui.draft;
   const changeAddr = wallet.freshChange().address;
-  const recipientOuts = d.outputs.filter((o) => o.address !== changeAddr);
-  const rows = recipientOuts.map((o) =>
-    h('div', { class: 'line' }, h('span', { class: 'k mono break' }, shortAddr(o.address, 16, 10)), h('span', { class: 'v' }, fmtBtc(o.amount)))
-  );
-  const sent = recipientOuts.reduce((s, o) => s + o.amount, 0);
+  const outs = d.outputs.filter((o) => o.address !== changeAddr);
   return h(
     'div',
     { class: 'card col' },
@@ -804,12 +840,16 @@ function reviewView() {
     h(
       'div',
       { class: 'summary col', style: 'gap:0' },
-      h('div', { class: 'line' }, h('span', { class: 'k' }, 'Sending'), h('span', { class: 'v' }, fmtBtc(sent) + ' BTC')),
-      ...rows,
-      h('div', { class: 'line' }, h('span', { class: 'k' }, 'Network fee'), h('span', { class: 'v' }, fmtSats(d.fee) + ' sats')),
-      h('div', { class: 'line' }, h('span', { class: 'k' }, 'Inputs / vsize'), h('span', { class: 'v' }, `${d.inputsCount} in · ${d.vsize} vB`)),
-      d.hasChange && h('div', { class: 'line' }, h('span', { class: 'k' }, 'Change returns to'), h('span', { class: 'v mono' }, shortAddr(changeAddr, 10, 8))),
-      h('div', { class: 'line' }, h('span', { class: 'k' }, 'Total cost'), h('span', { class: 'v' }, fmtBtc(sent + d.fee) + ' BTC'))
+      ...outs.map((o) =>
+        h('div', { class: 'line' },
+          h('span', { class: 'k mono break' }, shortAddr(o.address, 14, 8)),
+          h('span', { class: 'v' }, fmtAmount(o.amount), ' ', unitTag())
+        )
+      ),
+      h('div', { class: 'line' },
+        h('span', { class: 'k' }, 'Network fee'),
+        h('span', { class: 'v' }, fmtAmount(d.fee), ' ', unitTag())
+      )
     ),
     ui.sendError && h('div', { class: 'notice err' }, ui.sendError),
     wallet.offline
@@ -920,8 +960,8 @@ function historyTab() {
             h('div', { class: 'small faint' }, t.confirmed ? timeAgo(t.blockTime) : 'unconfirmed')
           ),
           h('div', { style: 'text-align:right' },
-            h('div', { class: incoming ? 'amount-pos' : 'amount-neg' }, (incoming ? '+' : '') + fmtBtc(display)),
-            !incoming && t.fee ? h('div', { class: 'small faint' }, `fee ${fmtSats(t.fee)}`) : null
+            h('div', { class: incoming ? 'amount-pos' : 'amount-neg' }, (incoming ? '+' : '') + fmtAmount(display)),
+            !incoming && t.fee ? h('div', { class: 'small faint' }, `fee ${fmtAmount(t.fee)}`) : null
           )
         );
       })
