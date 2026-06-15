@@ -84,6 +84,9 @@ export class Wallet {
     this._wsRetry = null;
     this._refreshTimer = null;
     this._pollTimer = null;
+    this._hbTimer = null; // heartbeat / liveness watchdog
+    this._lastMsg = 0; // time of last WS message (incl. pong)
+    this._wakeHooked = false;
 
     this._subs = new Set();
   }
@@ -458,6 +461,47 @@ export class Wallet {
     this._pollTimer = setInterval(() => this.scan({ silent: true }), 12000);
     if (typeof WebSocket === 'undefined') return;
     this._wsWant = true;
+
+    // Heartbeat: ping every 15s; if no message (incl. pong) for 45s the socket
+    // is half-open (died without firing onclose) — force a reconnect.
+    this._hbTimer = setInterval(() => {
+      if (this.offline || !this._ws || this._ws.readyState !== 1) return;
+      if (Date.now() - this._lastMsg > 45000) {
+        this._reconnectNow();
+      } else {
+        try {
+          this._ws.send(JSON.stringify({ action: 'ping' }));
+        } catch {}
+      }
+    }, 15000);
+
+    // Reconnect + refresh when the tab refocuses or the network returns.
+    if (!this._wakeHooked && typeof document !== 'undefined') {
+      this._wakeHooked = true;
+      const wake = () => {
+        if (this.offline || !this._wsWant) return;
+        if (!this._ws || this._ws.readyState !== 1) this._reconnectNow();
+        this.scan({ silent: true }).catch(() => {});
+      };
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') wake();
+      });
+      window.addEventListener('online', wake);
+    }
+
+    this._connectWs();
+  }
+
+  _reconnectNow() {
+    clearTimeout(this._wsRetry);
+    if (this._ws) {
+      try {
+        this._ws.onclose = null;
+        this._ws.close();
+      } catch {}
+      this._ws = null;
+    }
+    this.live = false;
     this._connectWs();
   }
 
@@ -473,10 +517,12 @@ export class Wallet {
     this._ws = ws;
     ws.onopen = () => {
       this.live = true;
+      this._lastMsg = Date.now();
       this.retrack();
       this.emit();
     };
     ws.onmessage = (ev) => {
+      this._lastMsg = Date.now();
       let msg;
       try {
         msg = JSON.parse(typeof ev.data === 'string' ? ev.data : '');
@@ -577,6 +623,7 @@ export class Wallet {
     clearTimeout(this._wsRetry);
     clearTimeout(this._refreshTimer);
     clearInterval(this._pollTimer);
+    clearInterval(this._hbTimer);
     if (this._ws) {
       try {
         this._ws.onclose = null;
