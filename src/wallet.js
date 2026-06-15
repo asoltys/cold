@@ -62,6 +62,7 @@ export class Wallet {
     this.price = null;
 
     this.scanning = false;
+    this.loaded = false; // true once a scan/snapshot has populated balances once
     this.nextReceiveIndex = 0;
     this.nextChangeIndex = 0;
 
@@ -108,6 +109,7 @@ export class Wallet {
     this.addrMap = new Map();
     this.utxos = [];
     this.txs = [];
+    this.loaded = false;
     this.nextReceiveIndex = 0;
     this.nextChangeIndex = 0;
   }
@@ -204,6 +206,7 @@ export class Wallet {
 
       await this.refreshUtxos();
       await this.refreshHistory();
+      this.loaded = true;
     } finally {
       this.scanning = false;
       this.emit();
@@ -540,6 +543,7 @@ export class Wallet {
     }
     utxos.sort((a, b) => b.value - a.value);
     this.utxos = utxos;
+    this.loaded = true;
     this.emit();
     return { imported: utxos.length, unmatched };
   }

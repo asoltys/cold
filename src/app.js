@@ -28,8 +28,7 @@ const ui = {
   importText: '',
   passphrase: '',
   showPass: false,
-  netName: 'mainnet',
-  offline: false,
+  offlineFallback: false, // auto-entered offline because the network was unreachable
   unlockError: '',
 
   tab: 'receive', // receive | send | history | coins | tools
@@ -294,46 +293,21 @@ function importPane() {
 
 function optionsPanel() {
   return h(
-    'div',
-    { class: 'col', style: 'gap:12px' },
-    h(
-      'label',
-      { class: 'field' },
-      h('span', { class: 'lab' }, 'BIP39 passphrase (optional extra word)'),
-      h(
-        'div',
-        { class: 'input-group' },
-        h('input', {
-          type: ui.showPass ? 'text' : 'password',
-          class: 'mono-input',
-          placeholder: 'leave blank if unused',
-          autocomplete: 'off',
-          value: ui.passphrase,
-          onInput: (e) => (ui.passphrase = e.target.value),
-        }),
-        h('button', { class: 'btn-sm', type: 'button', onClick: () => { ui.showPass = !ui.showPass; render(); } }, ui.showPass ? 'Hide' : 'Show')
-      )
-    ),
+    'label',
+    { class: 'field' },
+    h('span', { class: 'lab' }, 'BIP39 passphrase (optional extra word)'),
     h(
       'div',
-      { class: 'row between wrap', style: 'gap:12px' },
-      h(
-        'label',
-        { class: 'field', style: 'flex:1' },
-        h('span', { class: 'lab' }, 'Network'),
-        h(
-          'select',
-          { onChange: (e) => { ui.netName = e.target.value; render(); } },
-          h('option', { value: 'mainnet', selected: ui.netName === 'mainnet' }, 'Mainnet'),
-          h('option', { value: 'testnet', selected: ui.netName === 'testnet' }, 'Testnet')
-        )
-      ),
-      h(
-        'label',
-        { class: 'row gap6', style: 'margin-top:22px' },
-        h('input', { type: 'checkbox', checked: ui.offline, onChange: (e) => { ui.offline = e.target.checked; } }),
-        h('span', {}, 'Offline mode')
-      )
+      { class: 'input-group' },
+      h('input', {
+        type: ui.showPass ? 'text' : 'password',
+        class: 'mono-input',
+        placeholder: 'leave blank if unused',
+        autocomplete: 'off',
+        value: ui.passphrase,
+        onInput: (e) => (ui.passphrase = e.target.value),
+      }),
+      h('button', { class: 'btn-sm', type: 'button', onClick: () => { ui.showPass = !ui.showPass; render(); } }, ui.showPass ? 'Hide' : 'Show')
     )
   );
 }
@@ -346,29 +320,53 @@ async function openWallet(mnemonic) {
     render();
     return;
   }
-  wallet.load({ mnemonic: m, passphrase: ui.passphrase, netName: ui.netName, offline: ui.offline });
+  wallet.load({ mnemonic: m, passphrase: ui.passphrase, netName: 'mainnet', offline: false });
   ui.screen = 'wallet';
-  ui.tab = ui.offline ? 'tools' : 'receive';
+  ui.tab = 'receive';
   ui.send = blankSend();
   ui.draft = null;
   ui.sendResult = null;
+  ui.offlineFallback = false;
   render();
-  if (ui.offline) {
-    wallet.deriveWindow(40);
-    render();
-  } else {
-    try {
-      await wallet.scan();
-    } catch (e) {
-      toast('Scan failed: ' + e.message);
-    }
+
+  // No manual offline switch: try to scan, and if the network is unreachable,
+  // fall back to offline mode automatically.
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+    enterOfflineFallback();
+    return;
+  }
+  try {
+    await wallet.scan();
     wallet.startRealtime();
+  } catch {
+    enterOfflineFallback();
+  }
+}
+
+function enterOfflineFallback() {
+  wallet.setOffline(true);
+  wallet.deriveWindow(40);
+  ui.offlineFallback = true;
+  ui.tab = 'tools';
+  render();
+}
+
+async function retryOnline() {
+  ui.offlineFallback = false;
+  wallet.setOffline(false);
+  ui.tab = 'receive';
+  render();
+  try {
+    await wallet.scan();
+    wallet.startRealtime();
+  } catch {
+    enterOfflineFallback();
   }
 }
 
 function lock() {
   wallet.stopRealtime();
-  wallet.load({ mnemonic: '', passphrase: '', netName: ui.netName, offline: ui.offline });
+  wallet.load({ mnemonic: '', passphrase: '', netName: 'mainnet', offline: false });
   wallet.mnemonic = '';
   ui.screen = 'unlock';
   ui.createStep = 'gen';
@@ -394,7 +392,6 @@ function brandHeader(withLock) {
     h(
       'div',
       { class: 'row gap6' },
-      ui.netName === 'testnet' && h('span', { class: 'badge testnet' }, 'testnet'),
       withLock &&
         h(
           'span',
@@ -429,25 +426,31 @@ function walletScreen() {
     { class: 'col', style: 'gap:0' },
     brandHeader(true),
     h('div', { class: 'mt16' }, balanceCard()),
+    ui.offlineFallback && wallet.offline ? offlineBanner() : null,
     tabsBar(),
     tabContent()
   );
 }
 
+function offlineBanner() {
+  return h(
+    'div',
+    { class: 'notice info row between', style: 'margin:12px 0 0' },
+    h('span', {}, "Can't reach the network — working offline. Import a snapshot to load coins."),
+    h('button', { class: 'btn-sm', onClick: retryOnline }, 'Retry')
+  );
+}
+
 function balanceCard() {
   const price = wallet.price;
+  // Only dim on the very first load; WebSocket-driven updates happen silently.
+  const firstLoad = wallet.scanning && !wallet.loaded;
   return h(
     'div',
     { class: 'card balance' },
-    h('div', { class: 'row between' },
-      h('div', { class: 'small faint', style: 'text-transform:uppercase;letter-spacing:.05em' }, 'Total balance'),
-      wallet.scanning
-        ? h('span', { class: 'spinner' })
-        : !wallet.offline &&
-            h('button', { class: 'btn-sm btn-ghost', title: 'Refresh', onClick: () => wallet.scan() }, '↻ Refresh')
-    ),
-    h('div', { class: 'amt' }, fmtBtc(wallet.total), h('span', { class: 'unit' }, 'BTC')),
-    price ? h('div', { class: 'usd' }, '≈ ' + fmtUsd(wallet.total, price)) : null,
+    h('div', { class: 'small faint', style: 'text-transform:uppercase;letter-spacing:.05em' }, 'Total balance'),
+    h('div', { class: 'amt', style: firstLoad ? 'opacity:.3' : '' }, fmtBtc(wallet.total), h('span', { class: 'unit' }, 'BTC')),
+    price ? h('div', { class: 'usd', style: firstLoad ? 'opacity:.3' : '' }, '≈ ' + fmtUsd(wallet.total, price)) : null,
     h(
       'div',
       { class: 'split' },
@@ -498,12 +501,7 @@ function receiveTab() {
     h('div', { class: 'small muted' }, 'Your next receive address'),
     h('div', { html: qrSvg(fresh.address) }),
     h('div', { class: 'addr-box', style: 'width:100%' }, fresh.address),
-    h(
-      'div',
-      { class: 'row gap6' },
-      copyBtn(fresh.address, 'Copy address'),
-      !wallet.offline && h('button', { class: 'btn-sm btn-ghost', onClick: () => wallet.scan() }, '↻ Check for payments')
-    ),
+    copyBtn(fresh.address, 'Copy address'),
     h('div', { class: 'path' }, `m/84'/${coin}'/0'/0/${fresh.index}`),
     h('p', { class: 'small muted center', style: 'margin:0' },
       'A fresh address is shown for better privacy. When it receives a payment, a new one appears automatically.'),
@@ -563,7 +561,7 @@ function sendForm() {
       { class: 'field' },
       h('span', { class: 'lab' }, 'Recipient address'),
       h('input', {
-        type: 'text', class: 'mono-input', placeholder: wallet.netName === 'testnet' ? 'tb1q…' : 'bc1q…',
+        type: 'text', class: 'mono-input', placeholder: 'bc1q…',
         autocapitalize: 'none', autocomplete: 'off', spellcheck: 'false', value: s.address,
         onInput: (e) => (s.address = e.target.value),
       })
@@ -811,7 +809,7 @@ function sendResultView() {
 function historyTab() {
   if (wallet.offline)
     return h('div', { class: 'card' }, h('p', { class: 'muted center', style: 'margin:0' }, 'Transaction history is unavailable in offline mode.'));
-  if (wallet.scanning) return h('div', { class: 'card center' }, h('span', { class: 'spinner' }));
+  if (wallet.scanning && !wallet.loaded) return h('div', { class: 'card center' }, h('span', { class: 'spinner' }));
   if (!wallet.txs.length)
     return h('div', { class: 'card' }, h('p', { class: 'muted center', style: 'margin:0' }, 'No transactions yet.'));
   return h(
@@ -843,7 +841,7 @@ function historyTab() {
 
 // ---------------------------------------------------------------- Coins
 function coinsTab() {
-  if (wallet.scanning) return h('div', { class: 'card center' }, h('span', { class: 'spinner' }));
+  if (wallet.scanning && !wallet.loaded) return h('div', { class: 'card center' }, h('span', { class: 'spinner' }));
   if (!wallet.utxos.length)
     return h('div', { class: 'card' }, h('p', { class: 'muted center', style: 'margin:0' }, wallet.offline ? 'Import a wallet snapshot in Tools to load coins.' : 'No coins (UTXOs) yet.'));
   return h(
@@ -913,7 +911,6 @@ function toolsTab() {
       'div',
       { class: 'card col' },
       h('h3', {}, 'Wallet'),
-      infoLine('Network', wallet.netName),
       infoLine('Type', 'BIP84 · Native SegWit (p2wpkh)'),
       infoLine('Account path', `m/84'/${coin}'/0'`),
       !wallet.offline && infoLine('Receive addresses scanned', String(wallet.receive.length)),
