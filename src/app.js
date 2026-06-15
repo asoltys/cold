@@ -29,6 +29,7 @@ const ui = {
   importText: '',
   passphrase: '',
   showPass: false,
+  reveal: false, // showing the recovery-phrase modal
   offlineFallback: false, // auto-entered offline because the network was unreachable
   unlockError: '',
 
@@ -394,6 +395,7 @@ function lock() {
   ui.importText = '';
   ui.passphrase = '';
   ui.confirm = [];
+  ui.reveal = false;
   render();
 }
 
@@ -418,7 +420,39 @@ function brandHeader(withLock) {
           { class: `badge dot ${wallet.offline ? 'off' : ''} ${wallet.live ? 'live' : ''}` },
           status
         ),
+      withLock && h('button', { class: 'btn-sm', title: 'Show recovery phrase', onClick: () => { ui.reveal = true; render(); } }, 'Backup'),
       withLock && h('button', { class: 'btn-sm', onClick: lock }, 'Logout')
+    )
+  );
+}
+
+// Modal to view the recovery phrase (+ passphrase) again — important for users
+// who skipped backup verification.
+function revealModal() {
+  const words = wallet.mnemonic.split(' ');
+  const close = () => { ui.reveal = false; render(); };
+  return h(
+    'div',
+    { class: 'overlay', onClick: (e) => { if (e.target.classList.contains('overlay')) close(); } },
+    h(
+      'div',
+      { class: 'modal card col' },
+      h('h3', {}, 'Recovery phrase'),
+      h('div', { class: 'warn-box' }, '⚠ Anyone who can see these words can steal your funds. Make sure nobody is watching.'),
+      h('div', { class: 'words' },
+        words.map((w, i) => h('div', { class: 'w' }, h('span', { class: 'n' }, i + 1), h('span', { class: 't' }, w)))
+      ),
+      wallet.passphrase
+        ? h('div', { class: 'col gap6' },
+            h('span', { class: 'lab' }, 'BIP39 passphrase'),
+            h('div', { class: 'addr-box' }, wallet.passphrase)
+          )
+        : null,
+      h('div', { class: 'row gap6 wrap' },
+        copyBtn(wallet.mnemonic, 'Copy phrase'),
+        wallet.passphrase ? copyBtn(wallet.passphrase, 'Copy passphrase') : null,
+        h('button', { class: 'btn-primary grow', onClick: close }, 'Done')
+      )
     )
   );
 }
@@ -448,7 +482,8 @@ function walletScreen() {
     h('div', { class: 'mt16' }, balanceCard()),
     ui.offlineFallback && wallet.offline ? offlineBanner() : null,
     tabsBar(),
-    tabContent()
+    tabContent(),
+    ui.reveal ? revealModal() : null
   );
 }
 

@@ -206,6 +206,11 @@ textarea { resize: vertical; min-height: 84px; font-family: var(--mono); font-si
   transition: opacity .2s, transform .2s;
 }
 .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+.overlay {
+  position: fixed; inset: 0; z-index: 40; padding: 16px;
+  background: rgba(20, 23, 26, 0.5); display: grid; place-items: center;
+}
+.modal { max-width: 480px; width: 100%; max-height: 90vh; overflow: auto; }
 .divider { height: 1px; background: var(--line); margin: 16px 0; border: 0; }
 hr.divider { margin: 16px 0; }
 .linklike { background: none; border: 0; padding: 0; color: var(--accent-ink); font-weight: 600; cursor: pointer; }
