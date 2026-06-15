@@ -33,8 +33,7 @@ const ui = {
   offlineFallback: false, // auto-entered offline because the network was unreachable
   unlockError: '',
 
-  tab: 'receive', // receive | send | history | coins | tools
-  showAddrs: false,
+  tab: 'receive', // receive | send | history | settings
   send: blankSend(),
   draft: null, // built tx summary awaiting review
   sendError: '',
@@ -477,7 +476,6 @@ function goHome() {
     ui.draft = null;
     ui.sendResult = null;
     ui.sendError = '';
-    ui.showAddrs = false;
   } else {
     ui.unlockTab = 'create';
     ui.createStep = 'gen';
@@ -561,46 +559,12 @@ function tabContent() {
 // ---------------------------------------------------------------- Receive
 function receiveTab() {
   const fresh = wallet.freshReceive();
-  const coin = wallet.netCfg.coin;
   return h(
     'div',
     { class: 'card col', style: 'align-items:center;gap:14px' },
-    h('div', { class: 'small muted' }, 'Your next receive address'),
     h('div', { html: qrSvg(fresh.address) }),
     h('div', { class: 'addr-box', style: 'width:100%' }, fresh.address),
-    copyBtn(fresh.address, 'Copy address'),
-    h('div', { class: 'path' }, `m/84'/${coin}'/0'/0/${fresh.index}`),
-    h('p', { class: 'small muted center', style: 'margin:0' },
-      'A fresh address is shown for better privacy. When it receives a payment, a new one appears automatically.'),
-    addressBook()
-  );
-}
-
-function addressBook() {
-  if (!wallet.receive.length) return null;
-  const toggle = h(
-    'button',
-    { class: 'linklike small', onClick: () => { ui.showAddrs = !ui.showAddrs; render(); } },
-    ui.showAddrs ? 'Hide all addresses' : `View all addresses (${wallet.receive.length})`
-  );
-  if (!ui.showAddrs) return toggle;
-  return h(
-    'div',
-    { class: 'col', style: 'width:100%;gap:0' },
-    toggle,
-    h(
-      'div',
-      { class: 'list', style: 'width:100%' },
-      wallet.receive.map((a) =>
-        h(
-          'div',
-          { class: 'item' },
-          h('div', { class: 'grow mono small break' }, a.address),
-          a.used && h('span', { class: 'tag conf' }, 'used'),
-          copyBtn(a.address, '⧉')
-        )
-      )
-    )
+    copyBtn(fresh.address, 'Copy address')
   );
 }
 
