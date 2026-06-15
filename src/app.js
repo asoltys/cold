@@ -29,7 +29,8 @@ const ui = {
   importText: '',
   passphrase: '',
   showPass: false,
-  reveal: false, // showing the recovery-phrase modal
+  reveal: false, // recovery-phrase modal open
+  revealShown: false, // phrase actually unmasked (after reading the warning)
   offlineFallback: false, // auto-entered offline because the network was unreachable
   unlockError: '',
 
@@ -396,6 +397,7 @@ function lock() {
   ui.passphrase = '';
   ui.confirm = [];
   ui.reveal = false;
+  ui.revealShown = false;
   render();
 }
 
@@ -420,7 +422,7 @@ function brandHeader(withLock) {
           { class: `badge dot ${wallet.offline ? 'off' : ''} ${wallet.live ? 'live' : ''}` },
           status
         ),
-      withLock && h('button', { class: 'btn-sm', title: 'Show recovery phrase', onClick: () => { ui.reveal = true; render(); } }, 'Backup'),
+      withLock && h('button', { class: 'btn-sm', title: 'Show recovery phrase', onClick: () => { ui.reveal = true; ui.revealShown = false; render(); } }, 'Backup'),
       withLock && h('button', { class: 'btn-sm', onClick: lock }, 'Logout')
     )
   );
@@ -429,8 +431,19 @@ function brandHeader(withLock) {
 // Modal to view the recovery phrase (+ passphrase) again — important for users
 // who skipped backup verification.
 function revealModal() {
+  const shown = ui.revealShown;
   const words = wallet.mnemonic.split(' ');
-  const close = () => { ui.reveal = false; render(); };
+  const close = () => { ui.reveal = false; ui.revealShown = false; render(); };
+
+  // Until "Proceed", the real words are never put in the DOM — show 12 masked
+  // placeholders so the warning is read first.
+  const cells = words.map((w, i) =>
+    h('div', { class: 'w' + (shown ? '' : ' masked') },
+      h('span', { class: 'n' }, i + 1),
+      h('span', { class: 't' }, shown ? w : '••••••')
+    )
+  );
+
   return h(
     'div',
     { class: 'overlay', onClick: (e) => { if (e.target.classList.contains('overlay')) close(); } },
@@ -438,21 +451,24 @@ function revealModal() {
       'div',
       { class: 'modal card col' },
       h('h3', {}, 'Recovery phrase'),
-      h('div', { class: 'warn-box' }, '⚠ Anyone who can see these words can steal your funds. Make sure nobody is watching.'),
-      h('div', { class: 'words' },
-        words.map((w, i) => h('div', { class: 'w' }, h('span', { class: 'n' }, i + 1), h('span', { class: 't' }, w)))
-      ),
-      wallet.passphrase
+      h('div', { class: 'warn-box' }, '⚠ Anyone who can see these words can steal your funds. Make sure nobody is watching before you reveal them.'),
+      h('div', { class: 'words' }, cells),
+      shown && wallet.passphrase
         ? h('div', { class: 'col gap6' },
             h('span', { class: 'lab' }, 'BIP39 passphrase'),
             h('div', { class: 'addr-box' }, wallet.passphrase)
           )
         : null,
-      h('div', { class: 'row gap6 wrap' },
-        copyBtn(wallet.mnemonic, 'Copy phrase'),
-        wallet.passphrase ? copyBtn(wallet.passphrase, 'Copy passphrase') : null,
-        h('button', { class: 'btn-primary grow', onClick: close }, 'Done')
-      )
+      shown
+        ? h('div', { class: 'row gap6 wrap' },
+            copyBtn(wallet.mnemonic, 'Copy phrase'),
+            wallet.passphrase ? copyBtn(wallet.passphrase, 'Copy passphrase') : null,
+            h('button', { class: 'btn-primary grow', onClick: close }, 'Done')
+          )
+        : h('div', { class: 'row gap6' },
+            h('button', { class: 'btn-ghost', onClick: close }, 'Cancel'),
+            h('button', { class: 'btn-primary grow', onClick: () => { ui.revealShown = true; render(); } }, 'Proceed')
+          )
     )
   );
 }
