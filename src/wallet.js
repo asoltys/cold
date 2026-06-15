@@ -84,6 +84,8 @@ export class Wallet {
     this._wsRetry = null;
     this._refreshTimer = null;
     this._pollTimer = null;
+    this._deepTimer = null; // periodic full-scan safety net
+    this._polling = false; // a light poll is in flight
     this._hbTimer = null; // heartbeat / liveness watchdog
     this._lastMsg = 0; // time of last WS message (incl. pong)
     this._wakeHooked = false;
@@ -220,6 +222,48 @@ export class Wallet {
       r: this.nextReceiveIndex,
       c: this.nextChangeIndex,
     });
+  }
+
+  _addrInfo(chain, index) {
+    const arr = chain === 0 ? this.receive : this.change;
+    return arr.find((a) => a.index === index);
+  }
+
+  // Light poll: only re-query the addresses that can actually change — ones
+  // holding coins (could be spent) and the next fresh receive/change address
+  // (could receive). Stable historical addresses stay cached and aren't
+  // re-fetched. If anything moved, fall back to a full scan to reconcile.
+  async refreshLive() {
+    if (this.offline || this._refreshing || this._polling) return;
+    this._polling = true;
+    try {
+      const targets = new Map();
+      for (const u of this.utxos) targets.set(`${u.chain}/${u.index}`, { chain: u.chain, index: u.index });
+      targets.set(`0/${this.nextReceiveIndex}`, { chain: 0, index: this.nextReceiveIndex });
+      targets.set(`1/${this.nextChangeIndex}`, { chain: 1, index: this.nextChangeIndex });
+
+      let changed = false;
+      for (const { chain, index } of targets.values()) {
+        const { address } = this.derive(chain, index);
+        const info = await this.api.addressInfo(address);
+        const cs = info.chain_stats || {};
+        const ms = info.mempool_stats || {};
+        const confirmed = (cs.funded_txo_sum || 0) - (cs.spent_txo_sum || 0);
+        const pending = (ms.funded_txo_sum || 0) - (ms.spent_txo_sum || 0);
+        const used = (cs.tx_count || 0) > 0 || (ms.tx_count || 0) > 0;
+        const prev = this._addrInfo(chain, index);
+        if (!prev || prev.confirmed !== confirmed || prev.pending !== pending || prev.used !== used) {
+          changed = true;
+          break;
+        }
+      }
+      if (changed) {
+        this._polling = false;
+        await this.scan({ silent: true });
+      }
+    } finally {
+      this._polling = false;
+    }
   }
 
   // silent=false: foreground load (shows loading state, always re-renders).
@@ -455,10 +499,11 @@ export class Wallet {
   startRealtime() {
     if (this.offline) return;
     this.stopRealtime();
-    // Safety-net poll: the WebSocket gives instant updates, but its pushes can
-    // be missed (connection drops, server quirks). A light periodic silent
-    // refresh guarantees pending balances appear within a few seconds.
-    this._pollTimer = setInterval(() => this.scan({ silent: true }), 12000);
+    // Safety-net polling (the WebSocket gives instant updates, but its pushes
+    // can be missed): a light poll of just the live addresses every 15s, plus
+    // an occasional full scan to catch anything the frontier check can't.
+    this._pollTimer = setInterval(() => this.refreshLive(), 15000);
+    this._deepTimer = setInterval(() => this.scan({ silent: true }), 300000);
     if (typeof WebSocket === 'undefined') return;
     this._wsWant = true;
 
@@ -623,6 +668,7 @@ export class Wallet {
     clearTimeout(this._wsRetry);
     clearTimeout(this._refreshTimer);
     clearInterval(this._pollTimer);
+    clearInterval(this._deepTimer);
     clearInterval(this._hbTimer);
     if (this._ws) {
       try {
