@@ -347,6 +347,7 @@ async function openWallet(mnemonic) {
 async function enterWallet(mnemonic, passphrase) {
   wallet.load({ mnemonic, passphrase, netName: 'mainnet', offline: false });
   persistSession(mnemonic, passphrase);
+  wallet.restoreCache(); // show last-known balance/history instantly, if cached
   ui.screen = 'wallet';
   ui.tab = 'receive';
   ui.send = blankSend();
@@ -626,7 +627,10 @@ function sendForm() {
         { class: 'input-group' },
         h('input', {
           type: 'number', step: 'any', min: '0', placeholder: '0.00000000',
-          disabled: s.max, value: s.max ? '' : s.amount,
+          disabled: s.max,
+          value: s.max
+            ? (s.unit === 'sats' ? String(estimatedMaxSats()) : fmtBtc(estimatedMaxSats()))
+            : s.amount,
           onInput: (e) => (s.amount = e.target.value),
         }),
         h(
@@ -712,6 +716,21 @@ function coinControl() {
       h('span', { class: 'amount' }, fmtBtc(selTotal) + ' BTC')
     )
   );
+}
+
+// Coins that a send would draw from (all, or the manually-selected subset).
+function spendableCoins() {
+  const s = ui.send;
+  return s.manual ? wallet.utxos.filter((u) => s.coins.has(utxoId(u))) : wallet.utxos;
+}
+
+// Estimated max sendable = selected total − fee for (n inputs, 1 output).
+function estimatedMaxSats() {
+  const coins = spendableCoins();
+  const total = coins.reduce((a, u) => a + u.value, 0);
+  const vbytes = 11 + 68 * coins.length + 31;
+  const fee = Math.ceil(vbytes * currentFeeRate());
+  return Math.max(0, total - fee);
 }
 
 function currentFeeRate() {

@@ -12,18 +12,23 @@ import { HDKey } from '@scure/bip32';
 import { generateMnemonic, mnemonicToSeedSync, validateMnemonic } from '@scure/bip39';
 import { wordlist } from '@scure/bip39/wordlists/english';
 import { hex } from '@scure/base';
+import { sha256 } from '@noble/hashes/sha256';
 import * as btc from '@scure/btc-signer';
 import { p2wpkh } from '@scure/btc-signer/payment';
 
 import { Api, pool } from './api.js';
 
-// The BIP44 standard gap limit is 20, but that means ~40 address lookups per
-// scan. We can safely use a much smaller limit because this wallet only ever
-// exposes ONE unused receive address at a time (freshReceive = first unused;
-// there is no "generate another address" button). That keeps used addresses
-// contiguous, so the gap between them is never more than 1 — a limit of 5 is a
-// comfortable safety margin while cutting scan requests ~4x.
-const GAP_LIMIT = 5;
+// No look-ahead: stop scanning a chain at the first unused address. This wallet
+// only ever exposes ONE unused address at a time (freshReceive = first unused;
+// there is no "generate another address" button), so used addresses stay
+// contiguous and there is never a gap to look past. Keeps scans tiny.
+const GAP_LIMIT = 1;
+
+// Extra pause after finding a used address, before querying the next index —
+// keeps us gentle on the explorers' rate limits when a wallet has activity.
+const USED_HIT_DELAY_MS = 500;
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const NETS = {
   mainnet: { net: btc.NETWORK, coin: 0 },
@@ -170,6 +175,7 @@ export class Wallet {
   }
 
   // --- online scan --------------------------------------------------------
+  // Query one address at a time; stop at the first unused one (no look-ahead).
   async scanChain(chain) {
     const found = [];
     let gap = 0;
@@ -181,7 +187,12 @@ export class Wallet {
         info.chain_stats.tx_count > 0 || info.mempool_stats.tx_count > 0;
       found.push({ chain, index: i, address, used });
       this.addrMap.set(address, { chain, index: i });
-      gap = used ? 0 : gap + 1;
+      if (used) {
+        gap = 0;
+        await sleep(USED_HIT_DELAY_MS); // slow down before fetching the next one
+      } else {
+        gap += 1;
+      }
       i++;
     }
     return found;
@@ -211,10 +222,8 @@ export class Wallet {
     }
     try {
       this.addrMap = new Map();
-      [this.receive, this.change] = await Promise.all([
-        this.scanChain(0),
-        this.scanChain(1),
-      ]);
+      this.receive = await this.scanChain(0);
+      this.change = await this.scanChain(1);
       this.nextReceiveIndex = firstUnused(this.receive);
       this.nextChangeIndex = firstUnused(this.change);
 
@@ -226,6 +235,7 @@ export class Wallet {
       await this.refreshUtxos();
       await this.refreshHistory();
       this.loaded = true;
+      this.saveCache();
     } finally {
       this._refreshing = false;
       if (!silent) {
@@ -507,6 +517,58 @@ export class Wallet {
         this._ws.close();
       } catch {}
       this._ws = null;
+    }
+  }
+
+  // --- local history cache ------------------------------------------------
+  // Cache the scanned state in localStorage, keyed by a hash of the seed (the
+  // seed itself is never stored). Re-importing the same seed in this browser
+  // then shows the last-known balance/history instantly while a fresh scan
+  // runs in the background.
+  _cacheKey() {
+    const bytes = new TextEncoder().encode(`${this.mnemonic}\n${this.passphrase}`);
+    return 'btc-wallet-cache:' + hex.encode(sha256(bytes)).slice(0, 32);
+  }
+
+  saveCache() {
+    try {
+      localStorage.setItem(
+        this._cacheKey(),
+        JSON.stringify({
+          v: 1,
+          receive: this.receive,
+          change: this.change,
+          utxos: this.utxos,
+          txs: this.txs,
+          nextReceiveIndex: this.nextReceiveIndex,
+          nextChangeIndex: this.nextChangeIndex,
+          feeRates: this.feeRates,
+        })
+      );
+    } catch {}
+  }
+
+  restoreCache() {
+    try {
+      const raw = localStorage.getItem(this._cacheKey());
+      if (!raw) return false;
+      const d = JSON.parse(raw);
+      this.receive = d.receive || [];
+      this.change = d.change || [];
+      this.utxos = d.utxos || [];
+      this.txs = d.txs || [];
+      this.nextReceiveIndex = d.nextReceiveIndex || 0;
+      this.nextChangeIndex = d.nextChangeIndex || 0;
+      this.feeRates = d.feeRates || this.feeRates;
+      this.addrMap = new Map();
+      for (const a of [...this.receive, ...this.change]) {
+        this.addrMap.set(a.address, { chain: a.chain, index: a.index });
+      }
+      this.loaded = true;
+      this.emit();
+      return true;
+    } catch {
+      return false;
     }
   }
 

@@ -28,9 +28,10 @@ export class Api {
     }));
     this._rr = 0;
 
-    // Global throttle.
-    this._maxConcurrent = 2;
-    this._minGapMs = 200;
+    // Global throttle: one request at a time, well spaced. Combined with
+    // round-robin across two backends this keeps each host's rate very low.
+    this._maxConcurrent = 1;
+    this._minGapMs = 400;
     this._active = 0;
     this._nextStart = 0;
     this._queue = [];
