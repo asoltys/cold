@@ -279,7 +279,7 @@ function importPane() {
       { class: 'field' },
       h('span', { class: 'lab' }, 'Seed phrase'),
       h('textarea', {
-        placeholder: 'enter your words separated by spaces',
+        placeholder: 'enter your seed words separated by spaces',
         autocapitalize: 'none',
         autocomplete: 'off',
         spellcheck: 'false',
