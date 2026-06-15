@@ -212,7 +212,8 @@ textarea { resize: vertical; min-height: 84px; font-family: var(--mono); font-si
 .unit-tag {
   background: none; border: 0; padding: 0; margin: 0; font: inherit; cursor: pointer;
   color: var(--muted); font-weight: 600;
-  border-bottom: 1px solid var(--line-strong);
+  border-radius: 0;
+  border-bottom: 1px dotted var(--line-strong);
 }
 .unit-tag:hover { background: none; color: var(--accent-ink); border-bottom-color: var(--accent); }
 .unit-tag:active { transform: none; }
