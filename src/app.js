@@ -277,9 +277,10 @@ function importPane() {
     h(
       'label',
       { class: 'field' },
-      h('span', { class: 'lab' }, 'Seed phrase (12 or 24 words)'),
+      h('span', { class: 'lab' }, 'Seed phrase'),
       h('textarea', {
-        placeholder: 'word1 word2 word3 …',
+        placeholder:
+          'word1 word2 word3 word4 word5 word6 word7 word8 word9 word10 word11 word12',
         autocapitalize: 'none',
         autocomplete: 'off',
         spellcheck: 'false',

@@ -13,6 +13,17 @@ export class Api {
   constructor(net = 'mainnet') {
     this.net = net;
     this.offline = false;
+
+    // Global request throttle. mempool.space rate-limits bursts; an unthrottled
+    // scan (~40 address lookups at once) gets a chunk of requests rejected, and
+    // a throttled response arrives WITHOUT CORS headers, so the browser reports
+    // it as a CORS error. We cap concurrency and space out request starts so we
+    // stay under the limit, with exponential backoff to absorb the rest.
+    this._maxConcurrent = 2;
+    this._minGapMs = 250;
+    this._active = 0;
+    this._nextStart = 0;
+    this._queue = [];
   }
 
   base() {
@@ -24,20 +35,52 @@ export class Api {
     return `https://mempool.space/${path}/${txid}`;
   }
 
+  // Schedule a task respecting max concurrency + a minimum gap between starts.
+  #schedule(task) {
+    return new Promise((resolve, reject) => {
+      this._queue.push({ task, resolve, reject });
+      this.#pump();
+    });
+  }
+
+  #pump() {
+    while (this._active < this._maxConcurrent && this._queue.length) {
+      const { task, resolve, reject } = this._queue.shift();
+      this._active++;
+      const now = Date.now();
+      const startAt = Math.max(now, this._nextStart);
+      this._nextStart = startAt + this._minGapMs;
+      const delay = startAt - now;
+      setTimeout(() => {
+        Promise.resolve()
+          .then(task)
+          .then(resolve, reject)
+          .finally(() => {
+            this._active--;
+            this.#pump();
+          });
+      }, delay);
+    }
+  }
+
   async #get(path, asText = false) {
     if (this.offline) throw new Error('offline');
-    // Retry transient failures (mempool.space rate-limits bursts of requests
-    // during a scan, which can surface as network/CORS errors from file://).
+    const url = this.base() + path;
+    // Each attempt (including retries) goes back through the throttle so a burst
+    // of retries can't re-trip the rate limit.
+    const backoffs = [0, 700, 1500, 3000, 5000];
     let lastErr;
-    for (let attempt = 0; attempt < 3; attempt++) {
-      if (attempt) await sleep(400 * attempt + 200);
+    for (const wait of backoffs) {
+      if (wait) await sleep(wait);
       try {
-        const res = await fetch(this.base() + path);
-        if (res.status === 429) throw new Error('rate limited');
-        if (!res.ok) throw new Error(`${res.status} ${res.statusText}: ${path}`);
-        return asText ? res.text() : res.json();
+        return await this.#schedule(async () => {
+          const res = await fetch(url);
+          if (res.status === 429) throw new Error('rate limited');
+          if (!res.ok) throw new Error(`${res.status} ${res.statusText}: ${path}`);
+          return asText ? res.text() : res.json();
+        });
       } catch (e) {
-        lastErr = e;
+        lastErr = e; // network/CORS rejection (TypeError) or thrown above
       }
     }
     throw lastErr;
