@@ -626,7 +626,8 @@ function sendForm() {
         'div',
         { class: 'input-group' },
         h('input', {
-          type: 'number', step: 'any', min: '0', placeholder: s.unit === 'sats' ? '0' : '0.00000000',
+          type: 'number', step: s.unit === 'sats' ? '1' : '0.00000001', min: '0',
+          placeholder: s.unit === 'sats' ? '0' : '0.00000000',
           disabled: s.max,
           value: s.max
             ? (s.unit === 'sats' ? String(estimatedMaxSats()) : fmtBtc(estimatedMaxSats()))
