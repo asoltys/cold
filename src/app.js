@@ -222,8 +222,8 @@ function createPane() {
       ),
       h(
         'button',
-        { class: 'linklike small center', style: 'align-self:center', onClick: () => openWallet(ui.draftMnemonic) },
-        'Skip verification & open wallet →'
+        { class: 'btn-block', onClick: () => openWallet(ui.draftMnemonic) },
+        'Skip verification'
       )
     );
   }
