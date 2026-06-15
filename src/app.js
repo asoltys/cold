@@ -125,10 +125,11 @@ function copyBtn(text, label = 'Copy') {
 // logouts. Every unit label on the site is clickable to toggle it.
 const UNIT_KEY = 'btc-wallet-unit';
 let unit = (() => {
+  // Default to sats for first-time users; only an explicit 'btc' choice sticks.
   try {
-    return localStorage.getItem(UNIT_KEY) === 'sats' ? 'sats' : 'btc';
+    return localStorage.getItem(UNIT_KEY) === 'btc' ? 'btc' : 'sats';
   } catch {
-    return 'btc';
+    return 'sats';
   }
 })();
 
