@@ -632,7 +632,19 @@ function sendForm() {
           value: s.max
             ? (s.unit === 'sats' ? String(estimatedMaxSats()) : fmtBtc(estimatedMaxSats()))
             : s.amount,
-          onInput: (e) => (s.amount = e.target.value),
+          onInput: (e) => {
+            let v = e.target.value;
+            // Chrome emits scientific notation (e.g. "1e-8") when stepping tiny
+            // BTC amounts — normalize it back to a plain decimal string.
+            if (v && /e/i.test(v)) {
+              const n = Number(v);
+              if (isFinite(n)) {
+                v = s.unit === 'sats' ? String(Math.round(n)) : n.toFixed(8).replace(/\.?0+$/, '');
+                e.target.value = v;
+              }
+            }
+            s.amount = v;
+          },
         }),
         h(
           'div',
