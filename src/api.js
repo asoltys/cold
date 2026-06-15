@@ -1,33 +1,39 @@
-// Thin wrapper around the mempool.space REST API.
+// Wrapper around Esplora-compatible block explorer APIs (mempool.space and
+// Blockstream — same REST shape). Every network call goes through here so that
+// "offline mode" can be enforced in one place.
 //
-// Every network call goes through here so that "offline mode" can be enforced
-// in exactly one place: when offline, any call throws and the UI relies on an
-// imported snapshot instead.
+// Rate-limiting strategy: public explorers return 429 (which the browser shows
+// as a CORS error, since a 429 response has no CORS headers) when you burst a
+// scan's ~40 address lookups. We defend on three fronts:
+//   1. Throttle: cap concurrency + space out request starts.
+//   2. Spread: round-robin across multiple backends, halving per-host load.
+//   3. Cooldown: when a host 429s, park it for a few seconds and use the others
+//      instead of hammering it with retries (which only makes 429s worse).
 
-const BASES = {
-  mainnet: 'https://mempool.space/api',
-  testnet: 'https://mempool.space/testnet/api',
+const BACKENDS = {
+  mainnet: ['https://mempool.space/api', 'https://blockstream.info/api'],
+  testnet: ['https://mempool.space/testnet/api', 'https://blockstream.info/testnet/api'],
 };
+
+const COOLDOWN_MS = 8000;
 
 export class Api {
   constructor(net = 'mainnet') {
     this.net = net;
     this.offline = false;
 
-    // Global request throttle. mempool.space rate-limits bursts; an unthrottled
-    // scan (~40 address lookups at once) gets a chunk of requests rejected, and
-    // a throttled response arrives WITHOUT CORS headers, so the browser reports
-    // it as a CORS error. We cap concurrency and space out request starts so we
-    // stay under the limit, with exponential backoff to absorb the rest.
+    this._hosts = (BACKENDS[net] || BACKENDS.mainnet).map((base) => ({
+      base,
+      cooldownUntil: 0,
+    }));
+    this._rr = 0;
+
+    // Global throttle.
     this._maxConcurrent = 2;
-    this._minGapMs = 250;
+    this._minGapMs = 200;
     this._active = 0;
     this._nextStart = 0;
     this._queue = [];
-  }
-
-  base() {
-    return BASES[this.net] || BASES.mainnet;
   }
 
   explorerTx(txid) {
@@ -50,7 +56,6 @@ export class Api {
       const now = Date.now();
       const startAt = Math.max(now, this._nextStart);
       this._nextStart = startAt + this._minGapMs;
-      const delay = startAt - now;
       setTimeout(() => {
         Promise.resolve()
           .then(task)
@@ -59,28 +64,42 @@ export class Api {
             this._active--;
             this.#pump();
           });
-      }, delay);
+      }, startAt - now);
     }
+  }
+
+  // Pick a non-cooling-down host (round-robin), or null if all are cooling.
+  #pickHost() {
+    const now = Date.now();
+    const avail = this._hosts.filter((h) => h.cooldownUntil <= now);
+    if (!avail.length) return null;
+    return avail[this._rr++ % avail.length];
   }
 
   async #get(path, asText = false) {
     if (this.offline) throw new Error('offline');
-    const url = this.base() + path;
-    // Each attempt (including retries) goes back through the throttle so a burst
-    // of retries can't re-trip the rate limit.
-    const backoffs = [0, 700, 1500, 3000, 5000];
     let lastErr;
-    for (const wait of backoffs) {
-      if (wait) await sleep(wait);
+    for (let attempt = 0; attempt < 8; attempt++) {
+      let host = this.#pickHost();
+      if (!host) {
+        // Everyone is cooling down — wait until the soonest is ready.
+        const soonest = Math.min(...this._hosts.map((h) => h.cooldownUntil));
+        await sleep(Math.max(300, soonest - Date.now()));
+        host = this.#pickHost() || this._hosts[0];
+      }
       try {
         return await this.#schedule(async () => {
-          const res = await fetch(url);
-          if (res.status === 429) throw new Error('rate limited');
+          const res = await fetch(host.base + path);
+          if (res.status === 429) {
+            host.cooldownUntil = Date.now() + COOLDOWN_MS;
+            throw new Error('rate limited');
+          }
           if (!res.ok) throw new Error(`${res.status} ${res.statusText}: ${path}`);
           return asText ? res.text() : res.json();
         });
       } catch (e) {
-        lastErr = e; // network/CORS rejection (TypeError) or thrown above
+        lastErr = e;
+        await sleep(300); // brief pause, then try another host
       }
     }
     throw lastErr;
@@ -96,23 +115,41 @@ export class Api {
     return this.#get(`/address/${address}/utxo`);
   }
 
-  // Returns up to ~50 of the most recent transactions touching the address
-  // (mempool first, then confirmed).
+  // Returns the most recent transactions touching the address.
   addressTxs(address) {
     return this.#get(`/address/${address}/txs`);
   }
 
   async feeRates() {
-    try {
-      return await this.#get('/v1/fees/recommended');
-    } catch {
-      return { fastestFee: 20, halfHourFee: 10, hourFee: 5, economyFee: 2, minimumFee: 1 };
+    const now = Date.now();
+    for (const h of this._hosts) {
+      if (h.cooldownUntil > now) continue;
+      const isMempool = h.base.includes('mempool');
+      try {
+        const res = await fetch(h.base + (isMempool ? '/v1/fees/recommended' : '/fee-estimates'));
+        if (res.status === 429) {
+          h.cooldownUntil = Date.now() + COOLDOWN_MS;
+          continue;
+        }
+        if (!res.ok) continue;
+        const data = await res.json();
+        if (isMempool && data && data.halfHourFee) return data;
+        if (!isMempool && data) return mapEsploraFees(data);
+      } catch {
+        /* try next host */
+      }
     }
+    return { fastestFee: 20, halfHourFee: 10, hourFee: 5, economyFee: 2, minimumFee: 1 };
   }
 
+  // Only mempool.space exposes a price endpoint; price is non-critical.
   async price() {
+    const h = this._hosts.find((x) => x.base.includes('mempool'));
+    if (!h || h.cooldownUntil > Date.now()) return null;
     try {
-      const p = await this.#get('/v1/prices');
+      const res = await fetch(h.base + '/v1/prices');
+      if (!res.ok) return null;
+      const p = await res.json();
       return p && p.USD ? p.USD : null;
     } catch {
       return null;
@@ -121,11 +158,40 @@ export class Api {
 
   async broadcast(hexTx) {
     if (this.offline) throw new Error('offline');
-    const res = await fetch(this.base() + '/tx', { method: 'POST', body: hexTx });
-    const body = await res.text();
-    if (!res.ok) throw new Error(body || `${res.status} broadcast failed`);
-    return body.trim(); // txid
+    let lastErr;
+    for (const h of this._hosts) {
+      try {
+        const res = await fetch(h.base + '/tx', { method: 'POST', body: hexTx });
+        const body = await res.text();
+        if (res.status === 429) {
+          h.cooldownUntil = Date.now() + COOLDOWN_MS;
+          lastErr = new Error('rate limited');
+          continue;
+        }
+        if (!res.ok) {
+          lastErr = new Error(body || `${res.status} broadcast failed`);
+          continue;
+        }
+        return body.trim(); // txid
+      } catch (e) {
+        lastErr = e;
+      }
+    }
+    throw lastErr;
   }
+}
+
+// Esplora /fee-estimates is { blockTarget: sat/vB }. Map to the named tiers the
+// UI expects. Round up so we never underpay.
+function mapEsploraFees(est) {
+  const at = (n, d) => Math.max(1, Math.ceil(est[n] || d));
+  return {
+    fastestFee: at(1, 10),
+    halfHourFee: at(3, 5),
+    hourFee: at(6, 3),
+    economyFee: at(144, 2),
+    minimumFee: at(1008, 1),
+  };
 }
 
 function sleep(ms) {

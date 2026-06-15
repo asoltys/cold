@@ -60,7 +60,7 @@ browser** — no server, no internet.
 | File | Purpose |
 | --- | --- |
 | `src/wallet.js` | BIP84 derivation, scanning, coin selection, signing, snapshots |
-| `src/api.js` | mempool.space REST wrapper (the single network choke-point) |
+| `src/api.js` | Esplora REST wrapper (mempool.space + Blockstream, with throttle/rotation/cooldown to dodge rate limits); the single network choke-point |
 | `src/app.js` | UI controller (vanilla DOM) |
 | `src/qr.js` | QR → SVG (zero-dep) |
 | `src/format.js` | sat/BTC formatting helpers |
