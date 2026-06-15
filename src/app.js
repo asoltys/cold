@@ -652,7 +652,13 @@ function sendForm() {
         feeOpts.map(([k, label]) =>
           h('button', {
             type: 'button', class: (s.feeChoice === k ? 'active ' : '') + 'grow',
-            onClick: () => { s.feeChoice = k; render(); },
+            onClick: () => {
+              s.feeChoice = k;
+              if (k === 'custom' && !s.customFee) {
+                s.customFee = String((wallet.feeRates && wallet.feeRates.economyFee) || 1);
+              }
+              render();
+            },
           }, label)
         )
       ),
