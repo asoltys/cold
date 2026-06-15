@@ -16,8 +16,9 @@ export class Api {
     this.net = net;
     this.offline = false;
 
-    this._hosts = BACKENDS[net] || BACKENDS.mainnet;
-    this._rr = 0;
+    // Hosts are tried in order (mempool first); a host that 429s is parked on
+    // cooldown so we stop hammering it (Blockstream rate-limits aggressively).
+    this._hosts = (BACKENDS[net] || BACKENDS.mainnet).map((base) => ({ base, cooldownUntil: 0 }));
 
     // Serialized scheduler: one request at a time, min gap between starts.
     this._active = 0;
@@ -81,12 +82,15 @@ export class Api {
     }
   }
 
-  // The single choke-point: fetch through the scheduler with 429 handling.
-  async #run(url, opts) {
+  // The single choke-point: fetch a given host through the scheduler. A 429
+  // parks that host on cooldown (so we route away from it) and triggers the
+  // global backoff pause.
+  async #run(host, path, opts) {
     if (this.offline) throw new Error('offline');
     return this.#schedule(async () => {
-      const res = await fetch(url, opts);
+      const res = await fetch(host.base + path, opts);
       if (res.status === 429) {
+        host.cooldownUntil = Date.now() + 30000;
         this.#penalize();
         const e = new Error('rate limited');
         e.rateLimited = true;
@@ -97,21 +101,30 @@ export class Api {
     });
   }
 
-  #host() {
-    return this._hosts[this._rr++ % this._hosts.length];
+  // First host not on cooldown (mempool preferred), or null if all are cooling.
+  #pickHost() {
+    const now = Date.now();
+    for (const h of this._hosts) if (h.cooldownUntil <= now) return h;
+    return null;
   }
 
   async #get(path, asText = false) {
+    if (this.offline) throw new Error('offline');
     let lastErr;
     for (let attempt = 0; attempt < 6; attempt++) {
+      let host = this.#pickHost();
+      if (!host) {
+        // Every host is cooling down — wait for the soonest to recover.
+        const soonest = Math.min(...this._hosts.map((h) => h.cooldownUntil));
+        await sleep(Math.max(300, soonest - Date.now()));
+        host = this.#pickHost() || this._hosts[0];
+      }
       try {
-        const res = await this.#run(this.#host() + path);
+        const res = await this.#run(host, path);
         if (!res.ok) throw new Error(`${res.status} ${res.statusText}: ${path}`);
         return asText ? await res.text() : await res.json();
       } catch (e) {
         lastErr = e;
-        // On a 429 the global pause already delays the retry; for other errors
-        // add a small wait before trying the other host.
         if (!e.rateLimited) await sleep(300);
       }
     }
@@ -132,10 +145,11 @@ export class Api {
   }
 
   async feeRates() {
-    for (const base of this._hosts) {
-      const isMempool = base.includes('mempool');
+    for (const host of this._hosts) {
+      if (host.cooldownUntil > Date.now()) continue;
+      const isMempool = host.base.includes('mempool');
       try {
-        const res = await this.#run(base + (isMempool ? '/v1/fees/recommended' : '/fee-estimates'));
+        const res = await this.#run(host, isMempool ? '/v1/fees/recommended' : '/fee-estimates');
         if (!res.ok) continue;
         const data = await res.json();
         if (isMempool && data && data.halfHourFee) return data;
@@ -152,10 +166,13 @@ export class Api {
   // watches. Resolves with the txid if any accept it; rejects only if all fail.
   async broadcast(hexTx) {
     if (this.offline) throw new Error('offline');
-    const attempts = this._hosts.map(async (base) => {
-      const res = await fetch(base + '/tx', { method: 'POST', body: hexTx });
+    const attempts = this._hosts.map(async (host) => {
+      const res = await fetch(host.base + '/tx', { method: 'POST', body: hexTx });
       const body = await res.text();
-      if (res.status === 429) this.#penalize();
+      if (res.status === 429) {
+        host.cooldownUntil = Date.now() + 30000;
+        this.#penalize();
+      }
       if (!res.ok) throw new Error(body || `${res.status} broadcast failed`);
       return body.trim(); // txid
     });
