@@ -564,15 +564,15 @@ function balanceCard() {
   return h(
     'div',
     { class: 'card balance' },
-    h('div', { class: 'small faint', style: 'text-transform:uppercase;letter-spacing:.05em' }, 'Total balance'),
-    h('div', { class: 'amt', style: firstLoad ? 'opacity:.3' : '' }, fmtAmount(wallet.total), ' ', unitTag('unit')),
-    h(
-      'div',
-      { class: 'split' },
-      h('div', {}, h('div', { class: 'k' }, 'Confirmed'), h('div', { class: 'v' }, fmtAmount(wallet.confirmed), ' ', unitTag())),
-      wallet.pending > 0 &&
-        h('div', {}, h('div', { class: 'k' }, 'Pending'), h('div', { class: 'v pending' }, fmtAmount(wallet.pending), ' ', unitTag()))
-    )
+    h('div', { class: 'small faint', style: 'text-transform:uppercase;letter-spacing:.05em' }, 'Balance'),
+    h('div', { class: 'amt', style: firstLoad ? 'opacity:.3' : '' }, fmtAmount(wallet.confirmed), ' ', unitTag('unit')),
+    wallet.pending > 0
+      ? h(
+          'div',
+          { class: 'split' },
+          h('div', {}, h('div', { class: 'k' }, 'Pending'), h('div', { class: 'v pending' }, fmtAmount(wallet.pending), ' ', unitTag()))
+        )
+      : null
   );
 }
 
