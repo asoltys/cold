@@ -490,6 +490,8 @@ export class Wallet {
         msg['block-transactions'] ||
         msg['txConfirmed']
       ) {
+        // Update instantly from the pushed tx data, then reconcile via a scan.
+        this._ingestWs(msg);
         this._scheduleRefresh();
       }
     };
@@ -514,6 +516,44 @@ export class Wallet {
     }
   }
 
+  // Optimistically apply transactions from a WS push so an incoming deposit
+  // shows the instant mempool.space pushes it — no extra round-trip. The
+  // debounced scan that follows reconciles everything (spends, confirmations).
+  _ingestWs(msg) {
+    const txs = [];
+    const multi = msg['multi-address-transactions'];
+    if (multi && typeof multi === 'object') {
+      for (const addr of Object.keys(multi)) {
+        const g = multi[addr] || {};
+        for (const t of g.mempool || []) txs.push(t);
+        for (const t of g.confirmed || []) txs.push(t);
+      }
+    }
+    const single = msg['address-transactions'];
+    if (Array.isArray(single)) txs.push(...single);
+
+    let changed = false;
+    const have = new Set(this.utxos.map(utxoId));
+    for (const tx of txs) {
+      if (!tx || !Array.isArray(tx.vout)) continue;
+      tx.vout.forEach((vo, i) => {
+        const a = vo && vo.scriptpubkey_address;
+        if (!a || !this.addrMap.has(a)) return;
+        const id = `${tx.txid}:${i}`;
+        if (have.has(id)) return;
+        const p = this.addrMap.get(a);
+        const confirmed = !!(tx.status && tx.status.confirmed);
+        this.utxos.push({ txid: tx.txid, vout: i, value: vo.value, address: a, chain: p.chain, index: p.index, confirmed });
+        have.add(id);
+        if (confirmed) this.confirmed += vo.value;
+        else this.pending += vo.value;
+        changed = true;
+      });
+    }
+    if (changed) this.emit();
+    return changed;
+  }
+
   _scheduleReconnect() {
     if (!this._wsWant) return;
     clearTimeout(this._wsRetry);
@@ -528,7 +568,7 @@ export class Wallet {
         await this.scan({ silent: true });
         this.retrack();
       } catch {}
-    }, 800);
+    }, 400);
   }
 
   stopRealtime() {
