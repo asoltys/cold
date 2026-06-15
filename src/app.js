@@ -368,7 +368,7 @@ function enterOfflineFallback() {
   wallet.setOffline(true);
   wallet.deriveWindow(40);
   ui.offlineFallback = true;
-  ui.tab = 'coins';
+  ui.tab = 'settings';
   render();
 }
 
@@ -425,10 +425,11 @@ function brandHeader(withLock) {
   );
 }
 
-// Backup tab — view the recovery phrase (+ passphrase) again, important for
-// users who skipped backup verification. Gated: the real words are never put in
-// the DOM until "Reveal", so the warning is read first.
-function backupTab() {
+// Settings tab — view the recovery phrase (+ passphrase) again (important for
+// users who skipped backup verification) and the offline snapshot transfer.
+// The phrase is gated: the real words are never put in the DOM until "Reveal",
+// so the warning is read first.
+function settingsTab() {
   const shown = ui.revealShown;
   const words = wallet.mnemonic.split(' ');
   const cells = words.map((w, i) =>
@@ -440,29 +441,39 @@ function backupTab() {
 
   return h(
     'div',
-    { class: 'card col' },
-    h('h3', {}, 'Recovery phrase'),
-    h('div', { class: 'warn-box' }, '⚠ Anyone who can see these words can steal your funds. Make sure nobody is watching before you reveal them.'),
-    h('div', { class: 'words' }, cells),
-    shown && wallet.passphrase
-      ? h('div', { class: 'col gap6' },
-          h('span', { class: 'lab' }, 'BIP39 passphrase'),
-          h('div', { class: 'addr-box' }, wallet.passphrase)
-        )
-      : null,
-    shown
-      ? h('div', { class: 'row gap6 wrap' },
-          copyBtn(wallet.mnemonic, 'Copy phrase'),
-          wallet.passphrase ? copyBtn(wallet.passphrase, 'Copy passphrase') : null,
-          h('button', { class: 'grow', onClick: () => { ui.revealShown = false; render(); } }, 'Hide')
-        )
-      : h('button', { class: 'btn-primary btn-block', onClick: () => { ui.revealShown = true; render(); } }, 'Reveal recovery phrase')
+    { class: 'col', style: 'gap:16px' },
+    h(
+      'div',
+      { class: 'card col' },
+      h('h3', {}, 'Recovery phrase'),
+      h('div', { class: 'warn-box' }, '⚠ Anyone who can see these words can steal your funds. Make sure nobody is watching before you reveal them.'),
+      h('div', { class: 'words' }, cells),
+      shown && wallet.passphrase
+        ? h('div', { class: 'col gap6' },
+            h('span', { class: 'lab' }, 'BIP39 passphrase'),
+            h('div', { class: 'addr-box' }, wallet.passphrase)
+          )
+        : null,
+      shown
+        ? h('div', { class: 'row gap6 wrap' },
+            copyBtn(wallet.mnemonic, 'Copy phrase'),
+            wallet.passphrase ? copyBtn(wallet.passphrase, 'Copy passphrase') : null,
+            h('button', { class: 'grow', onClick: () => { ui.revealShown = false; render(); } }, 'Hide')
+          )
+        : h('button', { class: 'btn-primary btn-block', onClick: () => { ui.revealShown = true; render(); } }, 'Reveal recovery phrase')
+    ),
+    h(
+      'div',
+      { class: 'card col' },
+      h('h3', {}, 'Offline transfer'),
+      snapshotActions()
+    )
   );
 }
 
 function goHome() {
   if (ui.screen === 'wallet') {
-    ui.tab = wallet.offline ? 'coins' : 'receive';
+    ui.tab = wallet.offline ? 'settings' : 'receive';
     ui.draft = null;
     ui.sendResult = null;
     ui.sendError = '';
@@ -493,7 +504,7 @@ function offlineBanner() {
   return h(
     'div',
     { class: 'notice info row between', style: 'margin:12px 0 0' },
-    h('span', {}, "Can't reach the network — working offline. Import a snapshot on the Coins tab to load coins."),
+    h('span', {}, "Can't reach the network — working offline. Import a snapshot on the Settings tab to load coins."),
     h('button', { class: 'btn-sm', onClick: retryOnline }, 'Retry')
   );
 }
@@ -523,8 +534,7 @@ function tabsBar() {
     ['receive', 'Receive'],
     ['send', 'Send'],
     ['history', 'History'],
-    ['coins', 'Coins'],
-    ['backup', 'Backup'],
+    ['settings', 'Settings'],
   ];
   return h(
     'div',
@@ -544,8 +554,7 @@ function tabContent() {
     case 'receive': return receiveTab();
     case 'send': return sendTab();
     case 'history': return historyTab();
-    case 'coins': return coinsTab();
-    case 'backup': return backupTab();
+    case 'settings': return settingsTab();
   }
 }
 
@@ -896,49 +905,6 @@ function historyTab() {
   );
 }
 
-// ---------------------------------------------------------------- Coins
-function coinsTab() {
-  if (wallet.scanning && !wallet.loaded) return h('div', { class: 'card center' }, h('span', { class: 'spinner' }));
-  const coin = wallet.netCfg.coin;
-  if (!wallet.utxos.length) {
-    return h(
-      'div',
-      { class: 'card col' },
-      h('p', { class: 'muted center', style: 'margin:0' }, wallet.offline ? 'Import a snapshot to load coins.' : 'No coins (UTXOs) yet.'),
-      h('hr', { class: 'divider' }),
-      snapshotActions()
-    );
-  }
-  return h(
-    'div',
-    { class: 'card' },
-    h('div', { class: 'row between', style: 'margin-bottom:8px' },
-      h('span', { class: 'muted small' }, `${wallet.utxos.length} coin${wallet.utxos.length > 1 ? 's' : ''}`),
-      h('span', { class: 'amount' }, fmtBtc(wallet.total) + ' BTC')
-    ),
-    h(
-      'div',
-      { class: 'list' },
-      wallet.utxos.map((u) =>
-        h(
-          'div',
-          { class: 'item' },
-          h('div', { class: 'grow' },
-            h('div', { class: 'mono small break' }, shortAddr(u.address, 16, 10)),
-            h('div', { class: 'path' }, `m/84'/${coin}'/0'/${u.chain}/${u.index} · ${shortTxid(u.txid)}:${u.vout}`)
-          ),
-          h('div', { style: 'text-align:right' },
-            h('div', { class: 'amount' }, fmtBtc(u.value)),
-            h('span', { class: `tag ${u.confirmed ? 'conf' : 'pending'}` }, u.confirmed ? 'confirmed' : 'pending')
-          )
-        )
-      )
-    ),
-    h('hr', { class: 'divider' }),
-    snapshotActions()
-  );
-}
-
 // Offline snapshot exchange: export coins on an online device, import on an
 // offline (air-gapped) one to sign without internet.
 function snapshotActions() {
@@ -972,7 +938,7 @@ async function importSnapshotFile(e) {
     let msg = `Imported ${res.imported} coin(s)`;
     if (res.unmatched.length) msg += ` · ${res.unmatched.length} address(es) not in this wallet`;
     toast(msg);
-    ui.tab = 'coins';
+    ui.tab = 'settings';
     render();
   } catch (err) {
     toast('Import failed: ' + err.message);
