@@ -25,6 +25,7 @@ const ui = {
   createStep: 'gen', // 'gen' | 'confirm'
   draftMnemonic: '',
   confirm: [], // [{ index, value }]
+  confirmPass: '', // re-entered passphrase on the verify step
   importText: '',
   passphrase: '',
   showPass: false,
@@ -212,6 +213,7 @@ function createPane() {
           class: 'btn-primary btn-block',
           onClick: () => {
             ui.confirm = pickConfirm(words);
+            ui.confirmPass = '';
             ui.unlockError = '';
             ui.createStep = 'confirm';
             render();
@@ -228,6 +230,7 @@ function createPane() {
   }
 
   // confirm step (optional — reachable via "Verify backup")
+  const hasPass = !!ui.passphrase;
   return h(
     'div',
     { class: 'col' },
@@ -248,6 +251,20 @@ function createPane() {
         })
       )
     ),
+    // Only verify the passphrase if one was actually entered.
+    hasPass &&
+      h(
+        'label',
+        { class: 'field' },
+        h('span', { class: 'lab' }, 'Re-enter passphrase'),
+        h('input', {
+          type: 'password',
+          class: 'mono-input',
+          autocomplete: 'off',
+          value: ui.confirmPass,
+          onInput: (e) => (ui.confirmPass = e.target.value),
+        })
+      ),
     h('div', { class: 'row gap6' },
       h('button', { class: 'btn-ghost', onClick: () => { ui.createStep = 'gen'; render(); } }, '← Back'),
       h('button', {
@@ -256,6 +273,9 @@ function createPane() {
           const words = ui.draftMnemonic.split(' ');
           const ok = ui.confirm.every((c) => c.value.toLowerCase() === words[c.index]);
           if (!ok) { ui.unlockError = 'Those words don’t match your phrase. Check your backup.'; render(); return; }
+          if (hasPass && ui.confirmPass !== ui.passphrase) {
+            ui.unlockError = 'That passphrase doesn’t match the one you entered.'; render(); return;
+          }
           openWallet(ui.draftMnemonic);
         },
       }, 'Open wallet')
@@ -295,7 +315,7 @@ function optionsPanel() {
   return h(
     'label',
     { class: 'field' },
-    h('span', { class: 'lab' }, 'optional passphrase'),
+    h('span', { class: 'lab' }, 'Optional passphrase'),
     h(
       'div',
       { class: 'input-group' },
