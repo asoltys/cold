@@ -63,6 +63,7 @@ export class Wallet {
 
     this.scanning = false;
     this.loaded = false; // true once a scan/snapshot has populated balances once
+    this._refreshing = false; // a scan/refresh is in flight
     this.nextReceiveIndex = 0;
     this.nextChangeIndex = 0;
 
@@ -76,6 +77,7 @@ export class Wallet {
     this._wsWant = false;
     this._wsRetry = null;
     this._refreshTimer = null;
+    this._pollTimer = null;
 
     this._subs = new Set();
   }
@@ -186,10 +188,28 @@ export class Wallet {
     return found;
   }
 
-  async scan() {
-    if (this.offline) return;
-    this.scanning = true;
-    this.emit();
+  // A short signature of the user-visible state, so background ("silent")
+  // refreshes only re-render when something actually changed.
+  _sig() {
+    return JSON.stringify({
+      u: this.utxos.map((u) => `${u.txid}:${u.vout}:${u.value}:${u.confirmed ? 1 : 0}`),
+      t: this.txs.map((t) => `${t.txid}:${t.confirmed ? 1 : 0}`),
+      r: this.nextReceiveIndex,
+      c: this.nextChangeIndex,
+    });
+  }
+
+  // silent=false: foreground load (shows loading state, always re-renders).
+  // silent=true:  background refresh (poll / WS) — no spinner, and only emits
+  //               if the visible state changed, so it never disrupts typing.
+  async scan({ silent = false } = {}) {
+    if (this.offline || this._refreshing) return;
+    this._refreshing = true;
+    const before = silent ? this._sig() : null;
+    if (!silent) {
+      this.scanning = true;
+      this.emit();
+    }
     try {
       this.addrMap = new Map();
       [this.receive, this.change] = await Promise.all([
@@ -199,17 +219,25 @@ export class Wallet {
       this.nextReceiveIndex = firstUnused(this.receive);
       this.nextChangeIndex = firstUnused(this.change);
 
-      [this.feeRates, this.price] = await Promise.all([
-        this.api.feeRates(),
-        this.api.price(),
-      ]);
+      // Fees/price are only needed at load — skip on routine background polls.
+      if (!silent || !this.feeRates) {
+        [this.feeRates, this.price] = await Promise.all([
+          this.api.feeRates(),
+          this.api.price(),
+        ]);
+      }
 
       await this.refreshUtxos();
       await this.refreshHistory();
       this.loaded = true;
     } finally {
-      this.scanning = false;
-      this.emit();
+      this._refreshing = false;
+      if (!silent) {
+        this.scanning = false;
+        this.emit();
+      } else if (this._sig() !== before) {
+        this.emit();
+      }
     }
   }
 
@@ -390,8 +418,13 @@ export class Wallet {
   }
 
   startRealtime() {
-    if (this.offline || typeof WebSocket === 'undefined') return;
+    if (this.offline) return;
     this.stopRealtime();
+    // Safety-net poll: the WebSocket gives instant updates, but its pushes can
+    // be missed (connection drops, server quirks). A light periodic silent
+    // refresh guarantees pending balances appear within a few seconds.
+    this._pollTimer = setInterval(() => this.scan({ silent: true }), 12000);
+    if (typeof WebSocket === 'undefined') return;
     this._wsWant = true;
     this._connectWs();
   }
@@ -459,12 +492,11 @@ export class Wallet {
   _scheduleRefresh() {
     clearTimeout(this._refreshTimer);
     this._refreshTimer = setTimeout(async () => {
-      if (this.scanning || this.offline) return;
       try {
-        await this.scan();
+        await this.scan({ silent: true });
         this.retrack();
       } catch {}
-    }, 1200);
+    }, 800);
   }
 
   stopRealtime() {
@@ -472,6 +504,7 @@ export class Wallet {
     this.live = false;
     clearTimeout(this._wsRetry);
     clearTimeout(this._refreshTimer);
+    clearInterval(this._pollTimer);
     if (this._ws) {
       try {
         this._ws.onclose = null;
