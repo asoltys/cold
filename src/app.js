@@ -295,7 +295,7 @@ function optionsPanel() {
   return h(
     'label',
     { class: 'field' },
-    h('span', { class: 'lab' }, 'BIP39 passphrase (optional extra word)'),
+    h('span', { class: 'lab' }, 'optional passphrase'),
     h(
       'div',
       { class: 'input-group' },
