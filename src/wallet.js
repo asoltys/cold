@@ -64,6 +64,8 @@ export class Wallet {
     this.utxos = []; // { txid, vout, value, address, chain, index, confirmed }
     this.txs = []; // aggregated history
     this.feeRates = null;
+    this.confirmed = 0;
+    this.pending = 0;
 
     this.scanning = false;
     this.loaded = false; // true once a scan/snapshot has populated balances once
@@ -115,6 +117,8 @@ export class Wallet {
     this.addrMap = new Map();
     this.utxos = [];
     this.txs = [];
+    this.confirmed = 0;
+    this.pending = 0;
     this.loaded = false;
     this.nextReceiveIndex = 0;
     this.nextChangeIndex = 0;
@@ -183,9 +187,13 @@ export class Wallet {
     while (gap < GAP_LIMIT) {
       const { address } = this.derive(chain, i);
       const info = await this.api.addressInfo(address);
-      const used =
-        info.chain_stats.tx_count > 0 || info.mempool_stats.tx_count > 0;
-      found.push({ chain, index: i, address, used });
+      const cs = info.chain_stats || {};
+      const ms = info.mempool_stats || {};
+      const used = (cs.tx_count || 0) > 0 || (ms.tx_count || 0) > 0;
+      // Balance straight from chain_stats — no need to fetch /utxo just to total.
+      const confirmed = (cs.funded_txo_sum || 0) - (cs.spent_txo_sum || 0);
+      const pending = (ms.funded_txo_sum || 0) - (ms.spent_txo_sum || 0);
+      found.push({ chain, index: i, address, used, confirmed, pending });
       this.addrMap.set(address, { chain, index: i });
       if (used) {
         gap = 0;
@@ -202,6 +210,8 @@ export class Wallet {
   // refreshes only re-render when something actually changed.
   _sig() {
     return JSON.stringify({
+      bc: this.confirmed,
+      bp: this.pending,
       u: this.utxos.map((u) => `${u.txid}:${u.vout}:${u.value}:${u.confirmed ? 1 : 0}`),
       t: this.txs.map((t) => `${t.txid}:${t.confirmed ? 1 : 0}`),
       r: this.nextReceiveIndex,
@@ -221,19 +231,23 @@ export class Wallet {
       this.emit();
     }
     try {
+      const prevBal = `${this.confirmed}|${this.pending}|${this.nextReceiveIndex}|${this.nextChangeIndex}`;
       this.addrMap = new Map();
       this.receive = await this.scanChain(0);
       this.change = await this.scanChain(1);
       this.nextReceiveIndex = firstUnused(this.receive);
       this.nextChangeIndex = firstUnused(this.change);
+      this._recomputeBalanceFromChains();
 
-      // Fees are only needed at load — skip on routine background polls.
-      if (!silent || !this.feeRates) {
-        this.feeRates = await this.api.feeRates();
+      // Only pull /utxo and /txs (the heavy part) on first load or when the
+      // balance/addresses actually changed. Idle polls stay /address-only.
+      const balanceChanged =
+        `${this.confirmed}|${this.pending}|${this.nextReceiveIndex}|${this.nextChangeIndex}` !== prevBal;
+      if (!silent || balanceChanged || !this.loaded) {
+        if (!silent || !this.feeRates) this.feeRates = await this.api.feeRates();
+        await this.refreshUtxos();
+        await this.refreshHistory();
       }
-
-      await this.refreshUtxos();
-      await this.refreshHistory();
       this.loaded = true;
       this.saveCache();
     } finally {
@@ -309,14 +323,26 @@ export class Wallet {
   }
 
   // --- balances -----------------------------------------------------------
-  get confirmed() {
-    return this.utxos.reduce((s, u) => s + (u.confirmed ? u.value : 0), 0);
-  }
-  get pending() {
-    return this.utxos.reduce((s, u) => s + (u.confirmed ? 0 : u.value), 0);
-  }
+  // confirmed/pending are plain fields, set from chain_stats during scan (and
+  // from UTXOs when restoring an offline snapshot). total is derived.
   get total() {
     return this.confirmed + this.pending;
+  }
+
+  _recomputeBalanceFromChains() {
+    let c = 0;
+    let p = 0;
+    for (const a of [...this.receive, ...this.change]) {
+      c += a.confirmed || 0;
+      p += a.pending || 0;
+    }
+    this.confirmed = c;
+    this.pending = p;
+  }
+
+  _recomputeBalanceFromUtxos() {
+    this.confirmed = this.utxos.reduce((s, u) => s + (u.confirmed ? u.value : 0), 0);
+    this.pending = this.utxos.reduce((s, u) => s + (u.confirmed ? 0 : u.value), 0);
   }
 
   freshReceive() {
@@ -564,6 +590,7 @@ export class Wallet {
       for (const a of [...this.receive, ...this.change]) {
         this.addrMap.set(a.address, { chain: a.chain, index: a.index });
       }
+      this._recomputeBalanceFromChains();
       this.loaded = true;
       this.emit();
       return true;
@@ -632,6 +659,7 @@ export class Wallet {
     }
     utxos.sort((a, b) => b.value - a.value);
     this.utxos = utxos;
+    this._recomputeBalanceFromUtxos();
     this.loaded = true;
     this.emit();
     return { imported: utxos.length, unmatched };
