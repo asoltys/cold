@@ -401,7 +401,7 @@ function brandHeader(withLock) {
           { class: `badge dot ${wallet.offline ? 'off' : ''} ${wallet.live ? 'live' : ''}` },
           status
         ),
-      withLock && h('button', { class: 'btn-sm', onClick: lock }, '🔒 Lock')
+      withLock && h('button', { class: 'btn-sm', onClick: lock }, 'Logout')
     )
   );
 }
@@ -917,7 +917,7 @@ function toolsTab() {
       infoLine('Type', 'BIP84 · Native SegWit (p2wpkh)'),
       infoLine('Account path', `m/84'/${coin}'/0'`),
       !wallet.offline && infoLine('Receive addresses scanned', String(wallet.receive.length)),
-      h('button', { class: 'btn-danger mt8', onClick: lock }, '🔒 Lock wallet')
+      h('button', { class: 'btn-danger mt8', onClick: lock }, 'Logout')
     )
   );
 }
