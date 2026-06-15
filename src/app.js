@@ -546,7 +546,6 @@ function sendTab() {
 
 function sendForm() {
   const s = ui.send;
-  const fr = wallet.feeRates;
   const feeOpts = [
     ['economyFee', 'Economy'],
     ['halfHourFee', 'Normal'],
@@ -598,7 +597,7 @@ function sendForm() {
           h('button', {
             type: 'button', class: (s.feeChoice === k ? 'active ' : '') + 'grow',
             onClick: () => { s.feeChoice = k; render(); },
-          }, label + (fr && fr[k] ? ` ${fr[k]}` : ''))
+          }, label)
         )
       ),
       s.feeChoice === 'custom' &&
