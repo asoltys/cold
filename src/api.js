@@ -142,19 +142,6 @@ export class Api {
     return { fastestFee: 20, halfHourFee: 10, hourFee: 5, economyFee: 2, minimumFee: 1 };
   }
 
-  // Only mempool.space exposes a price endpoint; price is non-critical.
-  async price() {
-    const h = this._hosts.find((x) => x.base.includes('mempool'));
-    if (!h || h.cooldownUntil > Date.now()) return null;
-    try {
-      const res = await fetch(h.base + '/v1/prices');
-      if (!res.ok) return null;
-      const p = await res.json();
-      return p && p.USD ? p.USD : null;
-    } catch {
-      return null;
-    }
-  }
 
   async broadcast(hexTx) {
     if (this.offline) throw new Error('offline');

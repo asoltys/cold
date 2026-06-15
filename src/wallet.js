@@ -59,7 +59,6 @@ export class Wallet {
     this.utxos = []; // { txid, vout, value, address, chain, index, confirmed }
     this.txs = []; // aggregated history
     this.feeRates = null;
-    this.price = null;
 
     this.scanning = false;
     this.loaded = false; // true once a scan/snapshot has populated balances once
@@ -219,12 +218,9 @@ export class Wallet {
       this.nextReceiveIndex = firstUnused(this.receive);
       this.nextChangeIndex = firstUnused(this.change);
 
-      // Fees/price are only needed at load — skip on routine background polls.
+      // Fees are only needed at load — skip on routine background polls.
       if (!silent || !this.feeRates) {
-        [this.feeRates, this.price] = await Promise.all([
-          this.api.feeRates(),
-          this.api.price(),
-        ]);
+        this.feeRates = await this.api.feeRates();
       }
 
       await this.refreshUtxos();
@@ -524,7 +520,6 @@ export class Wallet {
       netName: this.netName,
       exportedAt: new Date().toISOString(),
       feeRates: this.feeRates,
-      price: this.price,
       nextReceiveIndex: this.nextReceiveIndex,
       nextChangeIndex: this.nextChangeIndex,
       utxos: this.utxos.map((u) => ({
@@ -547,7 +542,6 @@ export class Wallet {
       );
 
     this.feeRates = snap.feeRates || this.feeRates;
-    this.price = snap.price || this.price;
     this.nextReceiveIndex = snap.nextReceiveIndex || 0;
     this.nextChangeIndex = snap.nextChangeIndex || 0;
 

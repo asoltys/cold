@@ -9,7 +9,6 @@ import { qrSvg } from './qr.js';
 import {
   fmtBtc,
   fmtSats,
-  fmtUsd,
   parseAmount,
   shortAddr,
   shortTxid,
@@ -340,7 +339,14 @@ async function openWallet(mnemonic) {
     render();
     return;
   }
-  wallet.load({ mnemonic: m, passphrase: ui.passphrase, netName: 'mainnet', offline: false });
+  await enterWallet(m, ui.passphrase);
+}
+
+// Load a wallet and start scanning. Persists to sessionStorage so a refresh
+// restores the open wallet (cleared on logout or when the tab closes).
+async function enterWallet(mnemonic, passphrase) {
+  wallet.load({ mnemonic, passphrase, netName: 'mainnet', offline: false });
+  persistSession(mnemonic, passphrase);
   ui.screen = 'wallet';
   ui.tab = 'receive';
   ui.send = blankSend();
@@ -361,6 +367,33 @@ async function openWallet(mnemonic) {
   } catch {
     enterOfflineFallback();
   }
+}
+
+const SESSION_KEY = 'btc-wallet-session';
+
+function persistSession(mnemonic, passphrase) {
+  try {
+    sessionStorage.setItem(SESSION_KEY, JSON.stringify({ mnemonic, passphrase }));
+  } catch {}
+}
+
+function clearSession() {
+  try {
+    sessionStorage.removeItem(SESSION_KEY);
+  } catch {}
+}
+
+// Restore an open wallet after a page refresh (same tab session only).
+function restoreSession() {
+  let saved;
+  try {
+    saved = JSON.parse(sessionStorage.getItem(SESSION_KEY) || 'null');
+  } catch {}
+  if (saved && saved.mnemonic && isValidMnemonic(saved.mnemonic)) {
+    enterWallet(saved.mnemonic, saved.passphrase || '');
+    return true;
+  }
+  return false;
 }
 
 function enterOfflineFallback() {
@@ -386,6 +419,7 @@ async function retryOnline() {
 
 function lock() {
   wallet.stopRealtime();
+  clearSession();
   wallet.load({ mnemonic: '', passphrase: '', netName: 'mainnet', offline: false });
   wallet.mnemonic = '';
   ui.screen = 'unlock';
@@ -400,7 +434,6 @@ function lock() {
 
 // ================================================================ WALLET
 function brandHeader(withLock) {
-  const status = wallet.offline ? 'offline' : wallet.live ? 'live' : 'online';
   return h(
     'div',
     { class: 'row between' },
@@ -410,17 +443,7 @@ function brandHeader(withLock) {
       h('div', { class: 'logo' }, '₿'),
       h('h1', {}, 'Bitcoin Wallet')
     ),
-    h(
-      'div',
-      { class: 'row gap6' },
-      withLock &&
-        h(
-          'span',
-          { class: `badge dot ${wallet.offline ? 'off' : ''} ${wallet.live ? 'live' : ''}` },
-          status
-        ),
-      withLock && h('button', { class: 'btn-sm', onClick: lock }, 'Logout')
-    )
+    withLock && h('button', { class: 'btn-sm', onClick: lock }, 'Logout')
   );
 }
 
@@ -508,15 +531,13 @@ function offlineBanner() {
 }
 
 function balanceCard() {
-  const price = wallet.price;
-  // Only dim on the very first load; WebSocket-driven updates happen silently.
+  // Only dim on the very first load; background updates happen silently.
   const firstLoad = wallet.scanning && !wallet.loaded;
   return h(
     'div',
     { class: 'card balance' },
     h('div', { class: 'small faint', style: 'text-transform:uppercase;letter-spacing:.05em' }, 'Total balance'),
     h('div', { class: 'amt', style: firstLoad ? 'opacity:.3' : '' }, fmtBtc(wallet.total), h('span', { class: 'unit' }, 'BTC')),
-    price ? h('div', { class: 'usd', style: firstLoad ? 'opacity:.3' : '' }, '≈ ' + fmtUsd(wallet.total, price)) : null,
     h(
       'div',
       { class: 'split' },
@@ -911,4 +932,5 @@ async function importSnapshotFile(e) {
 }
 
 // ================================================================ start
-render();
+// Restore a wallet left open in this tab; otherwise show the unlock screen.
+if (!restoreSession()) render();
