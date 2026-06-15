@@ -347,7 +347,7 @@ function enterOfflineFallback() {
   wallet.setOffline(true);
   wallet.deriveWindow(40);
   ui.offlineFallback = true;
-  ui.tab = 'tools';
+  ui.tab = 'coins';
   render();
 }
 
@@ -405,7 +405,7 @@ function brandHeader(withLock) {
 
 function goHome() {
   if (ui.screen === 'wallet') {
-    ui.tab = wallet.offline ? 'tools' : 'receive';
+    ui.tab = wallet.offline ? 'coins' : 'receive';
     ui.draft = null;
     ui.sendResult = null;
     ui.sendError = '';
@@ -436,7 +436,7 @@ function offlineBanner() {
   return h(
     'div',
     { class: 'notice info row between', style: 'margin:12px 0 0' },
-    h('span', {}, "Can't reach the network — working offline. Import a snapshot to load coins."),
+    h('span', {}, "Can't reach the network — working offline. Import a snapshot on the Coins tab to load coins."),
     h('button', { class: 'btn-sm', onClick: retryOnline }, 'Retry')
   );
 }
@@ -467,7 +467,6 @@ function tabsBar() {
     ['send', 'Send'],
     ['history', 'History'],
     ['coins', 'Coins'],
-    ['tools', 'Tools'],
   ];
   return h(
     'div',
@@ -487,7 +486,6 @@ function tabContent() {
     case 'send': return sendTab();
     case 'history': return historyTab();
     case 'coins': return coinsTab();
-    case 'tools': return toolsTab();
   }
 }
 
@@ -841,8 +839,16 @@ function historyTab() {
 // ---------------------------------------------------------------- Coins
 function coinsTab() {
   if (wallet.scanning && !wallet.loaded) return h('div', { class: 'card center' }, h('span', { class: 'spinner' }));
-  if (!wallet.utxos.length)
-    return h('div', { class: 'card' }, h('p', { class: 'muted center', style: 'margin:0' }, wallet.offline ? 'Import a wallet snapshot in Tools to load coins.' : 'No coins (UTXOs) yet.'));
+  const coin = wallet.netCfg.coin;
+  if (!wallet.utxos.length) {
+    return h(
+      'div',
+      { class: 'card col' },
+      h('p', { class: 'muted center', style: 'margin:0' }, wallet.offline ? 'Import a snapshot to load coins.' : 'No coins (UTXOs) yet.'),
+      h('hr', { class: 'divider' }),
+      snapshotActions()
+    );
+  }
   return h(
     'div',
     { class: 'card' },
@@ -859,7 +865,7 @@ function coinsTab() {
           { class: 'item' },
           h('div', { class: 'grow' },
             h('div', { class: 'mono small break' }, shortAddr(u.address, 16, 10)),
-            h('div', { class: 'path' }, `m/84'/${wallet.netCfg.coin}'/0'/${u.chain}/${u.index} · ${shortTxid(u.txid)}:${u.vout}`)
+            h('div', { class: 'path' }, `m/84'/${coin}'/0'/${u.chain}/${u.index} · ${shortTxid(u.txid)}:${u.vout}`)
           ),
           h('div', { style: 'text-align:right' },
             h('div', { class: 'amount' }, fmtBtc(u.value)),
@@ -867,59 +873,27 @@ function coinsTab() {
           )
         )
       )
-    )
+    ),
+    h('hr', { class: 'divider' }),
+    snapshotActions()
   );
 }
 
-// ---------------------------------------------------------------- Tools
-function toolsTab() {
-  const coin = wallet.netCfg.coin;
+// Offline snapshot exchange: export coins on an online device, import on an
+// offline (air-gapped) one to sign without internet.
+function snapshotActions() {
   return h(
     'div',
-    { class: 'col', style: 'gap:16px' },
-    // Connectivity
-    h(
-      'div',
-      { class: 'card col' },
-      h('h3', {}, 'Connectivity'),
-      h('p', { class: 'small muted', style: 'margin:0' }, wallet.offline
-        ? 'Offline: no network requests are made. Load coins from a snapshot file, sign locally, and broadcast elsewhere.'
-        : 'Online: fetching balances and history from mempool.space.'),
-      wallet.offline
-        ? h('button', { class: 'btn-primary', onClick: async () => { wallet.setOffline(false); toast('Going online…'); await wallet.scan(); wallet.startRealtime(); ui.tab = 'receive'; render(); } }, 'Go online & scan')
-        : h('button', { onClick: () => { wallet.setOffline(true); toast('Offline mode'); render(); } }, 'Switch to offline')
-    ),
-    // Offline snapshot exchange
-    h(
-      'div',
-      { class: 'card col' },
-      h('h3', {}, 'Offline transfer'),
-      h('p', { class: 'small muted', style: 'margin:0' }, 'On an online device, export a snapshot of your coins. Move the file to your offline device (with this wallet + seed) to spend without internet.'),
-      h('div', { class: 'row gap6 wrap' },
-        h('button', { class: wallet.offline ? '' : 'btn-primary', disabled: wallet.offline, onClick: exportSnapshot }, '⤓ Export snapshot'),
-        h('label', { class: 'btn btn-sm', style: 'cursor:pointer' }, 'Import snapshot…',
-          h('input', { type: 'file', accept: 'application/json,.json', style: 'display:none', onChange: importSnapshotFile })
-        )
-      ),
-      wallet.offline && wallet.utxos.length
-        ? h('div', { class: 'small muted' }, `Loaded ${wallet.utxos.length} coin(s), ${fmtBtc(wallet.total)} BTC from snapshot.`)
-        : null
-    ),
-    // Wallet info
-    h(
-      'div',
-      { class: 'card col' },
-      h('h3', {}, 'Wallet'),
-      infoLine('Type', 'BIP84 · Native SegWit (p2wpkh)'),
-      infoLine('Account path', `m/84'/${coin}'/0'`),
-      !wallet.offline && infoLine('Receive addresses scanned', String(wallet.receive.length)),
-      h('button', { class: 'btn-danger mt8', onClick: lock }, 'Logout')
+    { class: 'col gap6' },
+    h('p', { class: 'small muted', style: 'margin:0' },
+      'Offline transfer — export your coins on an online device, then import the file on an offline device (with this wallet + seed) to sign without internet.'),
+    h('div', { class: 'row gap6 wrap' },
+      h('button', { class: 'btn-sm', disabled: !wallet.utxos.length, onClick: exportSnapshot }, '⤓ Export snapshot'),
+      h('label', { class: 'btn btn-sm', style: 'cursor:pointer' }, 'Import snapshot…',
+        h('input', { type: 'file', accept: 'application/json,.json', style: 'display:none', onChange: importSnapshotFile })
+      )
     )
   );
-}
-
-function infoLine(k, v) {
-  return h('div', { class: 'row between small' }, h('span', { class: 'muted' }, k), h('span', { class: 'mono' }, v));
 }
 
 function exportSnapshot() {
