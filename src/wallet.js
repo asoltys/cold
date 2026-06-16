@@ -697,12 +697,27 @@ export class Wallet {
         const confirmed = !!(tx.status && tx.status.confirmed);
         this.utxos.push({ txid: tx.txid, vout: i, value: vo.value, address: a, chain: p.chain, index: p.index, confirmed });
         have.add(id);
-        if (confirmed) this.confirmed += vo.value;
-        else this.pending += vo.value;
+        // Mark the receiving address used + record its balance, so the fresh
+        // index advances immediately (next address/QR shows right away).
+        const arr = p.chain === 0 ? this.receive : this.change;
+        let entry = arr.find((e) => e.index === p.index);
+        if (!entry) {
+          entry = { chain: p.chain, index: p.index, address: a, used: false, confirmed: 0, pending: 0 };
+          arr.push(entry);
+        }
+        entry.used = true;
+        if (confirmed) entry.confirmed = (entry.confirmed || 0) + vo.value;
+        else entry.pending = (entry.pending || 0) + vo.value;
         changed = true;
       });
     }
-    if (changed) this.emit();
+    if (changed) {
+      this.nextReceiveIndex = firstUnused(this.receive);
+      this.nextChangeIndex = firstUnused(this.change);
+      this._recomputeBalanceFromChains();
+      this.retrack(); // start watching the new fresh address
+      this.emit();
+    }
     return changed;
   }
 
