@@ -208,6 +208,9 @@ textarea { resize: vertical; min-height: 84px; font-family: var(--mono); font-si
 .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 .words .w.masked .t { color: var(--faint); letter-spacing: 2px; }
 
+.footer { margin-top: 28px; padding-bottom: 8px; }
+.footer a { color: var(--accent-ink); font-weight: 600; }
+
 /* Clickable unit labels (BTC/sats) — look like text, toggle the global unit. */
 .unit-tag {
   background: none; border: 0; padding: 0; margin: 0; font: inherit; cursor: pointer;

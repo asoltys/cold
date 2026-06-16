@@ -73,8 +73,21 @@ function h(tag, attrs = {}, ...children) {
 }
 
 const root = document.getElementById('app');
+function footer() {
+  return h(
+    'div',
+    { class: 'footer small muted center' },
+    'made with ',
+    h('span', { style: 'color:#e25555' }, '♥'),
+    ' by ',
+    h('a', { href: 'https://adamsoltys.com', target: '_blank', rel: 'noopener' }, 'Adam Soltys'),
+    h('span', { class: 'faint' }, ' · '),
+    h('a', { href: 'https://github.com/asoltys/cold', target: '_blank', rel: 'noopener' }, 'source available on GitHub')
+  );
+}
+
 function render() {
-  root.replaceChildren(ui.screen === 'wallet' ? walletScreen() : unlockScreen());
+  root.replaceChildren(ui.screen === 'wallet' ? walletScreen() : unlockScreen(), footer());
 }
 wallet.subscribe(render);
 

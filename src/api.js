@@ -6,9 +6,18 @@
 //   - a 429 from ANY request immediately backs off ALL subsequent requests
 //     (global exponential pause), easing back as requests succeed.
 
-// TEMPORARY: route explorer traffic through a VPS while this IP is rate-limited
-// by mempool.space. Set PROXY = '' to go back to the public explorers directly.
-const PROXY = 'http://51.79.52.200:8088';
+// Explorer endpoint. Defaults to the public explorers (correct for a hosted,
+// multi-user deploy — each visitor uses their own IP). A specific machine whose
+// IP is rate-limited can opt into a proxy at runtime:
+//   localStorage.setItem('explorer-proxy', 'http://51.79.52.200:8088')
+// (http proxy only works when the page itself is served over http/localhost).
+const PROXY = (() => {
+  try {
+    return localStorage.getItem('explorer-proxy') || '';
+  } catch {
+    return '';
+  }
+})();
 
 const BACKENDS = PROXY
   ? {
