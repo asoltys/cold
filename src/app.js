@@ -34,6 +34,7 @@ const ui = {
 
   tab: 'receive', // receive | send | history | settings
   receiveSeenIndex: null, // fresh receive index the user has acknowledged
+  txDetail: null, // txid being viewed in the history detail view
   send: blankSend(),
   draft: null, // built tx summary awaiting review
   sendError: '',
@@ -489,6 +490,7 @@ function lock() {
   ui.confirm = [];
   ui.revealShown = false;
   ui.receiveSeenIndex = null;
+  ui.txDetail = null;
   render();
 }
 
@@ -633,6 +635,7 @@ function tabsBar() {
       tabBtn(label, ui.tab === id, () => {
         ui.tab = id;
         ui.revealShown = false; // re-mask the recovery phrase whenever tabs change
+        ui.txDetail = null; // back to the history list when leaving/returning
         render();
       })
     )
@@ -1004,6 +1007,11 @@ function sendResultView() {
 
 // ---------------------------------------------------------------- History
 function historyTab() {
+  if (ui.txDetail) {
+    const t = wallet.txs.find((x) => x.txid === ui.txDetail);
+    if (t) return txDetailView(t);
+    ui.txDetail = null;
+  }
   if (wallet.offline)
     return h('div', { class: 'card' }, h('p', { class: 'muted center', style: 'margin:0' }, 'Transaction history is unavailable in offline mode.'));
   if (wallet.scanning && !wallet.loaded) return h('div', { class: 'card center' }, h('span', { class: 'spinner' }));
@@ -1018,8 +1026,8 @@ function historyTab() {
       wallet.txs.map((t) => {
         const incoming = t.net >= 0;
         return h(
-          'a',
-          { class: 'item', href: wallet.api.explorerTx(t.txid), target: '_blank', rel: 'noopener', style: 'color:inherit' },
+          'div',
+          { class: 'item', style: 'cursor:pointer', onClick: () => { ui.txDetail = t.txid; render(); } },
           h('div', { class: `ico ${incoming ? 'in' : 'out'}` }, incoming ? '↓' : '↑'),
           h('div', { class: 'grow' },
             h('div', { class: 'row gap6' },
@@ -1035,6 +1043,40 @@ function historyTab() {
         );
       })
     )
+  );
+}
+
+function txDetailView(t) {
+  const incoming = t.net >= 0;
+  const when = t.confirmed && t.blockTime
+    ? new Date(t.blockTime * 1000).toLocaleString() + ' · ' + timeAgo(t.blockTime)
+    : 'Unconfirmed — waiting to be mined';
+  const line = (k, v) => h('div', { class: 'line' }, h('span', { class: 'k' }, k), h('span', { class: 'v' }, v));
+  return h(
+    'div',
+    { class: 'card col' },
+    h('div', { class: 'row between' },
+      h('h3', {}, incoming ? 'Received' : 'Sent'),
+      h('span', { class: `tag ${t.confirmed ? 'conf' : 'pending'}` }, t.confirmed ? 'confirmed' : '⏳ pending')
+    ),
+    h('div', { class: 'amt', style: 'font-size:30px' },
+      h('span', { class: incoming ? 'amount-pos' : 'amount-neg' }, (incoming ? '+' : '') + fmtAmount(t.net)),
+      ' ', unitTag('unit')
+    ),
+    h('div', { class: 'summary col', style: 'gap:0' },
+      line('Status', t.confirmed ? `Confirmed (block ${t.blockHeight || '—'})` : 'In mempool'),
+      line('When', when),
+      !incoming && t.fee ? line('Network fee', fmtAmount(t.fee) + ' ' + unitLabel()) : null
+    ),
+    h('div', { class: 'col gap6' },
+      h('span', { class: 'lab' }, 'Transaction ID'),
+      h('div', { class: 'addr-box', style: 'font-size:13px' }, t.txid)
+    ),
+    h('div', { class: 'row gap6 wrap' },
+      copyBtn(t.txid, 'Copy ID'),
+      h('a', { class: 'btn btn-sm', href: wallet.api.explorerTx(t.txid), target: '_blank', rel: 'noopener' }, 'View on mempool.space ↗')
+    ),
+    h('button', { class: 'btn-ghost btn-block', onClick: () => { ui.txDetail = null; render(); } }, '← Back to history')
   );
 }
 
@@ -1082,6 +1124,7 @@ async function importSnapshotFile(e) {
 // ================================================================ start
 // Restore a wallet left open in this tab; otherwise show the unlock screen.
 if (!restoreSession()) render();
+
 
 
 
