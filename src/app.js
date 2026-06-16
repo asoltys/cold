@@ -322,7 +322,8 @@ function createPane() {
           openWallet(ui.draftMnemonic);
         },
       }, 'Open wallet')
-    )
+    ),
+    h('button', { class: 'btn-block', onClick: () => openWallet(ui.draftMnemonic) }, 'Skip verification')
   );
 }
 
