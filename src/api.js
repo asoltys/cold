@@ -11,6 +11,8 @@ const BACKENDS = {
   testnet: ['https://mempool.space/testnet/api', 'https://blockstream.info/testnet/api'],
 };
 
+const REQUEST_TIMEOUT_MS = 10000;
+
 export class Api {
   constructor(net = 'mainnet') {
     this.net = net;
@@ -19,6 +21,7 @@ export class Api {
     // Hosts are tried in order (mempool first); a host that 429s is parked on
     // cooldown so we stop hammering it (Blockstream rate-limits aggressively).
     this._hosts = (BACKENDS[net] || BACKENDS.mainnet).map((base) => ({ base, cooldownUntil: 0 }));
+    this._timeoutMs = REQUEST_TIMEOUT_MS;
 
     // Serialized scheduler: one request at a time, min gap between starts.
     this._active = 0;
@@ -88,7 +91,19 @@ export class Api {
   async #run(host, path, opts) {
     if (this.offline) throw new Error('offline');
     return this.#schedule(async () => {
-      const res = await fetch(host.base + path, opts);
+      // Hard timeout: an unresponsive host must not stall the (serialized)
+      // queue. On timeout/network error, park the host and fail over.
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), this._timeoutMs);
+      let res;
+      try {
+        res = await fetch(host.base + path, { ...opts, signal: ctrl.signal });
+      } catch (e) {
+        host.cooldownUntil = Date.now() + 20000; // unresponsive — route away
+        throw e;
+      } finally {
+        clearTimeout(timer);
+      }
       if (res.status === 429) {
         host.cooldownUntil = Date.now() + 30000;
         this.#penalize();
@@ -167,7 +182,14 @@ export class Api {
   async broadcast(hexTx) {
     if (this.offline) throw new Error('offline');
     const attempts = this._hosts.map(async (host) => {
-      const res = await fetch(host.base + '/tx', { method: 'POST', body: hexTx });
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), this._timeoutMs);
+      let res;
+      try {
+        res = await fetch(host.base + '/tx', { method: 'POST', body: hexTx, signal: ctrl.signal });
+      } finally {
+        clearTimeout(timer);
+      }
       const body = await res.text();
       if (res.status === 429) {
         host.cooldownUntil = Date.now() + 30000;
