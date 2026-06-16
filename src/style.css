@@ -185,9 +185,9 @@ textarea { resize: vertical; min-height: 84px; font-family: var(--mono); font-si
 
 /* ---- review / summary ---- */
 .summary { background: #f7f8fa; border: 1px solid var(--line); border-radius: 12px; padding: 14px; }
-.summary .line { display: flex; justify-content: space-between; padding: 4px 0; font-size: 14px; }
-.summary .line .k { color: var(--muted); }
-.summary .line .v { font-family: var(--mono); }
+.summary .line { display: flex; justify-content: space-between; gap: 12px; padding: 5px 0; font-size: 14px; align-items: baseline; }
+.summary .line .k { color: var(--muted); flex: none; }
+.summary .line .v { font-family: var(--mono); text-align: right; min-width: 0; word-break: break-word; }
 
 /* ---- misc ---- */
 .notice { border-radius: 11px; padding: 11px 13px; font-size: 14px; }

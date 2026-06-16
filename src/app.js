@@ -1048,9 +1048,6 @@ function historyTab() {
 
 function txDetailView(t) {
   const incoming = t.net >= 0;
-  const when = t.confirmed && t.blockTime
-    ? new Date(t.blockTime * 1000).toLocaleString() + ' · ' + timeAgo(t.blockTime)
-    : 'Unconfirmed — waiting to be mined';
   const line = (k, v) => h('div', { class: 'line' }, h('span', { class: 'k' }, k), h('span', { class: 'v' }, v));
   return h(
     'div',
@@ -1064,8 +1061,9 @@ function txDetailView(t) {
       ' ', unitTag('unit')
     ),
     h('div', { class: 'summary col', style: 'gap:0' },
-      line('Status', t.confirmed ? `Confirmed (block ${t.blockHeight || '—'})` : 'In mempool'),
-      line('When', when),
+      line('Status', t.confirmed ? 'Confirmed' : 'Pending (in mempool)'),
+      t.confirmed ? line('Block', String(t.blockHeight || '—')) : null,
+      t.confirmed && t.blockTime ? line('Date', new Date(t.blockTime * 1000).toLocaleString()) : null,
       !incoming && t.fee ? line('Network fee', fmtAmount(t.fee) + ' ' + unitLabel()) : null
     ),
     h('div', { class: 'col gap6' },
@@ -1124,6 +1122,7 @@ async function importSnapshotFile(e) {
 // ================================================================ start
 // Restore a wallet left open in this tab; otherwise show the unlock screen.
 if (!restoreSession()) render();
+
 
 
 
