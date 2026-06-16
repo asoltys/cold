@@ -1017,17 +1017,19 @@ function historyTab() {
       { class: 'list' },
       wallet.txs.map((t) => {
         const incoming = t.net >= 0;
-        const display = incoming ? t.net : t.net; // net already signed
         return h(
           'a',
-          { class: 'item', href: wallet.api.explorerTx(t.txid), target: '_blank', rel: 'noopener', style: 'color:inherit' },
+          { class: 'item' + (t.confirmed ? '' : ' pendingtx'), href: wallet.api.explorerTx(t.txid), target: '_blank', rel: 'noopener', style: 'color:inherit' },
           h('div', { class: `ico ${incoming ? 'in' : 'out'}` }, incoming ? '↓' : '↑'),
           h('div', { class: 'grow' },
-            h('div', {}, incoming ? 'Received' : 'Sent'),
-            h('div', { class: 'small faint' }, t.confirmed ? timeAgo(t.blockTime) : 'unconfirmed')
+            h('div', { class: 'row gap6' },
+              incoming ? 'Received' : 'Sent',
+              t.confirmed ? null : h('span', { class: 'tag pending' }, '⏳ pending')
+            ),
+            h('div', { class: 'small faint' }, t.confirmed ? timeAgo(t.blockTime) : 'awaiting confirmation')
           ),
           h('div', { style: 'text-align:right' },
-            h('div', { class: incoming ? 'amount-pos' : 'amount-neg' }, (incoming ? '+' : '') + fmtAmount(display)),
+            h('div', { class: incoming ? 'amount-pos' : 'amount-neg' }, (incoming ? '+' : '') + fmtAmount(t.net)),
             !incoming && t.fee ? h('div', { class: 'small faint' }, `fee ${fmtAmount(t.fee)}`) : null
           )
         );
@@ -1080,4 +1082,6 @@ async function importSnapshotFile(e) {
 // ================================================================ start
 // Restore a wallet left open in this tab; otherwise show the unlock screen.
 if (!restoreSession()) render();
+
+
 

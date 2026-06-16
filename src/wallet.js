@@ -686,11 +686,14 @@ export class Wallet {
 
     let changed = false;
     const have = new Set(this.utxos.map(utxoId));
+    const mine = new Set(this.addrMap.keys());
     for (const tx of txs) {
       if (!tx || !Array.isArray(tx.vout)) continue;
+      let relevant = false;
       tx.vout.forEach((vo, i) => {
         const a = vo && vo.scriptpubkey_address;
         if (!a || !this.addrMap.has(a)) return;
+        relevant = true;
         const id = `${tx.txid}:${i}`;
         if (have.has(id)) return;
         const p = this.addrMap.get(a);
@@ -710,11 +713,21 @@ export class Wallet {
         else entry.pending = (entry.pending || 0) + vo.value;
         changed = true;
       });
+      for (const vin of tx.vin || []) {
+        const a = vin.prevout && vin.prevout.scriptpubkey_address;
+        if (a && mine.has(a)) relevant = true;
+      }
+      // Record it in history (so a pending deposit shows up there too).
+      if (relevant && !this.txs.some((t) => t.txid === tx.txid)) {
+        this.txs.push(this._txSummary(tx));
+        changed = true;
+      }
     }
     if (changed) {
       this.nextReceiveIndex = firstUnused(this.receive);
       this.nextChangeIndex = firstUnused(this.change);
       this._recomputeBalanceFromChains();
+      this._sortTxs();
       this.retrack(); // start watching the new fresh address
       this.emit();
     }
