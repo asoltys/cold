@@ -208,6 +208,11 @@ textarea { resize: vertical; min-height: 84px; font-family: var(--mono); font-si
 .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 .words .w.masked .t { color: var(--faint); letter-spacing: 2px; }
 
+.check-badge {
+  width: 64px; height: 64px; border-radius: 50%; flex: none;
+  background: var(--green-soft); color: var(--green);
+  display: grid; place-items: center; font-size: 34px; font-weight: 700;
+}
 .footer { margin-top: 28px; padding-bottom: 8px; }
 .footer a { color: var(--accent-ink); font-weight: 600; }
 

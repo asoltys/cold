@@ -33,6 +33,7 @@ const ui = {
   unlockError: '',
 
   tab: 'receive', // receive | send | history | settings
+  receiveSeenIndex: null, // fresh receive index the user has acknowledged
   send: blankSend(),
   draft: null, // built tx summary awaiting review
   sendError: '',
@@ -411,6 +412,9 @@ async function enterWallet(mnemonic, passphrase) {
     // a brand-new wallet does one full scan.
     if (hadCache || hadNostr) await wallet.refreshLive();
     else await wallet.scan();
+    // Align the acknowledged index after load so we only celebrate payments
+    // that land while watching (not historical reconciliation).
+    ui.receiveSeenIndex = wallet.nextReceiveIndex;
     wallet.startRealtime();
   } catch {
     enterOfflineFallback();
@@ -477,6 +481,7 @@ function lock() {
   ui.passphrase = '';
   ui.confirm = [];
   ui.revealShown = false;
+  ui.receiveSeenIndex = null;
   render();
 }
 
@@ -638,6 +643,30 @@ function tabContent() {
 
 // ---------------------------------------------------------------- Receive
 function receiveTab() {
+  if (ui.receiveSeenIndex == null) ui.receiveSeenIndex = wallet.nextReceiveIndex;
+
+  // A payment landed on the shown address (the fresh index advanced past what
+  // the user last saw) — celebrate, and wait for a tap before showing the next.
+  if (wallet.nextReceiveIndex > ui.receiveSeenIndex) {
+    let amt = 0;
+    for (let i = ui.receiveSeenIndex; i < wallet.nextReceiveIndex; i++) {
+      const e = wallet._addrInfo(0, i);
+      if (e) amt += (e.confirmed || 0) + (e.pending || 0);
+    }
+    return h(
+      'div',
+      {
+        class: 'card col',
+        style: 'align-items:center;text-align:center;gap:14px;cursor:pointer;padding:48px 20px',
+        onClick: () => { ui.receiveSeenIndex = wallet.nextReceiveIndex; render(); },
+      },
+      h('div', { class: 'check-badge' }, '✓'),
+      h('h2', { style: 'margin:0' }, 'Payment received!'),
+      amt ? h('div', { class: 'amount-pos', style: 'font-size:18px' }, '+' + fmtAmount(amt) + ' ' + unitLabel()) : null,
+      h('div', { class: 'small muted' }, 'Tap anywhere to proceed')
+    );
+  }
+
   const fresh = wallet.freshReceive();
   return h(
     'div',
@@ -1044,3 +1073,4 @@ async function importSnapshotFile(e) {
 // ================================================================ start
 // Restore a wallet left open in this tab; otherwise show the unlock screen.
 if (!restoreSession()) render();
+
