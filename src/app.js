@@ -79,7 +79,7 @@ function footer() {
     'div',
     { class: 'footer small muted center' },
     'made with ',
-    h('span', { style: 'color:#e25555' }, '♥'),
+    h('span', { style: 'color:#e25555;font-size:1.25em;vertical-align:-1px' }, '♥'),
     ' by ',
     h('a', { href: 'https://adamsoltys.com', target: '_blank', rel: 'noopener' }, 'Adam Soltys'),
     h('span', { class: 'faint' }, ' · '),
