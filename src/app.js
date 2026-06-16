@@ -391,9 +391,12 @@ async function enterWallet(mnemonic, passphrase) {
     return;
   }
   try {
-    // With a cache, only check the live frontier (cheap) instead of a full
-    // re-scan; a full scan still runs for a brand-new wallet and periodically.
-    if (hadCache) await wallet.refreshLive();
+    // Cross-device state: pull the latest from Nostr (may supply state on a
+    // device with no local cache, or a newer copy from another device).
+    const hadNostr = await wallet.syncFromNostr();
+    // With existing state (local or remote), only check the live frontier;
+    // a brand-new wallet does one full scan.
+    if (hadCache || hadNostr) await wallet.refreshLive();
     else await wallet.scan();
     wallet.startRealtime();
   } catch {

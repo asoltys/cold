@@ -17,6 +17,7 @@ import * as btc from '@scure/btc-signer';
 import { p2wpkh } from '@scure/btc-signer/payment';
 
 import { Api, pool, wsUrl } from './api.js';
+import { NostrSync } from './nostr.js';
 
 // No look-ahead: stop scanning a chain at the first unused address. This wallet
 // only ever exposes ONE unused address at a time (freshReceive = first unused;
@@ -90,6 +91,11 @@ export class Wallet {
     this._lastMsg = 0; // time of last WS message (incl. pong)
     this._wakeHooked = false;
 
+    // Encrypted cross-device state sync over Nostr.
+    this.nostr = new NostrSync();
+    this._savedAt = 0;
+    this._nostrPubTimer = null;
+
     this._subs = new Set();
   }
 
@@ -113,6 +119,11 @@ export class Wallet {
     this.api.offline = offline;
     this._account = null;
     this._addrCache.clear();
+    this._savedAt = 0;
+    try {
+      if (this.mnemonic) this.nostr.load(this.mnemonic, this.passphrase);
+      else this.nostr.unload();
+    } catch {}
     this.reset();
   }
 
@@ -668,6 +679,7 @@ export class Wallet {
     clearInterval(this._pollTimer);
     clearInterval(this._deepTimer);
     clearInterval(this._hbTimer);
+    clearTimeout(this._nostrPubTimer);
     if (this._ws) {
       try {
         this._ws.onclose = null;
@@ -687,47 +699,84 @@ export class Wallet {
     return 'btc-wallet-cache:' + hex.encode(sha256(bytes)).slice(0, 32);
   }
 
+  // The serializable wallet state, shared by the localStorage cache and the
+  // Nostr sync. savedAt lets us pick the newest copy across devices.
+  _snapshot() {
+    return {
+      v: 1,
+      savedAt: Date.now(),
+      receive: this.receive,
+      change: this.change,
+      utxos: this.utxos,
+      txs: this.txs,
+      nextReceiveIndex: this.nextReceiveIndex,
+      nextChangeIndex: this.nextChangeIndex,
+      feeRates: this.feeRates,
+    };
+  }
+
+  _applySnapshot(d) {
+    this.receive = d.receive || [];
+    this.change = d.change || [];
+    this.utxos = d.utxos || [];
+    this.txs = d.txs || [];
+    this.nextReceiveIndex = d.nextReceiveIndex || 0;
+    this.nextChangeIndex = d.nextChangeIndex || 0;
+    this.feeRates = d.feeRates || this.feeRates;
+    this.addrMap = new Map();
+    for (const a of [...this.receive, ...this.change]) {
+      this.addrMap.set(a.address, { chain: a.chain, index: a.index });
+    }
+    this._recomputeBalanceFromChains();
+    this._savedAt = d.savedAt || 0;
+    this.loaded = true;
+  }
+
   saveCache() {
+    const snap = this._snapshot();
+    this._savedAt = snap.savedAt;
     try {
-      localStorage.setItem(
-        this._cacheKey(),
-        JSON.stringify({
-          v: 1,
-          receive: this.receive,
-          change: this.change,
-          utxos: this.utxos,
-          txs: this.txs,
-          nextReceiveIndex: this.nextReceiveIndex,
-          nextChangeIndex: this.nextChangeIndex,
-          feeRates: this.feeRates,
-        })
-      );
+      localStorage.setItem(this._cacheKey(), JSON.stringify(snap));
     } catch {}
+    // Push to Nostr too (debounced), so other devices get the update.
+    if (!this.offline) {
+      clearTimeout(this._nostrPubTimer);
+      this._nostrPubTimer = setTimeout(() => this.nostr.publish(snap), 2500);
+    }
   }
 
   restoreCache() {
     try {
       const raw = localStorage.getItem(this._cacheKey());
       if (!raw) return false;
-      const d = JSON.parse(raw);
-      this.receive = d.receive || [];
-      this.change = d.change || [];
-      this.utxos = d.utxos || [];
-      this.txs = d.txs || [];
-      this.nextReceiveIndex = d.nextReceiveIndex || 0;
-      this.nextChangeIndex = d.nextChangeIndex || 0;
-      this.feeRates = d.feeRates || this.feeRates;
-      this.addrMap = new Map();
-      for (const a of [...this.receive, ...this.change]) {
-        this.addrMap.set(a.address, { chain: a.chain, index: a.index });
-      }
-      this._recomputeBalanceFromChains();
-      this.loaded = true;
+      this._applySnapshot(JSON.parse(raw));
       this.emit();
       return true;
     } catch {
       return false;
     }
+  }
+
+  // Pull the latest state from Nostr; apply it if it's newer than what we have.
+  // Returns true if state was applied (so the caller can skip a full scan).
+  async syncFromNostr() {
+    if (this.offline) return false;
+    let remote;
+    try {
+      remote = await this.nostr.fetch();
+    } catch {
+      return false;
+    }
+    if (!remote) return false;
+    if ((remote.savedAt || 0) > (this._savedAt || 0)) {
+      this._applySnapshot(remote);
+      this.saveCache(); // mirror into localStorage
+      this.emit();
+      return true;
+    }
+    // Our local copy is newer (or equal) — push it up so the relay catches up.
+    if ((this._savedAt || 0) > (remote.savedAt || 0)) this.saveCache();
+    return true; // remote existed, so no full scan needed
   }
 
   // --- offline snapshot ---------------------------------------------------
