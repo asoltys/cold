@@ -83,7 +83,8 @@ function footer() {
     ' by ',
     h('a', { href: 'https://adamsoltys.com', target: '_blank', rel: 'noopener' }, 'Adam Soltys'),
     h('span', { class: 'faint' }, ' · '),
-    h('a', { href: 'https://github.com/asoltys/cold', target: '_blank', rel: 'noopener' }, 'source available on GitHub')
+    'source available on ',
+    h('a', { href: 'https://github.com/asoltys/cold', target: '_blank', rel: 'noopener' }, 'GitHub')
   );
 }
 
@@ -412,9 +413,15 @@ async function enterWallet(mnemonic, passphrase) {
     // a brand-new wallet does one full scan.
     if (hadCache || hadNostr) await wallet.refreshLive();
     else await wallet.scan();
-    // Align the acknowledged index after load so we only celebrate payments
-    // that land while watching (not historical reconciliation).
-    ui.receiveSeenIndex = wallet.nextReceiveIndex;
+    // Persisted acknowledgement: first time, baseline to the current index so we
+    // don't celebrate historical payments. After that, any advance beyond the
+    // acknowledged index shows the celebration (and survives refreshes).
+    let ack = wallet.getReceiveAck();
+    if (ack == null) {
+      ack = wallet.nextReceiveIndex;
+      wallet.setReceiveAck(ack);
+    }
+    ui.receiveSeenIndex = ack;
     wallet.startRealtime();
   } catch {
     enterOfflineFallback();
@@ -658,7 +665,7 @@ function receiveTab() {
       {
         class: 'card col',
         style: 'align-items:center;text-align:center;gap:14px;cursor:pointer;padding:48px 20px',
-        onClick: () => { ui.receiveSeenIndex = wallet.nextReceiveIndex; render(); },
+        onClick: () => { ui.receiveSeenIndex = wallet.nextReceiveIndex; wallet.setReceiveAck(wallet.nextReceiveIndex); render(); },
       },
       h('div', { class: 'check-badge' }, '✓'),
       h('h2', { style: 'margin:0' }, 'Payment received!'),

@@ -767,6 +767,24 @@ export class Wallet {
     return 'btc-wallet-cache:' + hex.encode(sha256(bytes)).slice(0, 32);
   }
 
+  // The fresh receive index the user has acknowledged (tapped past the
+  // "payment received" screen for). Persisted so a received payment keeps
+  // showing the celebration until acknowledged, even across refreshes.
+  getReceiveAck() {
+    try {
+      const v = localStorage.getItem(this._cacheKey() + ':ack');
+      return v == null ? null : Number(v);
+    } catch {
+      return null;
+    }
+  }
+
+  setReceiveAck(i) {
+    try {
+      localStorage.setItem(this._cacheKey() + ':ack', String(i));
+    } catch {}
+  }
+
   // The serializable wallet state, shared by the localStorage cache and the
   // Nostr sync. savedAt lets us pick the newest copy across devices.
   _snapshot() {
