@@ -6,10 +6,38 @@
 //   - a 429 from ANY request immediately backs off ALL subsequent requests
 //     (global exponential pause), easing back as requests succeed.
 
-const BACKENDS = {
-  mainnet: ['https://mempool.space/api', 'https://blockstream.info/api'],
-  testnet: ['https://mempool.space/testnet/api', 'https://blockstream.info/testnet/api'],
-};
+// TEMPORARY: route explorer traffic through a VPS while this IP is rate-limited
+// by mempool.space. Set PROXY = '' to go back to the public explorers directly.
+const PROXY = 'http://51.79.52.200:8088';
+
+const BACKENDS = PROXY
+  ? {
+      mainnet: [
+        { base: `${PROXY}/mp/api`, kind: 'mempool' },
+        { base: `${PROXY}/bs/api`, kind: 'esplora' },
+      ],
+      testnet: [
+        { base: `${PROXY}/mp/testnet/api`, kind: 'mempool' },
+        { base: `${PROXY}/bs/testnet/api`, kind: 'esplora' },
+      ],
+    }
+  : {
+      mainnet: [
+        { base: 'https://mempool.space/api', kind: 'mempool' },
+        { base: 'https://blockstream.info/api', kind: 'esplora' },
+      ],
+      testnet: [
+        { base: 'https://mempool.space/testnet/api', kind: 'mempool' },
+        { base: 'https://blockstream.info/testnet/api', kind: 'esplora' },
+      ],
+    };
+
+// WebSocket URL (mempool) — through the proxy when configured.
+export function wsUrl(net) {
+  const path = net === 'testnet' ? '/testnet/api/v1/ws' : '/api/v1/ws';
+  if (PROXY) return PROXY.replace(/^http/, 'ws') + '/mp' + path;
+  return 'wss://mempool.space' + path;
+}
 
 const REQUEST_TIMEOUT_MS = 10000;
 
@@ -20,7 +48,7 @@ export class Api {
 
     // Hosts are tried in order (mempool first); a host that 429s is parked on
     // cooldown so we stop hammering it (Blockstream rate-limits aggressively).
-    this._hosts = (BACKENDS[net] || BACKENDS.mainnet).map((base) => ({ base, cooldownUntil: 0 }));
+    this._hosts = (BACKENDS[net] || BACKENDS.mainnet).map((h) => ({ ...h, cooldownUntil: 0 }));
     this._timeoutMs = REQUEST_TIMEOUT_MS;
 
     // Serialized scheduler: one request at a time, min gap between starts.
@@ -162,7 +190,7 @@ export class Api {
   async feeRates() {
     for (const host of this._hosts) {
       if (host.cooldownUntil > Date.now()) continue;
-      const isMempool = host.base.includes('mempool');
+      const isMempool = host.kind === 'mempool';
       try {
         const res = await this.#run(host, isMempool ? '/v1/fees/recommended' : '/fee-estimates');
         if (!res.ok) continue;

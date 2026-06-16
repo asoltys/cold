@@ -16,7 +16,7 @@ import { sha256 } from '@noble/hashes/sha256';
 import * as btc from '@scure/btc-signer';
 import { p2wpkh } from '@scure/btc-signer/payment';
 
-import { Api, pool } from './api.js';
+import { Api, pool, wsUrl } from './api.js';
 
 // No look-ahead: stop scanning a chain at the first unused address. This wallet
 // only ever exposes ONE unused address at a time (freshReceive = first unused;
@@ -481,9 +481,7 @@ export class Wallet {
   // Pushes us new mempool/confirmed transactions for our addresses so history
   // and balances update with no polling.
   wsUrl() {
-    return this.netName === 'testnet'
-      ? 'wss://mempool.space/testnet/api/v1/ws'
-      : 'wss://mempool.space/api/v1/ws';
+    return wsUrl(this.netName);
   }
 
   // Addresses worth watching: those holding coins (to catch spends) plus a
