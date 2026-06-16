@@ -1019,7 +1019,7 @@ function historyTab() {
         const incoming = t.net >= 0;
         return h(
           'a',
-          { class: 'item' + (t.confirmed ? '' : ' pendingtx'), href: wallet.api.explorerTx(t.txid), target: '_blank', rel: 'noopener', style: 'color:inherit' },
+          { class: 'item', href: wallet.api.explorerTx(t.txid), target: '_blank', rel: 'noopener', style: 'color:inherit' },
           h('div', { class: `ico ${incoming ? 'in' : 'out'}` }, incoming ? '↓' : '↑'),
           h('div', { class: 'grow' },
             h('div', { class: 'row gap6' },
