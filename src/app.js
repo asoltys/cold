@@ -375,7 +375,7 @@ async function openWallet(mnemonic) {
 async function enterWallet(mnemonic, passphrase) {
   wallet.load({ mnemonic, passphrase, netName: 'mainnet', offline: false });
   persistSession(mnemonic, passphrase);
-  wallet.restoreCache(); // show last-known balance/history instantly, if cached
+  const hadCache = wallet.restoreCache(); // show last-known balance/history instantly
   ui.screen = 'wallet';
   ui.tab = 'receive';
   ui.send = blankSend();
@@ -391,7 +391,10 @@ async function enterWallet(mnemonic, passphrase) {
     return;
   }
   try {
-    await wallet.scan();
+    // With a cache, only check the live frontier (cheap) instead of a full
+    // re-scan; a full scan still runs for a brand-new wallet and periodically.
+    if (hadCache) await wallet.refreshLive();
+    else await wallet.scan();
     wallet.startRealtime();
   } catch {
     enterOfflineFallback();
