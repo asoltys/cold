@@ -229,21 +229,22 @@ export class Wallet {
     return arr.find((a) => a.index === index);
   }
 
-  // Light poll: only re-query the addresses that can actually change — ones
-  // holding coins (could be spent) and the next fresh receive/change address
-  // (could receive). Stable historical addresses stay cached and aren't
-  // re-fetched. If anything moved, fall back to a full scan to reconcile.
+  // Light poll: only check the fresh frontier — the next receive and change
+  // address — for new activity. Already-scanned addresses are never re-polled;
+  // changes to them (spends) arrive over the WebSocket while connected, and a
+  // manual rescan covers anything missed (e.g. address reuse). If the frontier
+  // moved, escalate to a full scan once to reconcile.
   async refreshLive() {
     if (this.offline || this._refreshing || this._polling) return;
     this._polling = true;
     try {
-      const targets = new Map();
-      for (const u of this.utxos) targets.set(`${u.chain}/${u.index}`, { chain: u.chain, index: u.index });
-      targets.set(`0/${this.nextReceiveIndex}`, { chain: 0, index: this.nextReceiveIndex });
-      targets.set(`1/${this.nextChangeIndex}`, { chain: 1, index: this.nextChangeIndex });
+      const targets = [
+        { chain: 0, index: this.nextReceiveIndex },
+        { chain: 1, index: this.nextChangeIndex },
+      ];
 
       let changed = false;
-      for (const { chain, index } of targets.values()) {
+      for (const { chain, index } of targets) {
         const { address } = this.derive(chain, index);
         const info = await this.api.addressInfo(address);
         const cs = info.chain_stats || {};
@@ -497,11 +498,10 @@ export class Wallet {
   startRealtime() {
     if (this.offline) return;
     this.stopRealtime();
-    // Safety-net polling (the WebSocket gives instant updates, but its pushes
-    // can be missed): a light poll of just the live addresses every 15s, plus
-    // an occasional full scan to catch anything the frontier check can't.
-    this._pollTimer = setInterval(() => this.refreshLive(), 15000);
-    this._deepTimer = setInterval(() => this.scan({ silent: true }), 300000);
+    // Safety-net poll: only the fresh frontier (next receive/change address),
+    // in case the WebSocket misses a deposit. Already-scanned addresses are
+    // never re-polled. No periodic full scan — use the manual Rescan for that.
+    this._pollTimer = setInterval(() => this.refreshLive(), 20000);
     if (typeof WebSocket === 'undefined') return;
     this._wsWant = true;
 

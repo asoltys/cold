@@ -521,6 +521,17 @@ function settingsTab() {
       { class: 'card col' },
       h('h3', {}, 'Offline transfer'),
       snapshotActions()
+    ),
+    h(
+      'div',
+      { class: 'card col' },
+      h('h3', {}, 'Rescan'),
+      h('p', { class: 'small muted', style: 'margin:0' },
+        'Your current address updates automatically. Rescan only if a payment was sent to an old (reused) address and isn’t showing.'),
+      wallet.offline
+        ? null
+        : h('button', { disabled: wallet.scanning, onClick: () => wallet.scan() },
+            wallet.scanning ? 'Scanning…' : 'Rescan wallet')
     )
   );
 }
