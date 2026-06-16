@@ -496,14 +496,16 @@ export class Wallet {
     return wsUrl(this.netName);
   }
 
-  // Addresses worth watching: those holding coins (to catch spends) plus a
-  // window of upcoming fresh receive/change addresses (to catch deposits).
+  // Only the fresh frontier needs realtime watching: the next receive address
+  // (incoming deposits) and the next change address (our change landing). Coin
+  // spends are handled by the post-send refresh and cross-device Nostr sync, so
+  // we don't track coin addresses — which also stays under the relay's 10-addr
+  // per-connection limit.
   watchedAddresses() {
-    const set = new Set();
-    for (const u of this.utxos) set.add(u.address);
-    for (let i = 0; i < 10; i++) set.add(this.derive(0, this.nextReceiveIndex + i).address);
-    for (let i = 0; i < 5; i++) set.add(this.derive(1, this.nextChangeIndex + i).address);
-    return [...set];
+    return [
+      this.derive(0, this.nextReceiveIndex).address,
+      this.derive(1, this.nextChangeIndex).address,
+    ];
   }
 
   startRealtime() {
