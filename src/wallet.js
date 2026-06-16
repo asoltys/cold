@@ -248,31 +248,75 @@ export class Wallet {
   async refreshLive() {
     if (this.offline || this._refreshing || this._polling) return;
     this._polling = true;
+    let changed = false;
     try {
-      const targets = [
-        { chain: 0, index: this.nextReceiveIndex },
-        { chain: 1, index: this.nextChangeIndex },
-      ];
+      const fresh = []; // frontier addresses found to be active this pass
+      for (const chain of [0, 1]) {
+        let idx = chain === 0 ? this.nextReceiveIndex : this.nextChangeIndex;
+        // Walk forward from the frontier while addresses are used; stop at the
+        // first unused one. Never revisits already-passed (cached) addresses.
+        for (let guard = 0; guard < 100; guard++) {
+          const { address } = this.derive(chain, idx);
+          const info = await this.api.addressInfo(address);
+          const cs = info.chain_stats || {};
+          const ms = info.mempool_stats || {};
+          const used = (cs.tx_count || 0) > 0 || (ms.tx_count || 0) > 0;
+          const confirmed = (cs.funded_txo_sum || 0) - (cs.spent_txo_sum || 0);
+          const pending = (ms.funded_txo_sum || 0) - (ms.spent_txo_sum || 0);
 
-      let changed = false;
-      for (const { chain, index } of targets) {
-        const { address } = this.derive(chain, index);
-        const info = await this.api.addressInfo(address);
-        const cs = info.chain_stats || {};
-        const ms = info.mempool_stats || {};
-        const confirmed = (cs.funded_txo_sum || 0) - (cs.spent_txo_sum || 0);
-        const pending = (ms.funded_txo_sum || 0) - (ms.spent_txo_sum || 0);
-        const used = (cs.tx_count || 0) > 0 || (ms.tx_count || 0) > 0;
-        const prev = this._addrInfo(chain, index);
-        if (!prev || prev.confirmed !== confirmed || prev.pending !== pending || prev.used !== used) {
-          changed = true;
-          break;
+          const arr = chain === 0 ? this.receive : this.change;
+          let entry = arr.find((a) => a.index === idx);
+          if (!entry) {
+            entry = { chain, index: idx, address };
+            arr.push(entry);
+            this.addrMap.set(address, { chain, index: idx });
+          }
+          if (entry.used !== used || entry.confirmed !== confirmed || entry.pending !== pending) {
+            changed = true;
+            if (used) fresh.push({ chain, index: idx, address });
+          }
+          entry.used = used;
+          entry.confirmed = confirmed;
+          entry.pending = pending;
+
+          if (!used) break; // frontier still fresh — done with this chain
+          idx++;
+        }
+        if (chain === 0) this.nextReceiveIndex = idx;
+        else this.nextChangeIndex = idx;
+      }
+
+      // Fetch coins + history for ONLY the newly-active frontier addresses.
+      for (const a of fresh) {
+        const us = await this.api.addressUtxos(a.address);
+        this.utxos = this.utxos.filter((u) => u.address !== a.address);
+        for (const u of us) {
+          this.utxos.push({
+            txid: u.txid,
+            vout: u.vout,
+            value: u.value,
+            address: a.address,
+            chain: a.chain,
+            index: a.index,
+            confirmed: !!u.status.confirmed,
+          });
+        }
+        const list = await this.api.addressTxs(a.address);
+        for (const tx of list) {
+          if (!this.txs.some((t) => t.txid === tx.txid)) this.txs.push(this._txSummary(tx));
         }
       }
+
       if (changed) {
-        this._polling = false;
-        await this.scan({ silent: true });
+        this.utxos.sort((x, y) => y.value - x.value);
+        this._sortTxs();
+        this._recomputeBalanceFromChains();
+        this.loaded = true;
+        this.saveCache();
+        this.emit();
       }
+    } catch {
+      /* transient; next poll/ws retries */
     } finally {
       this._polling = false;
     }
@@ -345,40 +389,46 @@ export class Wallet {
     this.utxos = utxos;
   }
 
-  async refreshHistory() {
-    const used = this.usedAddresses();
-    const lists = await pool(used, (a) => this.api.addressTxs(a.address));
+  // Summarize a raw esplora tx into our history shape (net to us, fee, status).
+  _txSummary(tx) {
     const mine = new Set(this.addrMap.keys());
-    const byId = new Map();
-    for (const list of lists) {
-      for (const tx of list) {
-        if (byId.has(tx.txid)) continue;
-        let received = 0;
-        let sent = 0;
-        for (const vin of tx.vin) {
-          const a = vin.prevout && vin.prevout.scriptpubkey_address;
-          if (a && mine.has(a)) sent += vin.prevout.value;
-        }
-        for (const vout of tx.vout) {
-          if (vout.scriptpubkey_address && mine.has(vout.scriptpubkey_address))
-            received += vout.value;
-        }
-        byId.set(tx.txid, {
-          txid: tx.txid,
-          net: received - sent, // >0 incoming, <0 outgoing
-          fee: tx.fee || 0,
-          confirmed: !!tx.status.confirmed,
-          blockTime: tx.status.block_time || 0,
-          blockHeight: tx.status.block_height || 0,
-        });
-      }
+    let received = 0;
+    let sent = 0;
+    for (const vin of tx.vin || []) {
+      const a = vin.prevout && vin.prevout.scriptpubkey_address;
+      if (a && mine.has(a)) sent += vin.prevout.value;
     }
-    const txs = [...byId.values()];
-    txs.sort((a, b) => {
+    for (const vout of tx.vout || []) {
+      if (vout.scriptpubkey_address && mine.has(vout.scriptpubkey_address)) received += vout.value;
+    }
+    return {
+      txid: tx.txid,
+      net: received - sent, // >0 incoming, <0 outgoing
+      fee: tx.fee || 0,
+      confirmed: !!(tx.status && tx.status.confirmed),
+      blockTime: (tx.status && tx.status.block_time) || 0,
+      blockHeight: (tx.status && tx.status.block_height) || 0,
+    };
+  }
+
+  _sortTxs() {
+    this.txs.sort((a, b) => {
       if (a.confirmed !== b.confirmed) return a.confirmed ? 1 : -1; // pending first
       return (b.blockTime || 0) - (a.blockTime || 0);
     });
-    this.txs = txs;
+  }
+
+  async refreshHistory() {
+    const used = this.usedAddresses();
+    const lists = await pool(used, (a) => this.api.addressTxs(a.address));
+    const byId = new Map();
+    for (const list of lists) {
+      for (const tx of list) {
+        if (!byId.has(tx.txid)) byId.set(tx.txid, this._txSummary(tx));
+      }
+    }
+    this.txs = [...byId.values()];
+    this._sortTxs();
   }
 
   // --- balances -----------------------------------------------------------
@@ -663,11 +713,12 @@ export class Wallet {
   }
 
   // Debounced: a payment may touch several of our addresses in one go.
+  // Reconcile incrementally (frontier only) — never re-scans old coins.
   _scheduleRefresh() {
     clearTimeout(this._refreshTimer);
     this._refreshTimer = setTimeout(async () => {
       try {
-        await this.scan({ silent: true });
+        await this.refreshLive();
         this.retrack();
       } catch {}
     }, 400);
