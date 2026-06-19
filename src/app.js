@@ -6,6 +6,7 @@
 
 import { Wallet, newMnemonic, isValidMnemonic, utxoId } from './wallet.js';
 import { qrSvg } from './qr.js';
+import { t, LANGS, getLang, setLang, isRTL } from './i18n.js';
 import {
   fmtBtc,
   fmtSats,
@@ -19,7 +20,8 @@ import {
 const wallet = new Wallet();
 
 const ui = {
-  screen: 'unlock', // 'unlock' | 'wallet'
+  screen: 'unlock', // 'unlock' | 'wallet' | 'howItWorks'
+  returnScreen: 'unlock', // where 'howItWorks' returns to (Back / logo)
   unlockTab: 'create', // 'create' | 'import'
   createStep: 'gen', // 'gen' | 'confirm'
   draftMnemonic: '',
@@ -79,18 +81,39 @@ function footer() {
   return h(
     'div',
     { class: 'footer small muted center' },
-    'made with ',
-    h('span', { style: 'color:#e25555;font-size:1.25em;vertical-align:-1px' }, '♥'),
-    ' by ',
-    h('a', { href: 'https://adamsoltys.com', target: '_blank', rel: 'noopener' }, 'Adam Soltys'),
-    h('span', { class: 'faint' }, ' · '),
-    'source available on ',
-    h('a', { href: 'https://github.com/asoltys/cold', target: '_blank', rel: 'noopener' }, 'GitHub')
+    h(
+      'div',
+      {},
+      t('footerMadeBy') + ' ',
+      h('a', { href: 'https://adamsoltys.com', target: '_blank', rel: 'noopener' }, 'Adam Soltys'),
+      h('span', { class: 'faint' }, ' · '),
+      t('footerSourceOn') + ' ',
+      h('a', { href: 'https://github.com/asoltys/cold', target: '_blank', rel: 'noopener' }, 'GitHub')
+    ),
+    h(
+      'div',
+      { style: 'margin-top:4px' },
+      h('button', { class: 'linklike', style: 'font-weight:400', onClick: openHowItWorks }, t('howItWorks'))
+    )
   );
 }
 
+// Open the How it works page, remembering where to return to.
+function openHowItWorks() {
+  if (ui.screen === 'howItWorks') return;
+  ui.returnScreen = ui.screen;
+  ui.screen = 'howItWorks';
+  render();
+}
+
 function render() {
-  root.replaceChildren(ui.screen === 'wallet' ? walletScreen() : unlockScreen(), footer());
+  const screen =
+    ui.screen === 'wallet'
+      ? walletScreen()
+      : ui.screen === 'howItWorks'
+        ? howItWorksScreen()
+        : unlockScreen();
+  root.replaceChildren(screen, footer());
 }
 wallet.subscribe(render);
 
@@ -120,7 +143,7 @@ async function copy(text) {
     } catch {}
     ta.remove();
   }
-  toast('Copied to clipboard');
+  toast(t('copied'));
 }
 
 function download(filename, text, mime = 'application/json') {
@@ -132,7 +155,7 @@ function download(filename, text, mime = 'application/json') {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-function copyBtn(text, label = 'Copy') {
+function copyBtn(text, label = t('copy')) {
   return h('button', { class: 'btn-sm', onClick: () => copy(text) }, label);
 }
 
@@ -162,7 +185,7 @@ const fmtAmount = (sats) => (unit === 'sats' ? fmtSats(sats) : fmtBtc(sats));
 
 // A clickable unit label. cls lets callers inherit surrounding sizing.
 function unitTag(cls = '') {
-  return h('button', { type: 'button', class: 'unit-tag ' + cls, title: 'Switch BTC / sats', onClick: toggleUnit }, unitLabel());
+  return h('button', { type: 'button', class: 'unit-tag ' + cls, title: t('switchUnit'), onClick: toggleUnit }, unitLabel());
 }
 
 // ================================================================ UNLOCK
@@ -177,23 +200,57 @@ function unlockScreen() {
       h(
         'div',
         { class: 'tabs' },
-        tabBtn('Create new', ui.unlockTab === 'create', () => {
+        tabBtn(t('createNew'), ui.unlockTab === 'create', () => {
           ui.unlockTab = 'create';
           render();
         }),
-        tabBtn('Import existing', ui.unlockTab === 'import', () => {
+        tabBtn(t('importExisting'), ui.unlockTab === 'import', () => {
           ui.unlockTab = 'import';
           render();
         })
       ),
       ui.unlockTab === 'create' ? createPane() : importPane(),
       ui.unlockError && h('div', { class: 'notice err' }, ui.unlockError)
-    ),
-    h(
-      'p',
-      { class: 'small muted center' },
-      'Keys never leave your browser. Works fully offline — save this page and open it from your filesystem.'
     )
+  );
+}
+
+// ================================================================ HOW IT WORKS
+function howItWorksScreen() {
+  const back = () => {
+    ui.screen = ui.returnScreen === 'wallet' ? 'wallet' : 'unlock';
+    render();
+  };
+  const para = (key) => h('p', { class: 'muted', style: 'margin:0' }, t(key));
+  return h(
+    'div',
+    { class: 'col', style: 'gap:16px' },
+    brandHeader(false),
+    h(
+      'div',
+      { class: 'card col', style: 'gap:14px' },
+      h('p', { class: 'lead', style: 'margin:0' }, t('hiwLead')),
+      h('h3', {}, t('hiwBasicsTitle')),
+      para('hiwBasics1'),
+      para('hiwBasics2'),
+      para('hiwBasics3'),
+      para('hiwBasics4'),
+      h(
+        'details',
+        { class: 'hiw-tech' },
+        h('summary', {}, t('hiwTechTitle')),
+        h(
+          'div',
+          { class: 'col', style: 'gap:12px;margin-top:12px' },
+          para('hiwTech1'),
+          para('hiwTech2'),
+          para('hiwTech3'),
+          para('hiwTech4'),
+          para('hiwTech5')
+        )
+      )
+    ),
+    h('button', { class: 'btn-block', onClick: back }, t('back'))
   );
 }
 
@@ -207,7 +264,7 @@ function createPane() {
       return h(
         'div',
         { class: 'col' },
-        h('p', { class: 'muted' }, 'Generate a new 12-word BIP39 seed phrase. Write it down — it is the only way to recover this wallet.'),
+        h('p', { class: 'muted' }, t('genIntro')),
         h(
           'button',
           {
@@ -217,7 +274,7 @@ function createPane() {
               render();
             },
           },
-          'Generate seed phrase'
+          t('generateSeed')
         )
       );
     }
@@ -225,7 +282,7 @@ function createPane() {
     return h(
       'div',
       { class: 'col' },
-      h('div', { class: 'warn-box' }, '⚠ Write these 12 words down on paper, in order. Anyone with them can spend your coins.'),
+      h('div', { class: 'warn-box' }, t('writeDownWarn')),
       h(
         'div',
         { class: 'words' },
@@ -236,7 +293,7 @@ function createPane() {
       h(
         'div',
         { class: 'row gap6' },
-        copyBtn(ui.draftMnemonic, 'Copy phrase'),
+        copyBtn(ui.draftMnemonic, t('copyPhrase')),
         h(
           'button',
           {
@@ -246,7 +303,7 @@ function createPane() {
               render();
             },
           },
-          'Regenerate'
+          t('regenerate')
         )
       ),
       optionsPanel(),
@@ -262,12 +319,12 @@ function createPane() {
             render();
           },
         },
-        'Verify backup'
+        t('verifyBackup')
       ),
       h(
         'button',
         { class: 'btn-block', onClick: () => openWallet(ui.draftMnemonic) },
-        'Skip verification'
+        t('skipVerification')
       )
     );
   }
@@ -277,12 +334,12 @@ function createPane() {
   return h(
     'div',
     { class: 'col' },
-    h('p', { class: 'muted' }, 'Confirm your backup by entering the requested words.'),
+    h('p', { class: 'muted' }, t('confirmBackupIntro')),
     ...ui.confirm.map((c, i) =>
       h(
         'label',
         { class: 'field' },
-        h('span', { class: 'lab' }, `Word #${c.index + 1}`),
+        h('span', { class: 'lab' }, t('wordN', { n: c.index + 1 })),
         h('input', {
           type: 'text',
           class: 'mono-input',
@@ -299,7 +356,7 @@ function createPane() {
       h(
         'label',
         { class: 'field' },
-        h('span', { class: 'lab' }, 'Re-enter passphrase'),
+        h('span', { class: 'lab' }, t('reenterPassphrase')),
         h('input', {
           type: 'password',
           class: 'mono-input',
@@ -309,21 +366,21 @@ function createPane() {
         })
       ),
     h('div', { class: 'row gap6' },
-      h('button', { class: 'btn-ghost', onClick: () => { ui.createStep = 'gen'; render(); } }, '← Back'),
+      h('button', { class: 'btn-ghost', onClick: () => { ui.createStep = 'gen'; render(); } }, t('back')),
       h('button', {
         class: 'btn-primary grow',
         onClick: () => {
           const words = ui.draftMnemonic.split(' ');
           const ok = ui.confirm.every((c) => c.value.toLowerCase() === words[c.index]);
-          if (!ok) { ui.unlockError = 'Those words don’t match your phrase. Check your backup.'; render(); return; }
+          if (!ok) { ui.unlockError = t('wordsMismatch'); render(); return; }
           if (hasPass && ui.confirmPass !== ui.passphrase) {
-            ui.unlockError = 'That passphrase doesn’t match the one you entered.'; render(); return;
+            ui.unlockError = t('passphraseMismatch'); render(); return;
           }
           openWallet(ui.draftMnemonic);
         },
-      }, 'Open wallet')
+      }, t('openWallet'))
     ),
-    h('button', { class: 'btn-block', onClick: () => openWallet(ui.draftMnemonic) }, 'Skip verification')
+    h('button', { class: 'btn-block', onClick: () => openWallet(ui.draftMnemonic) }, t('skipVerification'))
   );
 }
 
@@ -340,9 +397,9 @@ function importPane() {
     h(
       'label',
       { class: 'field' },
-      h('span', { class: 'lab' }, 'Seed phrase'),
+      h('span', { class: 'lab' }, t('seedPhrase')),
       h('textarea', {
-        placeholder: 'enter your seed words separated by spaces',
+        placeholder: t('seedPlaceholder'),
         autocapitalize: 'none',
         autocomplete: 'off',
         spellcheck: 'false',
@@ -351,7 +408,7 @@ function importPane() {
       })
     ),
     optionsPanel(),
-    h('button', { class: 'btn-primary btn-block', onClick: () => openWallet(ui.importText) }, 'Open wallet')
+    h('button', { class: 'btn-primary btn-block', onClick: () => openWallet(ui.importText) }, t('openWallet'))
   );
 }
 
@@ -359,19 +416,19 @@ function optionsPanel() {
   return h(
     'label',
     { class: 'field' },
-    h('span', { class: 'lab' }, 'Optional passphrase'),
+    h('span', { class: 'lab' }, t('optionalPassphrase')),
     h(
       'div',
       { class: 'input-group' },
       h('input', {
         type: ui.showPass ? 'text' : 'password',
         class: 'mono-input',
-        placeholder: 'leave blank if unused',
+        placeholder: t('leaveBlank'),
         autocomplete: 'off',
         value: ui.passphrase,
         onInput: (e) => (ui.passphrase = e.target.value),
       }),
-      h('button', { class: 'btn-sm', type: 'button', onClick: () => { ui.showPass = !ui.showPass; render(); } }, ui.showPass ? 'Hide' : 'Show')
+      h('button', { class: 'btn-sm', type: 'button', onClick: () => { ui.showPass = !ui.showPass; render(); } }, ui.showPass ? t('hide') : t('show'))
     )
   );
 }
@@ -380,7 +437,7 @@ async function openWallet(mnemonic) {
   ui.unlockError = '';
   const m = (mnemonic || '').trim().replace(/\s+/g, ' ');
   if (!isValidMnemonic(m)) {
-    ui.unlockError = 'Invalid seed phrase — check the spelling and word order.';
+    ui.unlockError = t('invalidSeed');
     render();
     return;
   }
@@ -502,11 +559,11 @@ function brandHeader(withLock) {
     { class: 'row between' },
     h(
       'div',
-      { class: 'brand', style: 'cursor:pointer', title: 'Home', onClick: goHome },
+      { class: 'brand', style: 'cursor:pointer', title: t('home'), onClick: goHome },
       h('div', { class: 'logo' }, '₿'),
-      h('h1', {}, 'Bitcoin Wallet')
+      h('h1', {}, t('appTitle'))
     ),
-    withLock && h('button', { class: 'btn-sm', onClick: lock }, 'Logout')
+    withLock && h('button', { class: 'btn-sm', onClick: lock }, t('logout'))
   );
 }
 
@@ -530,50 +587,85 @@ function settingsTab() {
     h(
       'div',
       { class: 'card col' },
-      h('h3', {}, 'Recovery phrase'),
-      h('div', { class: 'warn-box' }, '⚠ Anyone who can see these words can steal your funds. Make sure nobody is watching before you reveal them.'),
+      h('h3', {}, t('recoveryPhrase')),
+      h('div', { class: 'warn-box' }, t('recoveryWarn')),
       h('div', { class: 'words' }, cells),
       shown && wallet.passphrase
         ? h('div', { class: 'col gap6' },
-            h('span', { class: 'lab' }, 'BIP39 passphrase'),
+            h('span', { class: 'lab' }, t('bip39Passphrase')),
             h('div', { class: 'addr-box' }, wallet.passphrase)
           )
         : null,
       shown
         ? h('div', { class: 'row gap6 wrap' },
-            copyBtn(wallet.mnemonic, 'Copy phrase'),
-            wallet.passphrase ? copyBtn(wallet.passphrase, 'Copy passphrase') : null,
-            h('button', { class: 'grow', onClick: () => { ui.revealShown = false; render(); } }, 'Hide')
+            copyBtn(wallet.mnemonic, t('copyPhrase')),
+            wallet.passphrase ? copyBtn(wallet.passphrase, t('copyPassphrase')) : null,
+            h('button', { class: 'grow', onClick: () => { ui.revealShown = false; render(); } }, t('hide'))
           )
-        : h('button', { class: 'btn-primary btn-block', onClick: () => { ui.revealShown = true; render(); } }, 'Reveal recovery phrase')
+        : h('button', { class: 'btn-primary btn-block', onClick: () => { ui.revealShown = true; render(); } }, t('revealRecovery'))
     ),
     h(
       'div',
       { class: 'card col' },
-      h('h3', {}, 'Offline transfer'),
+      h('h3', {}, t('offlineTransfer')),
       snapshotActions()
     ),
     h(
       'div',
       { class: 'card col' },
-      h('h3', {}, 'Rescan'),
+      h('h3', {}, t('rescan')),
       h('p', { class: 'small muted', style: 'margin:0' },
-        'Your current address updates automatically. Rescan only if a payment was sent to an old (reused) address and isn’t showing.'),
+        t('rescanDesc')),
       wallet.offline
         ? null
         : h('button', { disabled: wallet.scanning, onClick: () => wallet.scan() },
-            wallet.scanning ? 'Scanning…' : 'Rescan wallet')
+            wallet.scanning ? t('scanning') : t('rescanWallet'))
+    ),
+    h(
+      'div',
+      { class: 'card col' },
+      h('h3', {}, t('language')),
+      languagePicker()
     )
   );
 }
 
+// Language selector. Changing it persists the choice, flips text direction for
+// RTL languages, and re-renders the whole app in the new language.
+function languagePicker() {
+  return h(
+    'select',
+    {
+      value: getLang(),
+      onChange: (e) => {
+        setLang(e.target.value);
+        applyDir();
+        render();
+      },
+    },
+    LANGS.map(([code, name]) => h('option', { value: code, selected: code === getLang() }, name))
+  );
+}
+
+// Reflect the active language's writing direction on <html> (rtl for ar/ur).
+function applyDir() {
+  try {
+    document.documentElement.dir = isRTL() ? 'rtl' : 'ltr';
+    document.documentElement.lang = getLang();
+  } catch {}
+}
+
 function goHome() {
+  if (ui.screen === 'howItWorks') {
+    ui.screen = ui.returnScreen === 'wallet' ? 'wallet' : 'unlock';
+  }
   if (ui.screen === 'wallet') {
     ui.tab = wallet.offline ? 'settings' : 'receive';
     ui.draft = null;
     ui.sendResult = null;
     ui.sendError = '';
   } else {
+    ui.screen = 'unlock';
     ui.unlockTab = 'create';
     ui.createStep = 'gen';
     ui.draftMnemonic = '';
@@ -599,8 +691,8 @@ function offlineBanner() {
   return h(
     'div',
     { class: 'notice info row between', style: 'margin:12px 0 0' },
-    h('span', {}, "Can't reach the network — working offline. Import a snapshot on the Settings tab to load coins."),
-    h('button', { class: 'btn-sm', onClick: retryOnline }, 'Retry')
+    h('span', {}, t('offlineBanner')),
+    h('button', { class: 'btn-sm', onClick: retryOnline }, t('retry'))
   );
 }
 
@@ -610,13 +702,13 @@ function balanceCard() {
   return h(
     'div',
     { class: 'card balance' },
-    h('div', { class: 'small faint', style: 'text-transform:uppercase;letter-spacing:.05em' }, 'Balance'),
+    h('div', { class: 'small faint', style: 'text-transform:uppercase;letter-spacing:.05em' }, t('balance')),
     h('div', { class: 'amt', style: firstLoad ? 'opacity:.3' : '' }, fmtAmount(wallet.confirmed), ' ', unitTag('unit')),
     wallet.pending > 0
       ? h(
           'div',
           { class: 'split' },
-          h('div', {}, h('div', { class: 'k' }, 'Pending'), h('div', { class: 'v pending' }, fmtAmount(wallet.pending), ' ', unitTag()))
+          h('div', {}, h('div', { class: 'k' }, t('pending')), h('div', { class: 'v pending' }, fmtAmount(wallet.pending), ' ', unitTag()))
         )
       : null
   );
@@ -624,10 +716,10 @@ function balanceCard() {
 
 function tabsBar() {
   const tabs = [
-    ['receive', 'Receive'],
-    ['send', 'Send'],
-    ['history', 'History'],
-    ['settings', 'Settings'],
+    ['receive', t('tabReceive')],
+    ['send', t('tabSend')],
+    ['history', t('tabHistory')],
+    ['settings', t('tabSettings')],
   ];
   return h(
     'div',
@@ -672,9 +764,9 @@ function receiveTab() {
         onClick: () => { ui.receiveSeenIndex = wallet.nextReceiveIndex; wallet.setReceiveAck(wallet.nextReceiveIndex); render(); },
       },
       h('div', { class: 'check-badge' }, '✓'),
-      h('h2', { style: 'margin:0' }, 'Payment received!'),
+      h('h2', { style: 'margin:0' }, t('paymentReceived')),
       amt ? h('div', { class: 'amount-pos', style: 'font-size:18px' }, '+' + fmtAmount(amt) + ' ' + unitLabel()) : null,
-      h('div', { class: 'small muted' }, 'Tap anywhere to proceed')
+      h('div', { class: 'small muted' }, t('tapToProceed'))
     );
   }
 
@@ -684,7 +776,7 @@ function receiveTab() {
     { class: 'card col', style: 'align-items:center;gap:14px' },
     h('div', { html: qrSvg(fresh.address) }),
     h('div', { class: 'addr-box', style: 'width:100%' }, fresh.address),
-    copyBtn(fresh.address, 'Copy address')
+    copyBtn(fresh.address, t('copyAddress'))
   );
 }
 
@@ -708,7 +800,7 @@ function recipientRow(s, r, i) {
         autocapitalize: 'none', autocomplete: 'off', spellcheck: 'false', value: r.address,
         onInput: (e) => (r.address = e.target.value),
       }),
-      !single && h('button', { type: 'button', class: 'btn-sm', title: 'Remove', onClick: () => { s.recipients.splice(i, 1); render(); } }, '✕')
+      !single && h('button', { type: 'button', class: 'btn-sm', title: t('remove'), onClick: () => { s.recipients.splice(i, 1); render(); } }, '✕')
     ),
     h('div', { class: 'input-group' },
       h('input', {
@@ -731,8 +823,8 @@ function recipientRow(s, r, i) {
           r.amount = v;
         },
       }),
-      h('button', { type: 'button', class: 'btn-sm', title: 'Switch BTC / sats', onClick: toggleUnit }, unitLabel()),
-      single && h('button', { type: 'button', class: s.max ? 'btn-primary' : '', onClick: () => { s.max = !s.max; render(); } }, 'Max')
+      h('button', { type: 'button', class: 'btn-sm', title: t('switchUnit'), onClick: toggleUnit }, unitLabel()),
+      single && h('button', { type: 'button', class: s.max ? 'btn-primary' : '', onClick: () => { s.max = !s.max; render(); } }, t('max'))
     )
   );
 }
@@ -740,10 +832,10 @@ function recipientRow(s, r, i) {
 function sendForm() {
   const s = ui.send;
   const feeOpts = [
-    ['economyFee', 'Economy'],
-    ['halfHourFee', 'Normal'],
-    ['fastestFee', 'Priority'],
-    ['custom', 'Custom'],
+    ['economyFee', t('feeEconomy')],
+    ['halfHourFee', t('feeNormal')],
+    ['fastestFee', t('feePriority')],
+    ['custom', t('feeCustom')],
   ];
   return h(
     'div',
@@ -751,7 +843,7 @@ function sendForm() {
     h(
       'div',
       { class: 'field' },
-      h('span', { class: 'lab' }, s.recipients.length > 1 ? 'Recipients' : 'Recipient'),
+      h('span', { class: 'lab' }, s.recipients.length > 1 ? t('recipients') : t('recipient')),
       h('div', { class: 'col', style: 'gap:14px' },
         s.recipients.map((r, i) => recipientRow(s, r, i))
       ),
@@ -759,12 +851,12 @@ function sendForm() {
         h('button', {
           type: 'button', class: 'linklike small mt8',
           onClick: () => { s.recipients.push({ address: '', amount: '' }); s.max = false; render(); },
-        }, '+ Add recipient')
+        }, t('addRecipient'))
     ),
     h(
       'div',
       { class: 'field' },
-      h('span', { class: 'lab' }, 'Fee rate'),
+      h('span', { class: 'lab' }, t('feeRate')),
       h(
         'div',
         { class: 'seg', style: 'display:flex;width:100%' },
@@ -787,11 +879,11 @@ function sendForm() {
           h('span', { class: 'small muted', style: 'align-self:center' }, 'sat/vB')
         ),
       s.feeChoice !== 'custom' &&
-        h('div', { class: 'small faint mt8' }, `Selected rate: ${currentFeeRate()} sat/vB`)
+        h('div', { class: 'small faint mt8' }, t('selectedRate', { n: currentFeeRate() }))
     ),
     coinControl(),
     ui.sendError && h('div', { class: 'notice err' }, ui.sendError),
-    h('button', { class: 'btn-primary btn-block', onClick: reviewSend }, 'Review transaction')
+    h('button', { class: 'btn-primary btn-block', onClick: reviewSend }, t('reviewTx'))
   );
 }
 
@@ -800,18 +892,18 @@ function coinControl() {
   const head = h(
     'div',
     { class: 'row between' },
-    h('span', { class: 'lab', style: 'margin:0' }, 'Coin selection'),
+    h('span', { class: 'lab', style: 'margin:0' }, t('coinSelection')),
     h(
       'div',
       { class: 'seg' },
-      h('button', { type: 'button', class: !s.manual ? 'active' : '', onClick: () => { s.manual = false; render(); } }, 'Automatic'),
-      h('button', { type: 'button', class: s.manual ? 'active' : '', onClick: () => { s.manual = true; render(); } }, 'Manual')
+      h('button', { type: 'button', class: !s.manual ? 'active' : '', onClick: () => { s.manual = false; render(); } }, t('automatic')),
+      h('button', { type: 'button', class: s.manual ? 'active' : '', onClick: () => { s.manual = true; render(); } }, t('manual'))
     )
   );
   if (!s.manual) return h('div', { class: 'col gap6' }, head);
 
   if (!wallet.utxos.length)
-    return h('div', { class: 'col gap6' }, head, h('div', { class: 'small muted' }, 'No coins available.'));
+    return h('div', { class: 'col gap6' }, head, h('div', { class: 'small muted' }, t('noCoins')));
 
   let selTotal = 0;
   const rows = wallet.utxos.map((u) => {
@@ -838,7 +930,7 @@ function coinControl() {
     head,
     h('div', { class: 'list' }, rows),
     h('div', { class: 'row between small' },
-      h('span', { class: 'muted' }, `${s.coins.size} selected`),
+      h('span', { class: 'muted' }, t('nSelected', { n: s.coins.size })),
       h('span', { class: 'amount' }, fmtAmount(selTotal), ' ', unitTag())
     )
   );
@@ -875,20 +967,20 @@ function reviewSend() {
     let coinIds = null;
     if (s.manual) {
       coinIds = [...s.coins];
-      if (!coinIds.length) throw new Error('Select at least one coin to spend.');
+      if (!coinIds.length) throw new Error(t('selectCoin'));
     }
     let recipients, sendMax = false;
     if (s.max && s.recipients.length === 1) {
       const addr = s.recipients[0].address.trim();
-      if (!addr) throw new Error('Enter a recipient address.');
+      if (!addr) throw new Error(t('enterRecipientAddr'));
       recipients = [{ address: addr, amount: 0 }];
       sendMax = true;
     } else {
       recipients = s.recipients.map((r, i) => {
         const addr = r.address.trim();
-        if (!addr) throw new Error(`Enter an address for recipient ${i + 1}.`);
+        if (!addr) throw new Error(t('enterAddrForN', { n: i + 1 }));
         const sats = parseAmount(r.amount, unit);
-        if (!sats || sats <= 0) throw new Error(`Enter a valid amount for recipient ${i + 1}.`);
+        if (!sats || sats <= 0) throw new Error(t('enterValidAmtForN', { n: i + 1 }));
         return { address: addr, amount: sats };
       });
     }
@@ -907,7 +999,7 @@ function reviewView() {
   return h(
     'div',
     { class: 'card col' },
-    h('h3', {}, 'Review transaction'),
+    h('h3', {}, t('reviewTx')),
     h(
       'div',
       { class: 'summary col', style: 'gap:0' },
@@ -918,23 +1010,23 @@ function reviewView() {
         )
       ),
       h('div', { class: 'line' },
-        h('span', { class: 'k' }, 'Network fee'),
+        h('span', { class: 'k' }, t('networkFee')),
         h('span', { class: 'v' }, fmtAmount(d.fee), ' ', unitTag())
       )
     ),
     ui.sendError && h('div', { class: 'notice err' }, ui.sendError),
     wallet.offline
-      ? h('div', { class: 'notice info' }, 'Offline: sign now, then broadcast the signed transaction from an online device.')
+      ? h('div', { class: 'notice info' }, t('offlineSignNote'))
       : null,
     h(
       'div',
       { class: 'row gap6' },
-      h('button', { class: 'btn-ghost', onClick: () => { ui.draft = null; ui.sendError = ''; render(); } }, '← Back'),
+      h('button', { class: 'btn-ghost', onClick: () => { ui.draft = null; ui.sendError = ''; render(); } }, t('back')),
       ui.busy
         ? h('button', { class: 'btn-primary grow', disabled: true }, h('span', { class: 'spinner' }))
         : wallet.offline
-          ? h('button', { class: 'btn-primary grow', onClick: signForExport }, 'Sign transaction')
-          : h('button', { class: 'btn-primary grow', onClick: broadcast }, 'Sign & broadcast')
+          ? h('button', { class: 'btn-primary grow', onClick: signForExport }, t('signTx'))
+          : h('button', { class: 'btn-primary grow', onClick: broadcast }, t('signBroadcast'))
     )
   );
 }
@@ -951,7 +1043,7 @@ async function broadcast() {
     ui.send = blankSend();
     await wallet.scan();
   } catch (e) {
-    ui.sendError = 'Broadcast failed: ' + e.message;
+    ui.sendError = t('broadcastFailed', { msg: e.message });
   }
   ui.busy = false;
   render();
@@ -966,41 +1058,41 @@ function signForExport() {
     ui.draft = null;
     ui.send = blankSend();
   } catch (e) {
-    ui.sendError = 'Signing failed: ' + e.message;
+    ui.sendError = t('signingFailed', { msg: e.message });
   }
   render();
 }
 
 function sendResultView() {
   const r = ui.sendResult;
-  const again = h('button', { class: 'btn-block mt8', onClick: () => { ui.sendResult = null; render(); } }, 'Done');
+  const again = h('button', { class: 'btn-block mt8', onClick: () => { ui.sendResult = null; render(); } }, t('done'));
   if (r.signedHex) {
     return h(
       'div',
       { class: 'card col' },
-      h('div', { class: 'notice ok' }, '✓ Transaction signed. Broadcast the hex below from any online device (e.g. mempool.space → Broadcast).'),
-      h('div', { class: 'small muted' }, 'Transaction ID'),
+      h('div', { class: 'notice ok' }, t('txSignedNote')),
+      h('div', { class: 'small muted' }, t('transactionId')),
       h('div', { class: 'addr-box' }, r.txid),
-      h('div', { class: 'small muted mt8' }, 'Signed transaction (raw hex)'),
+      h('div', { class: 'small muted mt8' }, t('signedTxRaw')),
       h('textarea', { readonly: true, style: 'min-height:120px', value: r.signedHex }),
       h('div', { class: 'row gap6' },
-        copyBtn(r.signedHex, 'Copy hex'),
-        h('button', { class: 'btn-sm', onClick: () => download(`tx-${r.txid.slice(0, 8)}.txt`, r.signedHex, 'text/plain') }, 'Download'),
+        copyBtn(r.signedHex, t('copyHex')),
+        h('button', { class: 'btn-sm', onClick: () => download(`tx-${r.txid.slice(0, 8)}.txt`, r.signedHex, 'text/plain') }, t('downloadLabel')),
         h('div', { class: 'grow', html: '' })
       ),
-      h('details', { class: 'mt8' }, h('summary', { class: 'small muted' }, 'Show QR (for air-gapped transfer)'), h('div', { style: 'margin-top:10px', html: qrSvg(r.signedHex) })),
+      h('details', { class: 'mt8' }, h('summary', { class: 'small muted' }, t('showQrAirgap')), h('div', { style: 'margin-top:10px', html: qrSvg(r.signedHex) })),
       again
     );
   }
   return h(
     'div',
     { class: 'card col', style: 'align-items:center' },
-    h('div', { class: 'notice ok', style: 'width:100%' }, '✓ Transaction broadcast!'),
-    h('div', { class: 'small muted' }, 'Transaction ID'),
+    h('div', { class: 'notice ok', style: 'width:100%' }, t('txBroadcast')),
+    h('div', { class: 'small muted' }, t('transactionId')),
     h('div', { class: 'addr-box' }, r.txid),
     h('div', { class: 'row gap6' },
-      copyBtn(r.txid, 'Copy txid'),
-      h('a', { class: 'btn btn-sm', href: wallet.api.explorerTx(r.txid), target: '_blank', rel: 'noopener' }, 'View on mempool.space ↗')
+      copyBtn(r.txid, t('copyTxid')),
+      h('a', { class: 'btn btn-sm', href: wallet.api.explorerTx(r.txid), target: '_blank', rel: 'noopener' }, t('viewOnMempool'))
     ),
     again
   );
@@ -1009,73 +1101,87 @@ function sendResultView() {
 // ---------------------------------------------------------------- History
 function historyTab() {
   if (ui.txDetail) {
-    const t = wallet.txs.find((x) => x.txid === ui.txDetail);
-    if (t) return txDetailView(t);
+    const tx = wallet.txs.find((x) => x.txid === ui.txDetail);
+    if (tx) return txDetailView(tx);
     ui.txDetail = null;
   }
   if (wallet.offline)
-    return h('div', { class: 'card' }, h('p', { class: 'muted center', style: 'margin:0' }, 'Transaction history is unavailable in offline mode.'));
-  if (wallet.scanning && !wallet.loaded) return h('div', { class: 'card center' }, h('span', { class: 'spinner' }));
+    return h('div', { class: 'card' }, h('p', { class: 'muted center', style: 'margin:0' }, t('historyOffline')));
+  if ((wallet.scanning && !wallet.loaded) || (wallet.historyLoading && !wallet.txs.length))
+    return h(
+      'div',
+      { class: 'card center col', style: 'align-items:center;gap:10px' },
+      h('span', { class: 'spinner' }),
+      wallet.historyLoading ? h('p', { class: 'small muted', style: 'margin:0' }, t('loadingHistory')) : null
+    );
   if (!wallet.txs.length)
-    return h('div', { class: 'card' }, h('p', { class: 'muted center', style: 'margin:0' }, 'No transactions yet.'));
+    return h('div', { class: 'card' }, h('p', { class: 'muted center', style: 'margin:0' }, t('noTxYet')));
   return h(
     'div',
     { class: 'card' },
     h(
       'div',
       { class: 'list' },
-      wallet.txs.map((t) => {
-        const incoming = t.net >= 0;
+      wallet.txs.map((tx) => {
+        const incoming = tx.net >= 0;
         return h(
           'div',
-          { class: 'item', style: 'cursor:pointer', onClick: () => { ui.txDetail = t.txid; render(); } },
+          { class: 'item', style: 'cursor:pointer', onClick: () => { ui.txDetail = tx.txid; render(); } },
           h('div', { class: `ico ${incoming ? 'in' : 'out'}` }, incoming ? '↓' : '↑'),
           h('div', { class: 'grow' },
             h('div', { class: 'row gap6' },
-              incoming ? 'Received' : 'Sent',
-              t.confirmed ? null : h('span', { class: 'tag pending' }, '⏳ pending')
+              incoming ? t('received') : t('sent'),
+              tx.confirmed ? null : h('span', { class: 'tag pending' }, t('pendingTag'))
             ),
-            h('div', { class: 'small faint' }, t.confirmed ? timeAgo(t.blockTime) : 'awaiting confirmation')
+            h('div', { class: 'small faint' }, tx.confirmed ? timeAgo(tx.blockTime) : t('awaitingConfirmation'))
           ),
           h('div', { style: 'text-align:right' },
-            h('div', { class: incoming ? 'amount-pos' : 'amount-neg' }, (incoming ? '+' : '') + fmtAmount(t.net)),
-            !incoming && t.fee ? h('div', { class: 'small faint' }, `fee ${fmtAmount(t.fee)}`) : null
+            h('div', { class: incoming ? 'amount-pos' : 'amount-neg' }, (incoming ? '+' : '') + fmtAmount(tx.net)),
+            !incoming && tx.fee ? h('div', { class: 'small faint' }, t('feeShort', { x: fmtAmount(tx.fee) })) : null
           )
         );
       })
-    )
+    ),
+    wallet.historyLoading
+      ? h(
+          'div',
+          { class: 'row gap6', style: 'padding:10px 0 2px;justify-content:center' },
+          h('span', { class: 'spinner sm' }),
+          h('span', { class: 'small muted' }, t('loadingHistory'))
+        )
+      : null
   );
 }
 
-function txDetailView(t) {
-  const incoming = t.net >= 0;
+function txDetailView(tx) {
+  const incoming = tx.net >= 0;
   const line = (k, v) => h('div', { class: 'line' }, h('span', { class: 'k' }, k), h('span', { class: 'v' }, v));
   return h(
     'div',
     { class: 'card col' },
     h('div', { class: 'row between' },
-      h('h3', {}, incoming ? 'Received' : 'Sent'),
-      h('span', { class: `tag ${t.confirmed ? 'conf' : 'pending'}` }, t.confirmed ? 'confirmed' : '⏳ pending')
+      h('h3', {}, incoming ? t('received') : t('sent')),
+      h('span', { class: `tag ${tx.confirmed ? 'conf' : 'pending'}` }, tx.confirmed ? t('confirmedTag') : t('pendingTag'))
     ),
     h('div', { class: 'amt', style: 'font-size:30px' },
-      h('span', { class: incoming ? 'amount-pos' : 'amount-neg' }, (incoming ? '+' : '') + fmtAmount(t.net)),
+      h('span', { class: incoming ? 'amount-pos' : 'amount-neg' }, (incoming ? '+' : '') + fmtAmount(tx.net)),
       ' ', unitTag('unit')
     ),
     h('div', { class: 'summary col', style: 'gap:0' },
-      line('Status', t.confirmed ? 'Confirmed' : 'Pending (in mempool)'),
-      t.confirmed ? line('Block', String(t.blockHeight || '—')) : null,
-      t.confirmed && t.blockTime ? line('Date', new Date(t.blockTime * 1000).toLocaleString()) : null,
-      !incoming && t.fee ? line('Network fee', fmtAmount(t.fee) + ' ' + unitLabel()) : null
+      line(t('status'), tx.confirmed ? t('confirmed') : t('pendingInMempool')),
+      tx.confirmed ? line(t('block'), String(tx.blockHeight || '—')) : null,
+      tx.confirmed && tx.blockTime ? line(t('date'), new Date(tx.blockTime * 1000).toLocaleString()) : null,
+      !incoming && tx.fee ? line(t('networkFee'), fmtAmount(tx.fee) + ' ' + unitLabel()) : null
     ),
     h('div', { class: 'col gap6' },
-      h('span', { class: 'lab' }, 'Transaction ID'),
-      h('div', { class: 'addr-box', style: 'font-size:13px' }, t.txid)
+      h('span', { class: 'lab' }, t('transactionId')),
+      h('div', { class: 'addr-box', style: 'font-size:13px' }, tx.txid)
     ),
     h('div', { class: 'row gap6 wrap' },
-      copyBtn(t.txid, 'Copy ID'),
-      h('a', { class: 'btn btn-sm', href: wallet.api.explorerTx(t.txid), target: '_blank', rel: 'noopener' }, 'View on mempool.space ↗')
+      copyBtn(tx.txid, t('copyId')),
+      h('a', { class: 'btn btn-sm', href: wallet.api.explorerTx(tx.txid), target: '_blank', rel: 'noopener' }, t('viewOnMempool'))
     ),
-    h('button', { class: 'btn-ghost btn-block', onClick: () => { ui.txDetail = null; render(); } }, '← Back to history')
+    h('button', { class: 'btn-ghost btn-block', onClick: () => { ui.txDetail = null; render(); } }, t('backToHistory'))
   );
 }
 
@@ -1086,10 +1192,10 @@ function snapshotActions() {
     'div',
     { class: 'col gap6' },
     h('p', { class: 'small muted', style: 'margin:0' },
-      'Offline transfer — export your coins on an online device, then import the file on an offline device (with this wallet + seed) to sign without internet.'),
+      t('offlineTransferDesc')),
     h('div', { class: 'row gap6 wrap' },
-      h('button', { class: 'btn-sm', disabled: !wallet.utxos.length, onClick: exportSnapshot }, '⤓ Export snapshot'),
-      h('label', { class: 'btn btn-sm', style: 'cursor:pointer' }, 'Import snapshot…',
+      h('button', { class: 'btn-sm', disabled: !wallet.utxos.length, onClick: exportSnapshot }, t('exportSnapshot')),
+      h('label', { class: 'btn btn-sm', style: 'cursor:pointer' }, t('importSnapshot'),
         h('input', { type: 'file', accept: 'application/json,.json', style: 'display:none', onChange: importSnapshotFile })
       )
     )
@@ -1100,7 +1206,7 @@ function exportSnapshot() {
   const snap = wallet.exportSnapshot();
   const stamp = new Date().toISOString().slice(0, 10);
   download(`wallet-snapshot-${wallet.netName}-${stamp}.json`, JSON.stringify(snap, null, 2));
-  toast('Snapshot exported');
+  toast(t('snapshotExported'));
 }
 
 async function importSnapshotFile(e) {
@@ -1109,19 +1215,21 @@ async function importSnapshotFile(e) {
   try {
     const snap = JSON.parse(await file.text());
     const res = wallet.importSnapshot(snap);
-    let msg = `Imported ${res.imported} coin(s)`;
-    if (res.unmatched.length) msg += ` · ${res.unmatched.length} address(es) not in this wallet`;
+    let msg = t('importedNCoins', { n: res.imported });
+    if (res.unmatched.length) msg += t('unmatchedSuffix', { n: res.unmatched.length });
     toast(msg);
     ui.tab = 'settings';
     render();
   } catch (err) {
-    toast('Import failed: ' + err.message);
+    toast(t('importFailed', { msg: err.message }));
   }
   e.target.value = '';
 }
 
 // ================================================================ start
-// Restore a wallet left open in this tab; otherwise show the unlock screen.
+// Apply the detected/saved language direction, then restore a wallet left open
+// in this tab; otherwise show the unlock screen.
+applyDir();
 if (!restoreSession()) render();
 
 

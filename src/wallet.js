@@ -70,6 +70,7 @@ export class Wallet {
 
     this.scanning = false;
     this.loaded = false; // true once a scan/snapshot has populated balances once
+    this.historyLoading = false; // history is still being fetched in the background
     this._refreshing = false; // a scan/refresh is in flight
     this.nextReceiveIndex = 0;
     this.nextChangeIndex = 0;
@@ -206,10 +207,11 @@ export class Wallet {
       const cs = info.chain_stats || {};
       const ms = info.mempool_stats || {};
       const used = (cs.tx_count || 0) > 0 || (ms.tx_count || 0) > 0;
+      const hasMempool = (ms.tx_count || 0) > 0;
       // Balance straight from chain_stats — no need to fetch /utxo just to total.
       const confirmed = (cs.funded_txo_sum || 0) - (cs.spent_txo_sum || 0);
       const pending = (ms.funded_txo_sum || 0) - (ms.spent_txo_sum || 0);
-      found.push({ chain, index: i, address, used, confirmed, pending });
+      found.push({ chain, index: i, address, used, confirmed, pending, hasMempool });
       this.addrMap.set(address, { chain, index: i });
       if (used) {
         gap = 0;
@@ -336,8 +338,11 @@ export class Wallet {
     try {
       const prevBal = `${this.confirmed}|${this.pending}|${this.nextReceiveIndex}|${this.nextChangeIndex}`;
       this.addrMap = new Map();
-      this.receive = await this.scanChain(0);
-      this.change = await this.scanChain(1);
+      // Probe both chains at once — they're independent, so interleaving lets
+      // their per-hit delays overlap instead of running back-to-back.
+      const [receive, change] = await Promise.all([this.scanChain(0), this.scanChain(1)]);
+      this.receive = receive;
+      this.change = change;
       this.nextReceiveIndex = firstUnused(this.receive);
       this.nextChangeIndex = firstUnused(this.change);
       this._recomputeBalanceFromChains();
@@ -347,14 +352,23 @@ export class Wallet {
       const balanceChanged =
         `${this.confirmed}|${this.pending}|${this.nextReceiveIndex}|${this.nextChangeIndex}` !== prevBal;
       if (!silent || balanceChanged || !this.loaded) {
+        // Balance + receive address are already known from the chain_stats above.
+        // Show them right away so the wallet looks ready, then keep loading the
+        // heavier UTXO set and full history in the background.
+        if (!silent) {
+          this.loaded = true;
+          this.historyLoading = true;
+          this.emit();
+        }
         if (!silent || !this.feeRates) this.feeRates = await this.api.feeRates();
         await this.refreshUtxos();
-        await this.refreshHistory();
+        await this.refreshHistory(!silent);
       }
       this.loaded = true;
       this.saveCache();
     } finally {
       this._refreshing = false;
+      this.historyLoading = false; // clear even if an earlier step threw
       if (!silent) {
         this.scanning = false;
         this.emit();
@@ -369,7 +383,13 @@ export class Wallet {
   }
 
   async refreshUtxos() {
-    const used = this.usedAddresses();
+    // An address whose confirmed balance is 0 and which has no mempool activity
+    // is fully spent and settled — it cannot hold any UTXOs, so skip the /utxo
+    // round-trip for it. In a wallet with history most addresses are spent, so
+    // this avoids the bulk of the requests (and the 429s that come with them).
+    const used = this.usedAddresses().filter(
+      (a) => (a.confirmed || 0) > 0 || a.hasMempool
+    );
     const lists = await pool(used, (a) => this.api.addressUtxos(a.address));
     const utxos = [];
     used.forEach((a, idx) => {
@@ -418,17 +438,35 @@ export class Wallet {
     });
   }
 
-  async refreshHistory() {
+  // progressive: emit after each address resolves so the History tab fills in
+  // as transactions arrive (foreground load) instead of all at once at the end.
+  async refreshHistory(progressive = false) {
     const used = this.usedAddresses();
-    const lists = await pool(used, (a) => this.api.addressTxs(a.address));
-    const byId = new Map();
-    for (const list of lists) {
-      for (const tx of list) {
-        if (!byId.has(tx.txid)) byId.set(tx.txid, this._txSummary(tx));
-      }
+    this.historyLoading = true;
+    const seen = new Set(); // txids found in this pass (a tx can touch >1 address)
+    try {
+      await pool(used, async (a) => {
+        const list = await this.api.addressTxs(a.address);
+        let added = false;
+        for (const tx of list) {
+          if (seen.has(tx.txid)) continue;
+          seen.add(tx.txid);
+          const summary = this._txSummary(tx);
+          const at = this.txs.findIndex((t) => t.txid === tx.txid);
+          if (at >= 0) this.txs[at] = summary; // refresh confirmations/fee
+          else { this.txs.push(summary); added = true; }
+        }
+        if (added && progressive) {
+          this._sortTxs();
+          this.emit();
+        }
+      });
+      // Drop anything that no longer appears in any address's history.
+      this.txs = this.txs.filter((t) => seen.has(t.txid));
+      this._sortTxs();
+    } finally {
+      this.historyLoading = false;
     }
-    this.txs = [...byId.values()];
-    this._sortTxs();
   }
 
   // --- balances -----------------------------------------------------------

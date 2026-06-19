@@ -198,6 +198,7 @@ textarea { resize: vertical; min-height: 84px; font-family: var(--mono); font-si
   width: 18px; height: 18px; border: 2px solid var(--line-strong); border-top-color: var(--accent);
   border-radius: 50%; animation: spin .7s linear infinite; display: inline-block; vertical-align: middle;
 }
+.spinner.sm { width: 13px; height: 13px; border-width: 2px; }
 @keyframes spin { to { transform: rotate(360deg); } }
 .toast {
   position: fixed; left: 50%; bottom: 26px; transform: translateX(-50%);
@@ -229,6 +230,14 @@ textarea { resize: vertical; min-height: 84px; font-family: var(--mono); font-si
 hr.divider { margin: 16px 0; }
 .linklike { background: none; border: 0; padding: 0; color: var(--accent-ink); font-weight: 600; cursor: pointer; }
 .linklike:hover { text-decoration: underline; background: none; }
+
+/* ---- how it works ---- */
+.lead { font-size: 16px; line-height: 1.5; color: var(--ink); }
+.hiw-tech { border-top: 1px solid var(--line); padding-top: 14px; }
+.hiw-tech > summary { font-weight: 650; cursor: pointer; list-style: none; color: var(--accent-ink); display: flex; align-items: center; gap: 7px; }
+.hiw-tech > summary::-webkit-details-marker { display: none; }
+.hiw-tech > summary::before { content: '▸'; font-size: 12px; transition: transform .15s; }
+.hiw-tech[open] > summary::before { transform: rotate(90deg); }
 
 @media (max-width: 420px) {
   .words { grid-template-columns: repeat(2, 1fr); }
