@@ -221,7 +221,7 @@ function howItWorksScreen() {
     ui.screen = ui.returnScreen === 'wallet' ? 'wallet' : 'unlock';
     render();
   };
-  const para = (key) => h('p', { class: 'muted', style: 'margin:0' }, t(key));
+  const para = (key) => h('p', { class: 'muted', style: 'margin:0' }, ...linkify(t(key)));
   return h(
     'div',
     { class: 'col', style: 'gap:16px' },
@@ -242,14 +242,31 @@ function howItWorksScreen() {
           { class: 'col', style: 'gap:12px;margin-top:12px' },
           para('hiwTech1'),
           para('hiwTech2'),
-          para('hiwTech3'),
-          para('hiwTech4'),
-          para('hiwTech5')
+          para('hiwTech4')
         )
       )
     ),
     h('button', { class: 'btn-block', onClick: back }, t('back'))
   );
+}
+
+// Turn known tokens (e.g. mempool.space) into links within a plain string,
+// returning an array of text + anchor nodes. Keeps i18n strings link-free.
+const HIW_LINKS = [['mempool.space', 'https://mempool.space']];
+function linkify(text) {
+  const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const re = new RegExp('(' + HIW_LINKS.map(([tok]) => esc(tok)).join('|') + ')', 'g');
+  const out = [];
+  let last = 0;
+  let m;
+  while ((m = re.exec(text))) {
+    if (m.index > last) out.push(text.slice(last, m.index));
+    const href = HIW_LINKS.find(([tok]) => tok === m[0])[1];
+    out.push(h('a', { href, target: '_blank', rel: 'noopener' }, m[0]));
+    last = m.index + m[0].length;
+  }
+  if (last < text.length) out.push(text.slice(last));
+  return out;
 }
 
 function tabBtn(label, active, onClick) {
