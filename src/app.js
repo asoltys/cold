@@ -229,11 +229,9 @@ function howItWorksScreen() {
     h(
       'div',
       { class: 'card col', style: 'gap:14px' },
-      h('p', { class: 'lead', style: 'margin:0' }, t('hiwLead')),
       h('h3', {}, t('hiwBasicsTitle')),
       para('hiwBasics1'),
       para('hiwBasics2'),
-      para('hiwBasics3'),
       para('hiwBasics4'),
       h(
         'details',
@@ -416,14 +414,13 @@ function optionsPanel() {
   return h(
     'label',
     { class: 'field' },
-    h('span', { class: 'lab' }, t('optionalPassphrase')),
+    h('span', { class: 'lab' }, t('passphrase')),
     h(
       'div',
       { class: 'input-group' },
       h('input', {
         type: ui.showPass ? 'text' : 'password',
         class: 'mono-input',
-        placeholder: t('leaveBlank'),
         autocomplete: 'off',
         value: ui.passphrase,
         onInput: (e) => (ui.passphrase = e.target.value),
