@@ -651,7 +651,7 @@ function settingsTab() {
         ? h('div', { class: 'row gap6 wrap' },
             copyBtn(wallet.mnemonic, t('copyPhrase')),
             wallet.passphrase ? copyBtn(wallet.passphrase, t('copyPassphrase')) : null,
-            h('button', { class: 'grow', onClick: () => { ui.revealShown = false; render(); } }, t('hide'))
+            h('button', { class: 'btn-sm grow', onClick: () => { ui.revealShown = false; render(); } }, t('hide'))
           )
         : h('button', { class: 'btn-primary btn-block', onClick: () => { ui.revealShown = true; render(); } }, t('revealRecovery'))
     ),
