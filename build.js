@@ -1,8 +1,13 @@
-// Build a single, self-contained dist/index.html.
+// Build a single, self-contained dist/index.html (plus PWA sidecar files).
 //
 // Everything — app code, the @scure/@noble crypto libs, the QR generator, and
 // all CSS — is bundled and inlined so the result is one file you can save and
 // open offline straight from the filesystem (file://). No server, no network.
+//
+// For the hosted site we also emit a web manifest, icons, and a small service
+// worker so the page can be installed as a PWA and still work offline once
+// installed. index.html stays self-contained; these are optional extras that
+// simply 404 (harmlessly) when the file is opened on its own from file://.
 
 import { mkdir } from 'node:fs/promises';
 
@@ -12,7 +17,81 @@ const FAVICON =
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="7" fill="#f7931a"/><text x="16" y="23" font-size="20" font-family="Arial" font-weight="bold" text-anchor="middle" fill="#fff">₿</text></svg>`
   );
 
-export async function buildHtml({ minify = true } = {}) {
+// Static assets copied verbatim into dist/ (icons referenced by the manifest).
+const STATIC = ['icon-192.png', 'icon-512.png', 'icon-maskable-512.png', 'icon.svg'];
+
+const MANIFEST = {
+  id: '/',
+  name: 'Bitcoin Wallet',
+  short_name: 'Bitcoin',
+  description: 'Self-custody Bitcoin wallet that runs entirely in your browser.',
+  start_url: './',
+  scope: './',
+  display: 'standalone',
+  background_color: '#eef0f3',
+  theme_color: '#f7931a',
+  icons: [
+    { src: 'icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
+    { src: 'icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'any' },
+    { src: 'icon-maskable-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
+  ],
+};
+
+// Service worker: precache the app shell, network-first for the page (so a new
+// deploy shows up), cache-first for the icons/manifest, and never touch the
+// cross-origin explorer/Nostr requests. CACHE carries a build token so each
+// deploy supersedes the previous cache. {{VERSION}} is filled in at build time.
+const SW = `const CACHE = 'cold-{{VERSION}}';
+const SHELL = ['./', 'manifest.webmanifest', 'icon-192.png', 'icon-512.png'];
+
+self.addEventListener('install', (e) => {
+  self.skipWaiting();
+  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)));
+});
+
+self.addEventListener('activate', (e) => {
+  e.waitUntil(
+    caches
+      .keys()
+      .then((keys) => Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k))))
+      .then(() => self.clients.claim())
+  );
+});
+
+self.addEventListener('fetch', (e) => {
+  const req = e.request;
+  if (req.method !== 'GET') return;
+  if (new URL(req.url).origin !== self.location.origin) return; // explorer/ws → network
+
+  if (req.mode === 'navigate') {
+    e.respondWith(
+      fetch(req)
+        .then((res) => {
+          const copy = res.clone();
+          caches.open(CACHE).then((c) => c.put('./', copy));
+          return res;
+        })
+        .catch(() => caches.match('./'))
+    );
+    return;
+  }
+  e.respondWith(caches.match(req).then((hit) => hit || fetch(req)));
+});
+`;
+
+const PWA_HEAD = `<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#f7931a">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Bitcoin Wallet">
+<link rel="apple-touch-icon" href="icon-192.png">
+`;
+
+const SW_REGISTER =
+  `<script>if('serviceWorker'in navigator)addEventListener('load',function(){navigator.serviceWorker.register('sw.js').catch(function(){})});</script>`;
+
+export async function buildHtml({ minify = true, pwa = minify } = {}) {
   const result = await Bun.build({
     entrypoints: ['./src/app.js'],
     target: 'browser',
@@ -35,12 +114,12 @@ export async function buildHtml({ minify = true } = {}) {
 <meta name="color-scheme" content="light">
 <title>Bitcoin Wallet</title>
 <link rel="icon" href="${FAVICON}">
-<style>${css}</style>
+${pwa ? PWA_HEAD : ''}<style>${css}</style>
 </head>
 <body>
 <div id="app"></div>
 <script>${js}</script>
-</body>
+${pwa ? SW_REGISTER + '\n' : ''}</body>
 </html>`;
 }
 
@@ -48,6 +127,14 @@ if (import.meta.main) {
   await mkdir('dist', { recursive: true });
   const html = await buildHtml({ minify: true });
   await Bun.write('dist/index.html', html);
+
+  // PWA sidecars.
+  await Bun.write('dist/manifest.webmanifest', JSON.stringify(MANIFEST, null, 2));
+  const version = Bun.hash(html).toString(36);
+  await Bun.write('dist/sw.js', SW.replace('{{VERSION}}', version));
+  for (const f of STATIC) await Bun.write('dist/' + f, Bun.file('static/' + f));
+
   const kb = (Buffer.byteLength(html) / 1024).toFixed(0);
   console.log(`✓ dist/index.html written (${kb} KB) — open it offline, no server needed`);
+  console.log(`✓ PWA: manifest.webmanifest, sw.js (cold-${version}), ${STATIC.length} icons`);
 }

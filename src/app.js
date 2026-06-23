@@ -466,6 +466,10 @@ async function enterWallet(mnemonic, passphrase) {
   const hadCache = wallet.restoreCache(); // show last-known balance/history instantly
   ui.screen = 'wallet';
   ui.tab = 'receive';
+  // Not baselined yet — stays null until the scan + ack logic below sets it,
+  // so the celebration never fires for payments that were already there at
+  // import (the index only looks "advanced" because the scan hadn't run yet).
+  ui.receiveSeenIndex = null;
   ui.send = blankSend();
   ui.draft = null;
   ui.sendResult = null;
@@ -760,11 +764,12 @@ function tabContent() {
 
 // ---------------------------------------------------------------- Receive
 function receiveTab() {
-  if (ui.receiveSeenIndex == null) ui.receiveSeenIndex = wallet.nextReceiveIndex;
-
   // A payment landed on the shown address (the fresh index advanced past what
   // the user last saw) — celebrate, and wait for a tap before showing the next.
-  if (wallet.nextReceiveIndex > ui.receiveSeenIndex) {
+  // Until receiveSeenIndex has been baselined (post-scan, in enterWallet) it
+  // stays null and we never celebrate, so importing a wallet with existing
+  // history doesn't flash "payment received" for old payments.
+  if (ui.receiveSeenIndex != null && wallet.nextReceiveIndex > ui.receiveSeenIndex) {
     let amt = 0;
     for (let i = ui.receiveSeenIndex; i < wallet.nextReceiveIndex; i++) {
       const e = wallet._addrInfo(0, i);
@@ -837,7 +842,7 @@ function recipientRow(s, r, i) {
           r.amount = v;
         },
       }),
-      h('button', { type: 'button', class: 'btn-sm', title: t('switchUnit'), onClick: toggleUnit }, unitLabel()),
+      h('button', { type: 'button', title: t('switchUnit'), onClick: toggleUnit }, unitLabel()),
       single && h('button', { type: 'button', class: s.max ? 'btn-primary' : '', onClick: () => { s.max = !s.max; render(); } }, t('max'))
     )
   );
