@@ -93,9 +93,42 @@ function footer() {
     h(
       'div',
       { style: 'margin-top:4px' },
-      h('button', { class: 'linklike', style: 'font-weight:400', onClick: openHowItWorks }, t('howItWorks'))
+      h('button', { class: 'linklike', style: 'font-weight:400', onClick: openHowItWorks }, t('howItWorks')),
+      // Chrome no longer prompts to install on its own — surface our own link
+      // once it reports the app is installable (beforeinstallprompt fired).
+      installPrompt
+        ? h('span', {}, h('span', { class: 'faint' }, ' · '),
+            h('button', { class: 'linklike', style: 'font-weight:400', onClick: triggerInstall }, t('installApp')))
+        : null
     )
   );
+}
+
+// PWA install. Chrome fires beforeinstallprompt when the app qualifies; we stash
+// the event and reveal an "Install app" link, then replay it on a user tap (the
+// browser requires a gesture). beforeinstallprompt only fires when not already
+// installed, so the link naturally hides once installed.
+let installPrompt = null;
+if (typeof window !== 'undefined') {
+  window.addEventListener('beforeinstallprompt', (e) => {
+    e.preventDefault();
+    installPrompt = e;
+    render();
+  });
+  window.addEventListener('appinstalled', () => {
+    installPrompt = null;
+    render();
+  });
+}
+async function triggerInstall() {
+  const e = installPrompt;
+  if (!e) return;
+  installPrompt = null;
+  render();
+  e.prompt();
+  try {
+    await e.userChoice;
+  } catch {}
 }
 
 // Open the How it works page, remembering where to return to.

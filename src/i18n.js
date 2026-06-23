@@ -60,6 +60,7 @@ const STR = {
     invalidSeed: 'Invalid seed phrase — check the spelling and word order.',
     keysNote: 'Keys never leave your browser. Works fully offline. Save this page and open it from your filesystem.',
     howItWorks: 'How it works',
+    installApp: 'Install app',
     hiwBasicsTitle: 'The basics',
     hiwBasics1: 'When you make a wallet, the page generates twelve random words. Those words are the key to your wallet. Anyone who has them can spend the coins, so write them down on paper and keep them somewhere only you can get to.',
     hiwBasics2: 'Everything happens on your device. There’s no server keeping your balance and nobody holding your coins for you. The words stay in your browser, and the page still works when you’re offline.',
