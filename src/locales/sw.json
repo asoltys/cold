@@ -165,7 +165,9 @@
   "claimedBody": "Bitcoin yako inakuja. Hifadhi kifungu chako cha kurejesha ili kuilinda.",
   "giftLinkReveal": "Tengeneza kiungo cha zawadi",
   "copyLink": "Nakili kiungo",
-  "giftRevoke": "Batilisha",
-  "giftRevokeConfirm": "Batilisha zawadi hii? Hii inarudisha sarafu kwenye pochi yako na kiungo kinaacha kufanya kazi.",
-  "giftRevoked": "Zawadi imebatilishwa"
+  "giftRevoke": "Batilisha sasa",
+  "giftRevoked": "Zawadi imebatilishwa",
+  "giftReclaim": "Rudisha",
+  "giftReclaimPrompt": "Kurudisha hufungua sarafu hii kwa malipo yako yajayo, lakini kiungo kinabaki kinaweza kudaiwa hadi uitumie. Badala yake ulipe ada ya mtandao kuibatilisha sasa hivi?",
+  "giftReclaimed": "Sarafu imerudishwa"
 }

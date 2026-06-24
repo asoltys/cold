@@ -165,7 +165,9 @@
   "claimedBody": "Bitcoin이 전송되고 있습니다. 안전하게 보관하려면 복구 문구를 백업하세요.",
   "giftLinkReveal": "선물 링크 만들기",
   "copyLink": "링크 복사",
-  "giftRevoke": "취소",
-  "giftRevokeConfirm": "이 선물을 취소할까요? 코인이 지갑으로 돌아가고 링크가 작동하지 않게 됩니다.",
-  "giftRevoked": "선물이 취소됨"
+  "giftRevoke": "지금 취소",
+  "giftRevoked": "선물이 취소됨",
+  "giftReclaim": "회수",
+  "giftReclaimPrompt": "회수하면 이 코인을 다음 결제에 쓸 수 있지만, 코인을 쓰기 전까지 링크는 청구 가능합니다. 대신 네트워크 수수료를 내고 지금 바로 취소할까요?",
+  "giftReclaimed": "코인 회수됨"
 }

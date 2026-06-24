@@ -755,18 +755,19 @@ function giftCard() {
             const label = u ? fmtAmount(u.value) + ' ' + unitLabel() : id.slice(0, 12) + '…';
             if (ui.revokeId === id) {
               return h('div', { class: 'col gap6' },
-                h('span', { class: 'small muted' }, t('giftRevokeConfirm')),
-                h('div', { class: 'row gap6' },
-                  ui.busy
-                    ? h('button', { class: 'btn-primary grow', disabled: true }, h('span', { class: 'spinner' }))
-                    : h('button', { class: 'btn-primary grow', onClick: () => doRevoke(id) }, t('giftRevoke')),
-                  h('button', { class: 'btn-ghost grow', onClick: () => { ui.revokeId = null; render(); } }, t('back'))
-                )
+                h('span', { class: 'small muted' }, t('giftReclaimPrompt')),
+                ui.busy
+                  ? h('button', { class: 'btn-primary btn-block', disabled: true }, h('span', { class: 'spinner' }))
+                  : h('div', { class: 'row gap6' },
+                      h('button', { class: 'btn-ghost grow', onClick: () => doReclaim(id) }, t('giftReclaim')),
+                      h('button', { class: 'btn-primary grow', onClick: () => doRevoke(id) }, t('giftRevoke'))
+                    ),
+                ui.busy ? null : h('button', { class: 'btn-ghost btn-block', onClick: () => { ui.revokeId = null; render(); } }, t('back'))
               );
             }
             return h('div', { class: 'row between' },
               h('span', { class: 'small mono' }, label),
-              h('button', { class: 'btn-sm', onClick: () => { ui.revokeId = id; render(); } }, t('giftRevoke'))
+              h('button', { class: 'btn-sm', onClick: () => { ui.revokeId = id; render(); } }, t('giftReclaim'))
             );
           })
         )
@@ -774,6 +775,16 @@ function giftCard() {
   );
 }
 
+// Passive reclaim: just free the coin for a future payment (no fee, no
+// broadcast). The link stays claimable until the coin is actually spent.
+function doReclaim(id) {
+  wallet.unreserve(id);
+  ui.revokeId = null;
+  toast(t('giftReclaimed'));
+  render();
+}
+
+// Active revoke: spend the coin back now (pays a fee), killing the link.
 async function doRevoke(id) {
   if (wallet.offline) { toast(t('scanOffline')); return; }
   ui.busy = true;

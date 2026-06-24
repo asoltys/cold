@@ -165,7 +165,9 @@
   "claimedBody": "你的 Bitcoin 正在到账。请备份你的恢复助记词以妥善保管。",
   "giftLinkReveal": "创建赠送链接",
   "copyLink": "复制链接",
-  "giftRevoke": "撤销",
-  "giftRevokeConfirm": "撤销此礼物？这会将这笔币退回你的钱包，并使链接失效。",
-  "giftRevoked": "礼物已撤销"
+  "giftRevoke": "立即撤销",
+  "giftRevoked": "礼物已撤销",
+  "giftReclaim": "收回",
+  "giftReclaimPrompt": "收回会释放这笔币用于你的下一次付款，但在你花掉它之前链接仍可被领取。改为支付网络手续费立即撤销？",
+  "giftReclaimed": "已收回"
 }

@@ -165,7 +165,9 @@
   "claimedBody": "Bitcoin が間もなく届きます。安全に保つため、復元フレーズをバックアップしてください。",
   "giftLinkReveal": "ギフトリンクを作成",
   "copyLink": "リンクをコピー",
-  "giftRevoke": "取り消す",
-  "giftRevokeConfirm": "このギフトを取り消しますか？コインがウォレットに戻り、リンクは無効になります。",
-  "giftRevoked": "ギフトを取り消しました"
+  "giftRevoke": "今すぐ取り消す",
+  "giftRevoked": "ギフトを取り消しました",
+  "giftReclaim": "取り戻す",
+  "giftReclaimPrompt": "取り戻すと次の支払いにこのコインを使えますが、使うまでリンクは請求可能なままです。代わりにネットワーク手数料を払って今すぐ取り消しますか？",
+  "giftReclaimed": "コインを取り戻しました"
 }

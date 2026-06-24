@@ -165,7 +165,9 @@
   "claimedBody": "Bitcoin của bạn đang trên đường tới. Hãy sao lưu cụm từ khôi phục để giữ an toàn.",
   "giftLinkReveal": "Tạo liên kết tặng",
   "copyLink": "Sao chép liên kết",
-  "giftRevoke": "Thu hồi",
-  "giftRevokeConfirm": "Thu hồi quà này? Việc này chuyển đồng coin về ví của bạn và khiến liên kết ngừng hoạt động.",
-  "giftRevoked": "Đã thu hồi quà"
+  "giftRevoke": "Thu hồi ngay",
+  "giftRevoked": "Đã thu hồi quà",
+  "giftReclaim": "Thu lại",
+  "giftReclaimPrompt": "Thu lại giải phóng đồng coin này cho lần thanh toán tới, nhưng liên kết vẫn có thể nhận được cho đến khi bạn tiêu nó. Trả phí mạng để thu hồi ngay bây giờ thay vào đó?",
+  "giftReclaimed": "Đã thu lại coin"
 }

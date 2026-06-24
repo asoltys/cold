@@ -165,7 +165,9 @@
   "claimFailed": "Este regalo ya ha sido reclamado o ya no está disponible.",
   "claimedTitle": "¡Reclamado!",
   "claimedBody": "Tu Bitcoin está en camino. Haz una copia de seguridad de tu frase de recuperación para mantenerlo a salvo.",
-  "giftRevoke": "Revocar",
-  "giftRevokeConfirm": "¿Revocar este regalo? Esto devuelve la moneda a tu monedero y desactiva el enlace.",
-  "giftRevoked": "Regalo revocado"
+  "giftRevoke": "Revocar ahora",
+  "giftRevoked": "Regalo revocado",
+  "giftReclaim": "Reclamar",
+  "giftReclaimPrompt": "Reclamar libera esta moneda para tu próximo pago, pero el enlace seguirá siendo reclamable hasta que la gastes. ¿Pagar una comisión de red para revocarlo ahora mismo?",
+  "giftReclaimed": "Moneda reclamada"
 }

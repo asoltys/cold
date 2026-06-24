@@ -165,7 +165,9 @@
   "claimedBody": "Bitcoin Anda sedang dalam perjalanan. Cadangkan frasa pemulihan Anda agar tetap aman.",
   "giftLinkReveal": "Buat tautan hadiah",
   "copyLink": "Salin tautan",
-  "giftRevoke": "Cabut",
-  "giftRevokeConfirm": "Cabut hadiah ini? Ini mengembalikan koin ke dompet Anda dan menonaktifkan tautannya.",
-  "giftRevoked": "Hadiah dicabut"
+  "giftRevoke": "Cabut sekarang",
+  "giftRevoked": "Hadiah dicabut",
+  "giftReclaim": "Tarik kembali",
+  "giftReclaimPrompt": "Menarik kembali membebaskan koin ini untuk pembayaran berikutnya, tetapi tautan tetap bisa diklaim sampai Anda membelanjakannya. Bayar biaya jaringan untuk mencabutnya sekarang?",
+  "giftReclaimed": "Koin ditarik kembali"
 }

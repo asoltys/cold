@@ -165,7 +165,9 @@
   "claimFailed": "Dieses Geschenk wurde bereits beansprucht oder ist nicht mehr verfügbar.",
   "claimedTitle": "Beansprucht!",
   "claimedBody": "Dein Bitcoin ist unterwegs. Sichere deine Wiederherstellungsphrase, um es zu schützen.",
-  "giftRevoke": "Widerrufen",
-  "giftRevokeConfirm": "Dieses Geschenk widerrufen? Die Münze geht zurück in deine Wallet und der Link funktioniert nicht mehr.",
-  "giftRevoked": "Geschenk widerrufen"
+  "giftRevoke": "Jetzt widerrufen",
+  "giftRevoked": "Geschenk widerrufen",
+  "giftReclaim": "Zurückholen",
+  "giftReclaimPrompt": "Zurückholen gibt diese Münze für deine nächste Zahlung frei, aber der Link bleibt einlösbar, bis du sie ausgibst. Stattdessen eine Netzwerkgebühr zahlen, um ihn jetzt zu widerrufen?",
+  "giftReclaimed": "Münze zurückgeholt"
 }

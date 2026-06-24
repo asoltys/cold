@@ -165,7 +165,9 @@
   "claimedBody": "Bitcoin’iniz yolda. Güvende tutmak için kurtarma ifadenizi yedekleyin.",
   "giftLinkReveal": "Hediye bağlantısı oluştur",
   "copyLink": "Bağlantıyı kopyala",
-  "giftRevoke": "İptal et",
-  "giftRevokeConfirm": "Bu hediye iptal edilsin mi? Bu, parayı cüzdanınıza geri gönderir ve bağlantıyı devre dışı bırakır.",
-  "giftRevoked": "Hediye iptal edildi"
+  "giftRevoke": "Şimdi iptal et",
+  "giftRevoked": "Hediye iptal edildi",
+  "giftReclaim": "Geri al",
+  "giftReclaimPrompt": "Geri almak bu parayı bir sonraki ödemen için serbest bırakır, ancak sen harcayana kadar bağlantı talep edilebilir kalır. Bunun yerine şimdi iptal etmek için ağ ücreti ödensin mi?",
+  "giftReclaimed": "Para geri alındı"
 }

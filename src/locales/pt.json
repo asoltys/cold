@@ -165,7 +165,9 @@
   "claimFailed": "Este presente já foi resgatado ou não está mais disponível.",
   "claimedTitle": "Resgatado!",
   "claimedBody": "Seus Bitcoin estão a caminho. Faça backup da sua frase de recuperação para mantê-los seguros.",
-  "giftRevoke": "Revogar",
-  "giftRevokeConfirm": "Revogar este presente? Isso devolve a moeda à sua carteira e o link para de funcionar.",
-  "giftRevoked": "Presente revogado"
+  "giftRevoke": "Revogar agora",
+  "giftRevoked": "Presente revogado",
+  "giftReclaim": "Recuperar",
+  "giftReclaimPrompt": "Recuperar libera esta moeda para o seu próximo pagamento, mas o link continua resgatável até você gastá-la. Pagar uma taxa de rede para revogá-lo agora?",
+  "giftReclaimed": "Moeda recuperada"
 }

@@ -165,7 +165,9 @@
   "claimFailed": "Ce cadeau a déjà été réclamé ou n’est plus disponible.",
   "claimedTitle": "Récupéré !",
   "claimedBody": "Vos Bitcoin sont en route. Sauvegardez votre phrase de récupération pour les garder en sécurité.",
-  "giftRevoke": "Révoquer",
-  "giftRevokeConfirm": "Révoquer ce cadeau ? La pièce revient dans votre portefeuille et le lien cesse de fonctionner.",
-  "giftRevoked": "Cadeau révoqué"
+  "giftRevoke": "Révoquer maintenant",
+  "giftRevoked": "Cadeau révoqué",
+  "giftReclaim": "Récupérer",
+  "giftReclaimPrompt": "Récupérer libère cette pièce pour votre prochain paiement, mais le lien reste réclamable jusqu’à ce que vous la dépensiez. Payer des frais de réseau pour le révoquer tout de suite ?",
+  "giftReclaimed": "Pièce récupérée"
 }
