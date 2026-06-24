@@ -157,7 +157,7 @@
   "giftAmountLabel": "贈る金額",
   "giftAmountInvalid": "有効な金額を入力してください。",
   "giftAnother": "もう一つ作成",
-  "giftReserved": "未受取のギフト用に {n} のコインを確保中",
+  "giftReserved": "未請求のギフトリンク（{n}）",
   "claimBody": "あなただけが管理できる真新しいウォレットに受け取りましょう。",
   "claimBtn": "受け取る",
   "claimFailed": "このギフトはすでに受け取られたか、現在利用できません。",
@@ -169,5 +169,7 @@
   "giftRevoked": "ギフトを取り消しました",
   "giftReclaim": "取り戻す",
   "giftReclaimPrompt": "取り戻すと次の支払いにこのコインを使えますが、使うまでリンクは請求可能なままです。代わりにネットワーク手数料を払って今すぐ取り消しますか？",
-  "giftReclaimed": "コインを取り戻しました"
+  "giftReclaimed": "コインを取り戻しました",
+  "giftRevokeConfirm": "このギフトを今すぐ取り消しますか？コインがウォレットに戻り、リンクが無効になります。",
+  "giftReclaimedTag": "まだ請求可能"
 }

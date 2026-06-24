@@ -157,7 +157,7 @@
   "giftAmountLabel": "Kiasi cha kutoa zawadi",
   "giftAmountInvalid": "Ingiza kiasi sahihi.",
   "giftAnother": "Tengeneza nyingine",
-  "giftReserved": "{n} sarafu imewekwa kando kwa zawadi ambazo hazijadaiwa",
+  "giftReserved": "Viungo vya zawadi visivyodaiwa ({n})",
   "claimBody": "Idai kwenye pochi mpya kabisa unayoidhibiti wewe pekee.",
   "claimBtn": "Idai",
   "claimFailed": "Zawadi hii tayari imedaiwa au haipatikani tena.",
@@ -169,5 +169,7 @@
   "giftRevoked": "Zawadi imebatilishwa",
   "giftReclaim": "Rudisha",
   "giftReclaimPrompt": "Kurudisha hufungua sarafu hii kwa malipo yako yajayo, lakini kiungo kinabaki kinaweza kudaiwa hadi uitumie. Badala yake ulipe ada ya mtandao kuibatilisha sasa hivi?",
-  "giftReclaimed": "Sarafu imerudishwa"
+  "giftReclaimed": "Sarafu imerudishwa",
+  "giftRevokeConfirm": "Batilisha zawadi hii sasa? Hii inarudisha sarafu kwenye pochi yako na kuzima kiungo.",
+  "giftReclaimedTag": "bado inaweza kudaiwa"
 }

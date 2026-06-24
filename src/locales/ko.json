@@ -157,7 +157,7 @@
   "giftAmountLabel": "선물할 금액",
   "giftAmountInvalid": "올바른 금액을 입력하세요.",
   "giftAnother": "또 만들기",
-  "giftReserved": "받지 않은 선물을 위해 따로 둔 코인 {n}개",
+  "giftReserved": "청구되지 않은 선물 링크 ({n})",
   "claimBody": "자신만 통제하는 완전히 새로운 지갑으로 받으세요.",
   "claimBtn": "받기",
   "claimFailed": "이 선물은 이미 수령되었거나 더 이상 이용할 수 없습니다.",
@@ -169,5 +169,7 @@
   "giftRevoked": "선물이 취소됨",
   "giftReclaim": "회수",
   "giftReclaimPrompt": "회수하면 이 코인을 다음 결제에 쓸 수 있지만, 코인을 쓰기 전까지 링크는 청구 가능합니다. 대신 네트워크 수수료를 내고 지금 바로 취소할까요?",
-  "giftReclaimed": "코인 회수됨"
+  "giftReclaimed": "코인 회수됨",
+  "giftRevokeConfirm": "이 선물을 지금 취소할까요? 코인이 지갑으로 돌아가고 링크가 비활성화됩니다.",
+  "giftReclaimedTag": "아직 청구 가능"
 }

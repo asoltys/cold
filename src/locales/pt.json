@@ -159,7 +159,7 @@
   "giftAmountLabel": "Valor a presentear",
   "giftAmountInvalid": "Digite um valor válido.",
   "giftAnother": "Criar outro",
-  "giftReserved": "{n} de moeda reservada para presentes não resgatados",
+  "giftReserved": "Links de presente não resgatados ({n})",
   "claimBody": "Resgate para uma carteira novinha que só você controla.",
   "claimBtn": "Resgatar",
   "claimFailed": "Este presente já foi resgatado ou não está mais disponível.",
@@ -169,5 +169,7 @@
   "giftRevoked": "Presente revogado",
   "giftReclaim": "Recuperar",
   "giftReclaimPrompt": "Recuperar libera esta moeda para o seu próximo pagamento, mas o link continua resgatável até você gastá-la. Pagar uma taxa de rede para revogá-lo agora?",
-  "giftReclaimed": "Moeda recuperada"
+  "giftReclaimed": "Moeda recuperada",
+  "giftRevokeConfirm": "Revogar este presente agora? Isso devolve a moeda à sua carteira e desativa o link.",
+  "giftReclaimedTag": "ainda resgatável"
 }

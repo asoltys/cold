@@ -157,7 +157,7 @@
   "giftAmountLabel": "Jumlah yang dihadiahkan",
   "giftAmountInvalid": "Masukkan jumlah yang valid.",
   "giftAnother": "Buat lagi",
-  "giftReserved": "{n} koin disisihkan untuk hadiah yang belum diklaim",
+  "giftReserved": "Tautan hadiah belum diklaim ({n})",
   "claimBody": "Klaim ke dompet baru yang hanya Anda kendalikan.",
   "claimBtn": "Klaim",
   "claimFailed": "Hadiah ini sudah diklaim atau tidak lagi tersedia.",
@@ -169,5 +169,7 @@
   "giftRevoked": "Hadiah dicabut",
   "giftReclaim": "Tarik kembali",
   "giftReclaimPrompt": "Menarik kembali membebaskan koin ini untuk pembayaran berikutnya, tetapi tautan tetap bisa diklaim sampai Anda membelanjakannya. Bayar biaya jaringan untuk mencabutnya sekarang?",
-  "giftReclaimed": "Koin ditarik kembali"
+  "giftReclaimed": "Koin ditarik kembali",
+  "giftRevokeConfirm": "Cabut hadiah ini sekarang? Ini mengembalikan koin ke dompet Anda dan menonaktifkan tautannya.",
+  "giftReclaimedTag": "masih bisa diklaim"
 }

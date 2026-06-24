@@ -157,7 +157,7 @@
   "giftAmountLabel": "Hediye edilecek tutar",
   "giftAmountInvalid": "Geçerli bir tutar girin.",
   "giftAnother": "Bir tane daha oluştur",
-  "giftReserved": "Talep edilmemiş hediyeler için {n} coin ayrıldı",
+  "giftReserved": "Talep edilmemiş hediye bağlantıları ({n})",
   "claimBody": "Yalnızca kendi kontrolünüzdeki yepyeni bir cüzdana alın.",
   "claimBtn": "Talep et",
   "claimFailed": "Bu hediye zaten talep edilmiş veya artık kullanılamıyor.",
@@ -169,5 +169,7 @@
   "giftRevoked": "Hediye iptal edildi",
   "giftReclaim": "Geri al",
   "giftReclaimPrompt": "Geri almak bu parayı bir sonraki ödemen için serbest bırakır, ancak sen harcayana kadar bağlantı talep edilebilir kalır. Bunun yerine şimdi iptal etmek için ağ ücreti ödensin mi?",
-  "giftReclaimed": "Para geri alındı"
+  "giftReclaimed": "Para geri alındı",
+  "giftRevokeConfirm": "Bu hediye şimdi iptal edilsin mi? Bu, parayı cüzdanınıza geri gönderir ve bağlantıyı devre dışı bırakır.",
+  "giftReclaimedTag": "hâlâ talep edilebilir"
 }

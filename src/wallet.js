@@ -120,7 +120,8 @@ export class Wallet {
     this.api.offline = offline;
     this._account = null;
     this._addrCache.clear();
-    this._reserved = null; // gift-reserved outpoints, lazy-loaded per wallet
+    this._reserved = null; // gift coins set aside from spending (lazy-loaded)
+    this._reclaimed = null; // gift coins freed for spending but link still live
     this._savedAt = 0;
     try {
       if (this.mnemonic) this.nostr.load(this.mnemonic, this.passphrase);
@@ -759,33 +760,47 @@ export class Wallet {
     return { hex: t.hex, txid: t.id, fee: pl.fee, oldFee: prep.oldFee, feeRate: pl.rate, outputs, replaces: prep.txid };
   }
 
-  // --- gift links (coins set aside as claimable presigned transactions) ----
-  // Outpoints reserved for unclaimed gifts are persisted per-wallet and skipped
-  // by normal coin selection so a send can't spend a gift out from under it.
+  // --- gift links (coins backing claimable presigned transactions) ---------
+  // A gift coin is either RESERVED (set aside, skipped by coin selection) or
+  // RECLAIMED (freed for spending, but its link stays live until the coin is
+  // actually spent). Both are "outstanding"; both are persisted per-wallet.
   _giftKey() {
     return this._cacheKey() + ':gift';
   }
-  reservedSet() {
-    if (!this._reserved) {
-      try {
-        this._reserved = new Set(JSON.parse(localStorage.getItem(this._giftKey()) || '[]'));
-      } catch {
-        this._reserved = new Set();
-      }
+  _reclaimedKey() {
+    return this._cacheKey() + ':giftfree';
+  }
+  _loadSet(key) {
+    try {
+      return new Set(JSON.parse(localStorage.getItem(key) || '[]'));
+    } catch {
+      return new Set();
     }
+  }
+  reservedSet() {
+    if (!this._reserved) this._reserved = this._loadSet(this._giftKey());
     return this._reserved;
+  }
+  reclaimedSet() {
+    if (!this._reclaimed) this._reclaimed = this._loadSet(this._reclaimedKey());
+    return this._reclaimed;
   }
   isReserved(id) {
     return this.reservedSet().has(id);
   }
   _saveReserved() {
-    try {
-      localStorage.setItem(this._giftKey(), JSON.stringify([...this.reservedSet()]));
-    } catch {}
+    try { localStorage.setItem(this._giftKey(), JSON.stringify([...this.reservedSet()])); } catch {}
   }
+  _saveReclaimed() {
+    try { localStorage.setItem(this._reclaimedKey(), JSON.stringify([...this.reclaimedSet()])); } catch {}
+  }
+  // Passive reclaim: free the coin for spending but keep tracking the live link
+  // so it can still be revoked later (until the coin is spent).
   unreserve(id) {
     this.reservedSet().delete(id);
+    this.reclaimedSet().add(id);
     this._saveReserved();
+    this._saveReclaimed();
   }
 
   // Truly revoke an unclaimed gift: spend its coin back into our own wallet,
@@ -795,16 +810,27 @@ export class Wallet {
     const draft = this.buildTx({ recipients: [{ address: this.freshChange().address }], feeRate, coinIds: [id], sendMax: true });
     const hexTx = this.sign(draft.tx);
     const txid = await this.broadcast(hexTx);
-    this.unreserve(id);
+    this.reservedSet().delete(id);
+    this.reclaimedSet().delete(id);
+    this._saveReserved();
+    this._saveReclaimed();
     return txid;
   }
-  // Active gifts whose coin is still unspent (drops claimed/spent ones).
-  activeGifts() {
+  // Outstanding gifts (reserved + reclaimed) whose coin is still unspent; prunes
+  // any whose coin has since been claimed/spent. { id, reserved, value }.
+  outstandingGifts() {
     const live = new Set(this.utxos.map((u) => utxoId(u)));
+    const res = this.reservedSet();
+    const rec = this.reclaimedSet();
     let changed = false;
-    for (const id of [...this.reservedSet()]) if (!live.has(id)) { this.reservedSet().delete(id); changed = true; }
-    if (changed) this._saveReserved();
-    return [...this.reservedSet()];
+    for (const id of [...res]) if (!live.has(id)) { res.delete(id); changed = true; }
+    for (const id of [...rec]) if (!live.has(id)) { rec.delete(id); changed = true; }
+    if (changed) { this._saveReserved(); this._saveReclaimed(); }
+    return [...new Set([...res, ...rec])].map((id) => ({
+      id,
+      reserved: res.has(id),
+      value: (this.utxos.find((u) => utxoId(u) === id) || {}).value,
+    }));
   }
 
   // Build a SIGHASH_SINGLE-signed gift: input = a single coin, output0 = change

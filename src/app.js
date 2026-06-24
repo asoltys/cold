@@ -722,7 +722,7 @@ function createGiftLink() {
   render();
 }
 function giftCard() {
-  const active = wallet.activeGifts();
+  const active = wallet.outstandingGifts();
   return h(
     'div',
     { class: 'card col' },
@@ -750,24 +750,24 @@ function giftCard() {
     active.length
       ? h('div', { class: 'col gap6', style: 'margin-top:4px' },
           h('span', { class: 'small muted' }, t('giftReserved', { n: active.length })),
-          ...active.map((id) => {
-            const u = wallet.utxos.find((x) => utxoId(x) === id);
-            const label = u ? fmtAmount(u.value) + ' ' + unitLabel() : id.slice(0, 12) + '…';
-            if (ui.revokeId === id) {
+          ...active.map((g) => {
+            const amt = g.value != null ? fmtAmount(g.value) + ' ' + unitLabel() : g.id.slice(0, 12) + '…';
+            const label = amt + (g.reserved ? '' : ' · ' + t('giftReclaimedTag'));
+            if (ui.revokeId === g.id) {
               return h('div', { class: 'col gap6' },
-                h('span', { class: 'small muted' }, t('giftReclaimPrompt')),
+                h('span', { class: 'small muted' }, g.reserved ? t('giftReclaimPrompt') : t('giftRevokeConfirm')),
                 ui.busy
                   ? h('button', { class: 'btn-primary btn-block', disabled: true }, h('span', { class: 'spinner' }))
                   : h('div', { class: 'row gap6' },
-                      h('button', { class: 'btn-ghost grow', onClick: () => doReclaim(id) }, t('giftReclaim')),
-                      h('button', { class: 'btn-primary grow', onClick: () => doRevoke(id) }, t('giftRevoke'))
+                      g.reserved ? h('button', { class: 'btn-ghost grow', onClick: () => doReclaim(g.id) }, t('giftReclaim')) : null,
+                      h('button', { class: 'btn-primary grow', onClick: () => doRevoke(g.id) }, t('giftRevoke'))
                     ),
                 ui.busy ? null : h('button', { class: 'btn-ghost btn-block', onClick: () => { ui.revokeId = null; render(); } }, t('back'))
               );
             }
             return h('div', { class: 'row between' },
               h('span', { class: 'small mono' }, label),
-              h('button', { class: 'btn-sm', onClick: () => { ui.revokeId = id; render(); } }, t('giftReclaim'))
+              h('button', { class: 'btn-sm', onClick: () => { ui.revokeId = g.id; render(); } }, g.reserved ? t('giftReclaim') : t('giftRevoke'))
             );
           })
         )

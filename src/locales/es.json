@@ -159,7 +159,7 @@
   "giftAmountLabel": "Importe a regalar",
   "giftAmountInvalid": "Introduce un importe válido.",
   "giftAnother": "Crear otro",
-  "giftReserved": "{n} de monedas reservadas para regalos sin reclamar",
+  "giftReserved": "Enlaces de regalo sin reclamar ({n})",
   "claimBody": "Reclámalo en una billetera totalmente nueva que solo tú controlas.",
   "claimBtn": "Reclamarlo",
   "claimFailed": "Este regalo ya ha sido reclamado o ya no está disponible.",
@@ -169,5 +169,7 @@
   "giftRevoked": "Regalo revocado",
   "giftReclaim": "Reclamar",
   "giftReclaimPrompt": "Reclamar libera esta moneda para tu próximo pago, pero el enlace seguirá siendo reclamable hasta que la gastes. ¿Pagar una comisión de red para revocarlo ahora mismo?",
-  "giftReclaimed": "Moneda reclamada"
+  "giftReclaimed": "Moneda reclamada",
+  "giftRevokeConfirm": "¿Revocar este regalo ahora? Esto devuelve la moneda a tu monedero y desactiva el enlace.",
+  "giftReclaimedTag": "aún reclamable"
 }

@@ -157,7 +157,7 @@
   "giftAmountLabel": "赠送金额",
   "giftAmountInvalid": "请输入有效金额。",
   "giftAnother": "再创建一个",
-  "giftReserved": "{n} 枚币已预留给未领取的礼物",
+  "giftReserved": "未领取的礼物链接（{n}）",
   "claimBody": "将它领取到一个仅由你自己掌控的全新钱包中。",
   "claimBtn": "领取",
   "claimFailed": "此礼物已被领取或不再可用。",
@@ -169,5 +169,7 @@
   "giftRevoked": "礼物已撤销",
   "giftReclaim": "收回",
   "giftReclaimPrompt": "收回会释放这笔币用于你的下一次付款，但在你花掉它之前链接仍可被领取。改为支付网络手续费立即撤销？",
-  "giftReclaimed": "已收回"
+  "giftReclaimed": "已收回",
+  "giftRevokeConfirm": "立即撤销此礼物？这会将这笔币退回你的钱包并使链接失效。",
+  "giftReclaimedTag": "仍可领取"
 }

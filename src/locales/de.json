@@ -159,7 +159,7 @@
   "giftAmountLabel": "Zu verschenkender Betrag",
   "giftAmountInvalid": "Gib einen gültigen Betrag ein.",
   "giftAnother": "Weiteres erstellen",
-  "giftReserved": "{n} Coin für unbeanspruchte Geschenke zurückgelegt",
+  "giftReserved": "Nicht eingelöste Geschenk-Links ({n})",
   "claimBody": "Beanspruche es in einer brandneuen Wallet, die nur du selbst kontrollierst.",
   "claimBtn": "Beanspruchen",
   "claimFailed": "Dieses Geschenk wurde bereits beansprucht oder ist nicht mehr verfügbar.",
@@ -169,5 +169,7 @@
   "giftRevoked": "Geschenk widerrufen",
   "giftReclaim": "Zurückholen",
   "giftReclaimPrompt": "Zurückholen gibt diese Münze für deine nächste Zahlung frei, aber der Link bleibt einlösbar, bis du sie ausgibst. Stattdessen eine Netzwerkgebühr zahlen, um ihn jetzt zu widerrufen?",
-  "giftReclaimed": "Münze zurückgeholt"
+  "giftReclaimed": "Münze zurückgeholt",
+  "giftRevokeConfirm": "Dieses Geschenk jetzt widerrufen? Die Münze geht zurück in deine Wallet und der Link wird deaktiviert.",
+  "giftReclaimedTag": "noch einlösbar"
 }

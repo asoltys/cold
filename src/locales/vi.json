@@ -157,7 +157,7 @@
   "giftAmountLabel": "Số tiền muốn tặng",
   "giftAmountInvalid": "Nhập một số tiền hợp lệ.",
   "giftAnother": "Tạo cái khác",
-  "giftReserved": "{n} coin được để dành cho các món quà chưa nhận",
+  "giftReserved": "Liên kết quà chưa nhận ({n})",
   "claimBody": "Nhận nó vào một ví hoàn toàn mới mà chỉ riêng bạn kiểm soát.",
   "claimBtn": "Nhận ngay",
   "claimFailed": "Món quà này đã được nhận hoặc không còn khả dụng.",
@@ -169,5 +169,7 @@
   "giftRevoked": "Đã thu hồi quà",
   "giftReclaim": "Thu lại",
   "giftReclaimPrompt": "Thu lại giải phóng đồng coin này cho lần thanh toán tới, nhưng liên kết vẫn có thể nhận được cho đến khi bạn tiêu nó. Trả phí mạng để thu hồi ngay bây giờ thay vào đó?",
-  "giftReclaimed": "Đã thu lại coin"
+  "giftReclaimed": "Đã thu lại coin",
+  "giftRevokeConfirm": "Thu hồi quà này ngay? Việc này chuyển đồng coin về ví của bạn và vô hiệu hóa liên kết.",
+  "giftReclaimedTag": "vẫn có thể nhận"
 }
