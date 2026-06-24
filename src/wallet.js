@@ -587,6 +587,7 @@ export class Wallet {
         ...pay,
         txid: u.txid,
         index: u.vout,
+        sequence: 0xfffffffd, // signal opt-in RBF (BIP125) so sends are bumpable
         witnessUtxo: { script: pay.script, amount: BigInt(u.value) },
       };
     });
@@ -665,6 +666,82 @@ export class Wallet {
       outputs.push({ address, value: Number(o.amount) });
     }
     return { txid: tx.id, total, outputs };
+  }
+
+  // Build + sign an RBF replacement of an unconfirmed outgoing tx at a higher
+  // fee rate. Reuses the original inputs and recipient outputs, taking the extra
+  // fee from the change output (pulling in a confirmed coin if change can't
+  // cover it). Returns a signed draft { hex, txid, fee, oldFee, feeRate, outputs }.
+  async bumpTx(origTxid, feeRate) {
+    const orig = await this.api.getTx(origTxid);
+    if (orig.status && orig.status.confirmed) throw new Error('Transaction already confirmed.');
+
+    // Every input of our own send is ours; reconstruct them with values + paths.
+    const ins = [];
+    let totalIn = 0;
+    for (const vin of orig.vin || []) {
+      const a = vin.prevout && vin.prevout.scriptpubkey_address;
+      const p = a && this.addrMap.get(a);
+      if (!p) throw new Error('Can only bump your own transactions.');
+      totalIn += vin.prevout.value;
+      ins.push({ txid: vin.txid, vout: vin.vout, value: vin.prevout.value, chain: p.chain, index: p.index });
+    }
+
+    // Split outputs: our first change-chain output is the change we'll shrink;
+    // everything else is a recipient and stays fixed.
+    const recipients = [];
+    let outTotal = 0;
+    let changeSeen = false;
+    for (const o of orig.vout || []) {
+      outTotal += o.value;
+      const p = o.scriptpubkey_address && this.addrMap.get(o.scriptpubkey_address);
+      if (p && p.chain === 1 && !changeSeen) { changeSeen = true; continue; }
+      recipients.push({ address: o.scriptpubkey_address, value: o.value });
+    }
+    const recipTotal = recipients.reduce((s, r) => s + r.value, 0);
+    const oldFee = totalIn - outTotal;
+
+    const rate = Math.max(1, Math.round(feeRate));
+    const DUST = 294; // p2wpkh dust
+    const vsizeOf = (nIn, nOut) => 11 + 68 * nIn + 31 * nOut;
+    const usedIds = new Set(ins.map((i) => `${i.txid}:${i.vout}`));
+    const spare = this.utxos.filter((u) => u.confirmed && !usedIds.has(utxoId(u)));
+    const extra = [];
+
+    const plan = () => {
+      const nIn = ins.length + extra.length;
+      const inAmt = totalIn + extra.reduce((s, u) => s + u.value, 0);
+      let nOut = recipients.length + 1;
+      let fee = Math.ceil(vsizeOf(nIn, nOut) * rate);
+      let change = inAmt - recipTotal - fee;
+      if (change < DUST) { nOut = recipients.length; fee = inAmt - recipTotal; change = 0; }
+      // BIP125: beat old fee by at least the replacement's vsize (incremental relay).
+      const minFee = oldFee + vsizeOf(nIn, nOut);
+      if (change > 0 && fee < minFee) {
+        fee = minFee; change = inAmt - recipTotal - fee;
+        if (change < DUST) { fee = inAmt - recipTotal; change = 0; }
+      }
+      return { inAmt, fee, change, ok: inAmt - recipTotal >= fee && fee > oldFee };
+    };
+    let pl = plan();
+    while (!pl.ok && spare.length) { extra.push(spare.shift()); pl = plan(); }
+    if (!pl.ok) throw new Error('Not enough funds to bump at this rate. Try a lower rate or CPFP.');
+
+    const allIns = [...ins, ...extra.map((u) => ({ txid: u.txid, vout: u.vout, value: u.value, chain: u.chain, index: u.index }))];
+    const t = new btc.Transaction();
+    for (const i of allIns) {
+      const pay = p2wpkh(this.derive(i.chain, i.index).pubkey, this.netCfg.net);
+      t.addInput({ ...pay, txid: i.txid, index: i.vout, sequence: 0xfffffffd, witnessUtxo: { script: pay.script, amount: BigInt(i.value) } });
+    }
+    for (const r of recipients) t.addOutputAddress(r.address, BigInt(r.value), this.netCfg.net);
+    const changeAddr = this.freshChange().address;
+    if (pl.change > 0) t.addOutputAddress(changeAddr, BigInt(pl.change), this.netCfg.net);
+    for (let k = 0; k < allIns.length; k++) t.signIdx(this.node(allIns[k].chain, allIns[k].index).privateKey, k);
+    t.finalize();
+
+    const outputs = recipients.map((r) => ({ address: r.address, value: r.value }));
+    if (pl.change > 0) outputs.push({ address: changeAddr, value: pl.change, change: true });
+    return { hex: t.hex, txid: t.id, fee: pl.fee, oldFee, feeRate: rate, outputs, replaces: origTxid };
   }
 
   // --- realtime (mempool.space WebSocket) ---------------------------------

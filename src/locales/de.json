@@ -141,5 +141,8 @@
   "copy": "Kopieren",
   "switchUnit": "BTC / sats wechseln",
   "footerMadeBy": "gemacht von",
-  "footerSourceOn": "Quellcode auf"
+  "footerSourceOn": "Quellcode auf",
+  "bumpFee": "Gebühr erhöhen",
+  "bumpConfirm": "Mit höherer Gebühr ersetzen?",
+  "replaceTx": "Ersetzen"
 }

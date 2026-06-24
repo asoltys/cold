@@ -141,5 +141,8 @@
   "copy": "نسخ",
   "switchUnit": "تبديل BTC / sats",
   "footerMadeBy": "صُنع بواسطة",
-  "footerSourceOn": "الكود المصدري على"
+  "footerSourceOn": "الكود المصدري على",
+  "bumpFee": "رفع الرسوم",
+  "bumpConfirm": "استبدال برسوم أعلى؟",
+  "replaceTx": "استبدال"
 }

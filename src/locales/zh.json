@@ -141,5 +141,8 @@
   "copy": "复制",
   "switchUnit": "切换 BTC / sats",
   "footerMadeBy": "制作者",
-  "footerSourceOn": "源代码见"
+  "footerSourceOn": "源代码见",
+  "bumpFee": "提高手续费",
+  "bumpConfirm": "用更高手续费替换？",
+  "replaceTx": "替换"
 }

@@ -141,5 +141,8 @@
   "copy": "Nakili",
   "switchUnit": "Badilisha BTC / sats",
   "footerMadeBy": "imetengenezwa na",
-  "footerSourceOn": "msimbo unapatikana"
+  "footerSourceOn": "msimbo unapatikana",
+  "bumpFee": "Ongeza ada",
+  "bumpConfirm": "Badilisha kwa ada ya juu zaidi?",
+  "replaceTx": "Badilisha"
 }

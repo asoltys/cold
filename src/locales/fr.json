@@ -141,5 +141,8 @@
   "copy": "Copier",
   "switchUnit": "Basculer BTC / sats",
   "footerMadeBy": "fait par",
-  "footerSourceOn": "code source sur"
+  "footerSourceOn": "code source sur",
+  "bumpFee": "Augmenter les frais",
+  "bumpConfirm": "Remplacer avec des frais plus élevés ?",
+  "replaceTx": "Remplacer"
 }

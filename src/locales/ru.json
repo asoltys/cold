@@ -141,5 +141,8 @@
   "copy": "Копировать",
   "switchUnit": "Переключить BTC / sats",
   "footerMadeBy": "сделано —",
-  "footerSourceOn": "исходный код на"
+  "footerSourceOn": "исходный код на",
+  "bumpFee": "Поднять комиссию",
+  "bumpConfirm": "Заменить с более высокой комиссией?",
+  "replaceTx": "Заменить"
 }

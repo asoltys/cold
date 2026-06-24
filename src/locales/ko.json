@@ -141,5 +141,8 @@
   "copy": "복사",
   "switchUnit": "BTC / sats 전환",
   "footerMadeBy": "만든 사람:",
-  "footerSourceOn": "소스 공개:"
+  "footerSourceOn": "소스 공개:",
+  "bumpFee": "수수료 올리기",
+  "bumpConfirm": "더 높은 수수료로 교체할까요?",
+  "replaceTx": "교체"
 }

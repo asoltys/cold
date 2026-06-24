@@ -1008,7 +1008,7 @@ function broadcastConfirmView() {
   return h(
     'div',
     { class: 'card col' },
-    h('h3', {}, t('broadcastScanned')),
+    h('h3', {}, b.bump ? t('bumpConfirm') : t('broadcastScanned')),
     h(
       'div',
       { class: 'summary col', style: 'gap:0' },
@@ -1018,6 +1018,11 @@ function broadcastConfirmView() {
           h('span', { class: 'v' }, fmtAmount(o.value), ' ', unitTag())
         )
       ),
+      b.bump
+        ? h('div', { class: 'line' },
+            h('span', { class: 'k' }, t('networkFee')),
+            h('span', { class: 'v' }, fmtAmount(b.bump.oldFee) + ' → ' + fmtAmount(b.bump.newFee) + ' ' + unitLabel()))
+        : null,
       h('div', { class: 'line' },
         h('span', { class: 'k' }, t('transactionId')),
         h('span', { class: 'v mono break' }, shortTxid(b.txid))
@@ -1028,9 +1033,29 @@ function broadcastConfirmView() {
       h('button', { class: 'btn-ghost', onClick: () => { ui.broadcastTx = null; ui.sendError = ''; render(); } }, t('back')),
       ui.busy
         ? h('button', { class: 'btn-primary grow', disabled: true }, h('span', { class: 'spinner' }))
-        : h('button', { class: 'btn-primary grow', onClick: broadcastScanned }, t('broadcastNow'))
+        : h('button', { class: 'btn-primary grow', onClick: broadcastScanned }, b.bump ? t('replaceTx') : t('broadcastNow'))
     )
   );
+}
+
+// Build a higher-fee RBF replacement of an unconfirmed send and route it to the
+// broadcast confirmation. Bumps to the Priority rate.
+async function bumpFee(txid) {
+  if (wallet.offline) { toast(t('scanOffline')); return; }
+  const rate = (wallet.feeRates && wallet.feeRates.fastestFee) || 10;
+  ui.busy = true;
+  render();
+  try {
+    const d = await wallet.bumpTx(txid, rate);
+    ui.broadcastTx = { hex: d.hex, txid: d.txid, outputs: d.outputs, bump: { oldFee: d.oldFee, newFee: d.fee } };
+    ui.txDetail = null;
+    ui.tab = 'send';
+    ui.sendError = '';
+  } catch (e) {
+    toast(e.message);
+  }
+  ui.busy = false;
+  render();
 }
 
 async function broadcastScanned() {
@@ -1480,6 +1505,12 @@ function txDetailView(tx) {
       copyBtn(tx.txid, t('copyId')),
       h('a', { class: 'btn btn-sm', href: wallet.api.explorerTx(tx.txid), target: '_blank', rel: 'noopener' }, t('viewOnMempool'))
     ),
+    // RBF: an unconfirmed send can be rebroadcast at a higher fee.
+    !tx.confirmed && !incoming && !wallet.offline
+      ? (ui.busy
+          ? h('button', { class: 'btn-primary btn-block', disabled: true }, h('span', { class: 'spinner' }))
+          : h('button', { class: 'btn-primary btn-block', onClick: () => bumpFee(tx.txid) }, t('bumpFee')))
+      : null,
     h('button', { class: 'btn-ghost btn-block', onClick: () => { ui.txDetail = null; render(); } }, t('backToHistory'))
   );
 }

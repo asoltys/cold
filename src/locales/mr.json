@@ -141,5 +141,8 @@
   "copy": "कॉपी",
   "switchUnit": "BTC / sats बदला",
   "footerMadeBy": "द्वारे बनवले",
-  "footerSourceOn": "सोर्स येथे"
+  "footerSourceOn": "सोर्स येथे",
+  "bumpFee": "फी वाढवा",
+  "bumpConfirm": "जास्त फीसह बदला?",
+  "replaceTx": "बदला"
 }

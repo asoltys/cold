@@ -200,6 +200,11 @@ export class Api {
     return this.#get(`/address/${address}/txs`);
   }
 
+  // Full transaction (vin with prevouts, vout, status) — used for fee bumping.
+  getTx(txid) {
+    return this.#get(`/tx/${txid}`);
+  }
+
   async feeRates() {
     for (const host of this._hosts) {
       if (host.cooldownUntil > Date.now()) continue;

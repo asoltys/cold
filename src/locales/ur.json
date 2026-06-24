@@ -141,5 +141,8 @@
   "copy": "کاپی",
   "switchUnit": "BTC / sats بدلیں",
   "footerMadeBy": "بنایا از",
-  "footerSourceOn": "سورس کوڈ یہاں"
+  "footerSourceOn": "سورس کوڈ یہاں",
+  "bumpFee": "فیس بڑھائیں",
+  "bumpConfirm": "زیادہ فیس کے ساتھ بدلیں؟",
+  "replaceTx": "بدلیں"
 }

@@ -141,5 +141,8 @@
   "copy": "Kopyala",
   "switchUnit": "BTC / sats değiştir",
   "footerMadeBy": "yapan:",
-  "footerSourceOn": "kaynak kodu"
+  "footerSourceOn": "kaynak kodu",
+  "bumpFee": "Ücreti artır",
+  "bumpConfirm": "Daha yüksek ücretle değiştirilsin mi?",
+  "replaceTx": "Değiştir"
 }

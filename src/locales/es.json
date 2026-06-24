@@ -141,5 +141,8 @@
   "copy": "Copiar",
   "switchUnit": "Cambiar BTC / sats",
   "footerMadeBy": "hecho por",
-  "footerSourceOn": "código disponible en"
+  "footerSourceOn": "código disponible en",
+  "bumpFee": "Aumentar comisión",
+  "bumpConfirm": "¿Reemplazar con una comisión más alta?",
+  "replaceTx": "Reemplazar"
 }

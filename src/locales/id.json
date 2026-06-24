@@ -141,5 +141,8 @@
   "copy": "Salin",
   "switchUnit": "Ganti BTC / sats",
   "footerMadeBy": "dibuat oleh",
-  "footerSourceOn": "sumber tersedia di"
+  "footerSourceOn": "sumber tersedia di",
+  "bumpFee": "Naikkan biaya",
+  "bumpConfirm": "Ganti dengan biaya lebih tinggi?",
+  "replaceTx": "Ganti"
 }

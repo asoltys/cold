@@ -141,5 +141,8 @@
   "copy": "కాపీ",
   "switchUnit": "BTC / sats మార్చు",
   "footerMadeBy": "తయారు చేసినవారు",
-  "footerSourceOn": "సోర్స్ ఇక్కడ"
+  "footerSourceOn": "సోర్స్ ఇక్కడ",
+  "bumpFee": "ఫీజు పెంచు",
+  "bumpConfirm": "ఎక్కువ ఫీజుతో భర్తీ చేయాలా?",
+  "replaceTx": "భర్తీ చేయి"
 }

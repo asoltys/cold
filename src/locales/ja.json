@@ -141,5 +141,8 @@
   "copy": "コピー",
   "switchUnit": "BTC / sats を切替",
   "footerMadeBy": "作成者:",
-  "footerSourceOn": "ソースは"
+  "footerSourceOn": "ソースは",
+  "bumpFee": "手数料を上げる",
+  "bumpConfirm": "より高い手数料で置き換えますか？",
+  "replaceTx": "置き換える"
 }

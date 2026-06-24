@@ -141,5 +141,8 @@
   "copy": "Sao chép",
   "switchUnit": "Đổi BTC / sats",
   "footerMadeBy": "làm bởi",
-  "footerSourceOn": "mã nguồn tại"
+  "footerSourceOn": "mã nguồn tại",
+  "bumpFee": "Tăng phí",
+  "bumpConfirm": "Thay thế với phí cao hơn?",
+  "replaceTx": "Thay thế"
 }

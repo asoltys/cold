@@ -141,5 +141,8 @@
   "copy": "நகலெடு",
   "switchUnit": "BTC / sats மாற்று",
   "footerMadeBy": "உருவாக்கியவர்",
-  "footerSourceOn": "மூலம்"
+  "footerSourceOn": "மூலம்",
+  "bumpFee": "கட்டணத்தை உயர்த்து",
+  "bumpConfirm": "அதிக கட்டணத்துடன் மாற்றவா?",
+  "replaceTx": "மாற்று"
 }

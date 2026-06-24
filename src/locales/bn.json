@@ -141,5 +141,8 @@
   "copy": "কপি",
   "switchUnit": "BTC / sats পাল্টান",
   "footerMadeBy": "তৈরি করেছেন",
-  "footerSourceOn": "সোর্স কোড"
+  "footerSourceOn": "সোর্স কোড",
+  "bumpFee": "ফি বাড়ান",
+  "bumpConfirm": "বেশি ফি দিয়ে প্রতিস্থাপন করবেন?",
+  "replaceTx": "প্রতিস্থাপন"
 }
