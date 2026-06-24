@@ -67,6 +67,7 @@ const STR = {
     hiwBasics3: 'There’s no server and no account. The whole app is a single page that runs in your browser, so nobody holds your coins and nothing on a server ever sees your keys. To show your balance and history it reads from a public block explorer (mempool.space by default, or your own node if you set one in Settings).',
     hiwBasics4: 'You can even save this page and open it straight from your computer with no internet at all. It keeps working offline.',
     hiwBasics5: 'It follows the usual Bitcoin standards (a 12-word BIP39 phrase and BIP84 native SegWit keys), so if this site ever disappears you can restore the same phrase in Sparrow, Electrum, or any other standard wallet and your coins will be right there.',
+    hiwTribute: 'The name Hal Wallet is a tribute to legendary cypherpunk and Bitcoin pioneer, Hal Finney (1956–2014).',
     balance: 'Balance',
     pending: 'Pending',
     tabReceive: 'Receive',

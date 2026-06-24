@@ -271,7 +271,8 @@ function howItWorksScreen() {
       para('hiwBasics2'),
       para('hiwBasics3'),
       para('hiwBasics4'),
-      para('hiwBasics5')
+      para('hiwBasics5'),
+      h('p', { class: 'small muted hiw-tribute', style: 'margin:0' }, ...linkify(t('hiwTribute')))
     ),
     h('button', { class: 'btn-block', onClick: back }, t('back'))
   );
@@ -279,7 +280,10 @@ function howItWorksScreen() {
 
 // Turn known tokens (e.g. mempool.space) into links within a plain string,
 // returning an array of text + anchor nodes. Keeps i18n strings link-free.
-const HIW_LINKS = [['mempool.space', 'https://mempool.space']];
+const HIW_LINKS = [
+  ['mempool.space', 'https://mempool.space'],
+  ['Hal Finney', 'https://en.wikipedia.org/wiki/Hal_Finney_(computer_scientist)'],
+];
 function linkify(text) {
   const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const re = new RegExp('(' + HIW_LINKS.map(([tok]) => esc(tok)).join('|') + ')', 'g');
