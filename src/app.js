@@ -4,7 +4,7 @@
 // which rebuilds the active screen. Text inputs write back into `ui` on `input`
 // (without re-rendering) so their values survive structural re-renders.
 
-import { Wallet, newMnemonic, isValidMnemonic, utxoId } from './wallet.js';
+import { Wallet, newMnemonic, isValidMnemonic, utxoId, encodeGift, decodeGift } from './wallet.js';
 import { qrSvg } from './qr.js';
 import { scanQr } from './scan.js';
 import { getSyncConfig, setSyncConfig } from './nostr.js';
@@ -23,7 +23,8 @@ import {
 const wallet = new Wallet();
 
 const ui = {
-  screen: 'unlock', // 'unlock' | 'wallet' | 'howItWorks'
+  screen: 'unlock', // 'unlock' | 'wallet' | 'claim' | 'howItWorks'
+  claimStep: null, // 'welcome' | 'backup' when opening a gift link
   returnScreen: 'unlock', // where 'howItWorks' returns to (Back / logo)
   unlockTab: 'create', // 'create' | 'import'
   createStep: 'gen', // 'gen' | 'confirm'
@@ -34,6 +35,7 @@ const ui = {
   passphrase: '',
   showPass: false,
   revealShown: false, // recovery phrase unmasked on the Backup tab (after the warning)
+  giftShown: false, // gift link revealed in Settings
   offlineFallback: false, // auto-entered offline because the network was unreachable
   unlockError: '',
 
@@ -148,9 +150,11 @@ function render() {
   const screen =
     ui.screen === 'wallet'
       ? walletScreen()
-      : ui.screen === 'howItWorks'
-        ? howItWorksScreen()
-        : unlockScreen();
+      : ui.screen === 'claim'
+        ? claimScreen()
+        : ui.screen === 'howItWorks'
+          ? howItWorksScreen()
+          : unlockScreen();
   root.replaceChildren(screen, footer());
 }
 wallet.subscribe(render);
@@ -492,11 +496,13 @@ async function openWallet(mnemonic) {
 
 // Load a wallet and start scanning. Persists to sessionStorage so a refresh
 // restores the open wallet (cleared on logout or when the tab closes).
-async function enterWallet(mnemonic, passphrase) {
+async function enterWallet(mnemonic, passphrase, opts = {}) {
   wallet.load({ mnemonic, passphrase, netName: 'mainnet', offline: false });
   persistSession(mnemonic, passphrase);
   const hadCache = wallet.restoreCache(); // show last-known balance/history instantly
-  ui.screen = 'wallet';
+  // A claimed gift link starts on a welcome/back-up screen instead of the wallet.
+  ui.screen = opts.claim ? 'claim' : 'wallet';
+  ui.claimStep = 'welcome';
   ui.tab = 'receive';
   // Not baselined yet — stays null until the scan + ack logic below sets it,
   // so the celebration never fires for payments that were already there at
@@ -598,6 +604,7 @@ function lock() {
   ui.passphrase = '';
   ui.confirm = [];
   ui.revealShown = false;
+  ui.giftShown = false;
   ui.receiveSeenIndex = null;
   ui.txDetail = null;
   ui.broadcastTx = null;
@@ -675,6 +682,7 @@ function settingsTab() {
             wallet.scanning ? t('scanning') : t('rescanWallet'))
     ),
     explorerCard(),
+    giftCard(),
     syncCard(),
     h(
       'div',
@@ -682,6 +690,32 @@ function settingsTab() {
       h('h3', {}, t('language')),
       languagePicker()
     )
+  );
+}
+
+// Gift link: turn this whole wallet into a #claim= link (seed in the URL
+// fragment) for quick onboarding. Gated behind a reveal + warning, since the
+// link is bearer — whoever opens it controls the funds.
+function giftUrl() {
+  return `${location.origin}/#claim=${encodeGift(wallet.mnemonic, wallet.passphrase)}`;
+}
+function giftCard() {
+  return h(
+    'div',
+    { class: 'card col' },
+    h('h3', {}, t('giftLink')),
+    h('p', { class: 'small muted', style: 'margin:0' }, t('giftLinkDesc')),
+    h('div', { class: 'warn-box' }, t('giftLinkWarn')),
+    ui.giftShown
+      ? h('div', { class: 'col', style: 'align-items:center;gap:10px' },
+          h('div', { html: qrSvg(giftUrl()) }),
+          h('div', { class: 'addr-box break', style: 'width:100%;font-size:12px' }, giftUrl()),
+          h('div', { class: 'row gap6 wrap' },
+            copyBtn(giftUrl(), t('copyLink')),
+            h('button', { class: 'btn-sm grow', onClick: () => { ui.giftShown = false; render(); } }, t('hide'))
+          )
+        )
+      : h('button', { class: 'btn-block', onClick: () => { ui.giftShown = true; render(); } }, t('giftLinkReveal'))
   );
 }
 
@@ -813,6 +847,55 @@ function goHome() {
     ui.unlockError = '';
   }
   render();
+}
+
+// ================================================================ GIFT / CLAIM
+// Read a #claim=<code> gift link, returning the seed (and scrubbing it from the
+// URL so it doesn't linger in the address bar or history).
+function readClaimHash() {
+  try {
+    const m = location.hash.match(/^#claim=([A-Za-z0-9_~-]+)$/);
+    if (!m) return null;
+    history.replaceState(null, '', location.pathname + location.search);
+    return decodeGift(m[1]);
+  } catch {
+    return null;
+  }
+}
+
+// Onboarding flow shown when a gift link is opened: celebrate + balance, then a
+// firm nudge to back up the recovery phrase (the recipient now owns this wallet).
+function claimScreen() {
+  if (ui.claimStep === 'backup') {
+    const words = wallet.mnemonic.split(' ');
+    return h(
+      'div',
+      { class: 'col', style: 'gap:16px' },
+      brandHeader(false),
+      h('div', { class: 'card col' },
+        h('h3', {}, t('recoveryPhrase')),
+        h('div', { class: 'warn-box' }, t('writeDownWarn')),
+        h('div', { class: 'words' },
+          words.map((w, i) => h('div', { class: 'w' }, h('span', { class: 'n' }, i + 1), h('span', { class: 't' }, w)))
+        ),
+        h('div', { class: 'row gap6' }, copyBtn(wallet.mnemonic, t('copyPhrase'))),
+        h('button', { class: 'btn-primary btn-block', onClick: () => { ui.screen = 'wallet'; ui.claimStep = null; render(); } }, t('giftBackedUp'))
+      )
+    );
+  }
+  return h(
+    'div',
+    { class: 'col', style: 'gap:16px' },
+    brandHeader(false),
+    h('div', { class: 'card col', style: 'align-items:center;text-align:center;gap:12px' },
+      h('div', { class: 'check-badge', style: 'background:var(--accent)' }, '🎁'),
+      h('h2', { style: 'margin:0' }, t('giftWelcome')),
+      h('p', { class: 'muted', style: 'margin:0' }, t('giftWelcomeBody'))
+    ),
+    balanceCard(),
+    h('button', { class: 'btn-primary btn-block', onClick: () => { ui.claimStep = 'backup'; render(); } }, t('giftBackup')),
+    h('button', { class: 'btn-block', onClick: () => { ui.screen = 'wallet'; ui.claimStep = null; render(); } }, t('giftSkip'))
+  );
 }
 
 function walletScreen() {
@@ -1640,6 +1723,8 @@ async function importSnapshotFile(e) {
 // show the unlock screen.
 applyDir();
 loadLocale(getLang()).finally(() => {
+  const gift = readClaimHash();
+  if (gift) { enterWallet(gift.mnemonic, gift.passphrase, { claim: true }); return; }
   if (!restoreSession()) render();
 });
 

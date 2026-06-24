@@ -145,5 +145,15 @@
   "bumpFee": "Augmenter les frais",
   "bumpConfirm": "Remplacer avec des frais plus élevés ?",
   "replaceTx": "Remplacer",
-  "bumpInsufficient": "Fonds insuffisants pour augmenter à ce taux. Essayez un taux plus bas."
+  "bumpInsufficient": "Fonds insuffisants pour augmenter à ce taux. Essayez un taux plus bas.",
+  "giftWelcome": "Vous avez reçu des Bitcoin",
+  "giftWelcomeBody": "Ce portefeuille est désormais le vôtre. Quiconque possède sa phrase de récupération contrôle les fonds, alors sauvegardez-la avant toute autre chose.",
+  "giftBackup": "Sauvegarder ce portefeuille",
+  "giftSkip": "Plus tard",
+  "giftBackedUp": "Je l’ai notée",
+  "giftLink": "Offrir ce portefeuille",
+  "giftLinkDesc": "Créez un lien qui ouvre ce portefeuille, avec ses fonds, pour configurer quelqu’un rapidement.",
+  "giftLinkWarn": "⚠ Quiconque ouvre ce lien contrôle tous les fonds de ce portefeuille. Ne le partagez que pour donner le portefeuille, et gardez le montant faible.",
+  "giftLinkReveal": "Créer le lien cadeau",
+  "copyLink": "Copier le lien"
 }

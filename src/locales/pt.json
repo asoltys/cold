@@ -145,5 +145,15 @@
   "bumpFee": "Aumentar taxa",
   "bumpConfirm": "Substituir com uma taxa maior?",
   "replaceTx": "Substituir",
-  "bumpInsufficient": "Fundos insuficientes para aumentar nessa taxa. Tente uma taxa menor."
+  "bumpInsufficient": "Fundos insuficientes para aumentar nessa taxa. Tente uma taxa menor.",
+  "giftWelcome": "Você recebeu Bitcoin",
+  "giftWelcomeBody": "Esta carteira é sua agora. Qualquer pessoa com a frase de recuperação controla as moedas, então faça o backup antes de qualquer outra coisa.",
+  "giftBackup": "Fazer backup desta carteira",
+  "giftSkip": "Pular por enquanto",
+  "giftBackedUp": "Já anotei",
+  "giftLink": "Presentear esta carteira",
+  "giftLinkDesc": "Crie um link que abre esta carteira, com seus fundos, para integrar alguém rapidamente.",
+  "giftLinkWarn": "⚠ Qualquer pessoa que abrir este link controla todos os fundos desta carteira. Compartilhe-o apenas para doar a carteira e mantenha o valor baixo.",
+  "giftLinkReveal": "Criar link de presente",
+  "copyLink": "Copiar link"
 }

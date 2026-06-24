@@ -145,5 +145,15 @@
   "bumpFee": "Aumentar comisión",
   "bumpConfirm": "¿Reemplazar con una comisión más alta?",
   "replaceTx": "Reemplazar",
-  "bumpInsufficient": "Fondos insuficientes para aumentar a esta tasa. Prueba una tasa más baja."
+  "bumpInsufficient": "Fondos insuficientes para aumentar a esta tasa. Prueba una tasa más baja.",
+  "giftWelcome": "Te han enviado Bitcoin",
+  "giftWelcomeBody": "Esta billetera ahora es tuya. Cualquiera que tenga su frase de recuperación controla las monedas, así que haz una copia de seguridad antes de hacer cualquier otra cosa.",
+  "giftBackup": "Hacer copia de seguridad de esta billetera",
+  "giftSkip": "Omitir por ahora",
+  "giftBackedUp": "Ya la anoté",
+  "giftLink": "Regalar esta billetera",
+  "giftLinkDesc": "Crea un enlace que abre esta billetera, con sus fondos, para incorporar a alguien rápidamente.",
+  "giftLinkWarn": "⚠ Cualquiera que abra este enlace controla todos los fondos de esta billetera. Compártelo solo para regalar la billetera, y mantén el monto pequeño.",
+  "giftLinkReveal": "Crear enlace de regalo",
+  "copyLink": "Copiar enlace"
 }

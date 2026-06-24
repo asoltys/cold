@@ -145,5 +145,15 @@
   "bumpFee": "Ongeza ada",
   "bumpConfirm": "Badilisha kwa ada ya juu zaidi?",
   "replaceTx": "Badilisha",
-  "bumpInsufficient": "Fedha hazitoshi kuongeza kwa kiwango hiki. Jaribu kiwango cha chini."
+  "bumpInsufficient": "Fedha hazitoshi kuongeza kwa kiwango hiki. Jaribu kiwango cha chini.",
+  "giftWelcome": "Umetumiwa Bitcoin",
+  "giftWelcomeBody": "Pochi hii sasa ni yako. Yeyote aliye na kifungu chake cha kurejesha anadhibiti sarafu, kwa hivyo kihifadhi kabla ya kufanya jambo lingine lolote.",
+  "giftBackup": "Hifadhi pochi hii",
+  "giftSkip": "Ruka kwa sasa",
+  "giftBackedUp": "Nimeshakiandika",
+  "giftLink": "Toa pochi hii kama zawadi",
+  "giftLinkDesc": "Tengeneza kiungo kinachofungua pochi hii, pamoja na fedha zake, ili kumkaribisha mtu haraka.",
+  "giftLinkWarn": "⚠ Yeyote anayefungua kiungo hiki anadhibiti fedha zote zilizomo kwenye pochi hii. Kishiriki tu ili kuachia pochi, na uweke kiasi kidogo.",
+  "giftLinkReveal": "Tengeneza kiungo cha zawadi",
+  "copyLink": "Nakili kiungo"
 }

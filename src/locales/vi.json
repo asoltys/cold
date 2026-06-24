@@ -145,5 +145,15 @@
   "bumpFee": "Tăng phí",
   "bumpConfirm": "Thay thế với phí cao hơn?",
   "replaceTx": "Thay thế",
-  "bumpInsufficient": "Không đủ tiền để tăng ở mức phí này. Hãy thử mức thấp hơn."
+  "bumpInsufficient": "Không đủ tiền để tăng ở mức phí này. Hãy thử mức thấp hơn.",
+  "giftWelcome": "Bạn đã được gửi Bitcoin",
+  "giftWelcomeBody": "Ví này giờ là của bạn. Bất kỳ ai có cụm từ khôi phục đều kiểm soát số coin, vì vậy hãy sao lưu trước khi làm bất kỳ điều gì khác.",
+  "giftBackup": "Sao lưu ví này",
+  "giftSkip": "Bỏ qua lúc này",
+  "giftBackedUp": "Tôi đã ghi lại rồi",
+  "giftLink": "Tặng ví này",
+  "giftLinkDesc": "Tạo một liên kết mở ví này, kèm số tiền trong đó, để giúp ai đó bắt đầu nhanh chóng.",
+  "giftLinkWarn": "⚠ Bất kỳ ai mở liên kết này đều kiểm soát toàn bộ số tiền trong ví. Chỉ chia sẻ để tặng ví đi, và hãy giữ số tiền nhỏ.",
+  "giftLinkReveal": "Tạo liên kết tặng",
+  "copyLink": "Sao chép liên kết"
 }

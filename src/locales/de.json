@@ -145,5 +145,15 @@
   "bumpFee": "Gebühr erhöhen",
   "bumpConfirm": "Mit höherer Gebühr ersetzen?",
   "replaceTx": "Ersetzen",
-  "bumpInsufficient": "Nicht genug Guthaben für diese Gebührenrate. Versuche eine niedrigere Rate."
+  "bumpInsufficient": "Nicht genug Guthaben für diese Gebührenrate. Versuche eine niedrigere Rate.",
+  "giftWelcome": "Dir wurde Bitcoin gesendet",
+  "giftWelcomeBody": "Diese Wallet gehört jetzt dir. Wer ihre Wiederherstellungsphrase besitzt, kontrolliert die Coins — sichere sie daher, bevor du irgendetwas anderes tust.",
+  "giftBackup": "Diese Wallet sichern",
+  "giftSkip": "Vorerst überspringen",
+  "giftBackedUp": "Ich habe sie aufgeschrieben",
+  "giftLink": "Diese Wallet verschenken",
+  "giftLinkDesc": "Erstelle einen Link, der diese Wallet samt Guthaben öffnet, um jemanden schnell einzurichten.",
+  "giftLinkWarn": "⚠ Wer diesen Link öffnet, kontrolliert das gesamte Guthaben dieser Wallet. Teile ihn nur, um die Wallet zu verschenken, und halte den Betrag klein.",
+  "giftLinkReveal": "Geschenk-Link erstellen",
+  "copyLink": "Link kopieren"
 }

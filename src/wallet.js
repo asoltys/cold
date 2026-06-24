@@ -9,9 +9,9 @@
 // transactions, only the (txid, vout, value, address) of each UTXO.
 
 import { HDKey } from '@scure/bip32';
-import { generateMnemonic, mnemonicToSeedSync, validateMnemonic } from '@scure/bip39';
+import { generateMnemonic, mnemonicToSeedSync, validateMnemonic, mnemonicToEntropy, entropyToMnemonic } from '@scure/bip39';
 import { wordlist } from '@scure/bip39/wordlists/english';
-import { hex } from '@scure/base';
+import { hex, base64urlnopad } from '@scure/base';
 import { sha256 } from '@noble/hashes/sha256';
 import * as btc from '@scure/btc-signer';
 import { p2wpkh } from '@scure/btc-signer/payment';
@@ -1183,6 +1183,27 @@ export class Wallet {
 
 export function utxoId(u) {
   return `${u.txid}:${u.vout}`;
+}
+
+// Gift links: encode a wallet (12-word seed as BIP39 entropy, plus the optional
+// passphrase) compactly for the #claim= fragment as base64url, and decode it
+// back to { mnemonic, passphrase }. Returns null if the code isn't valid.
+export function encodeGift(mnemonic, passphrase = '') {
+  let code = base64urlnopad.encode(mnemonicToEntropy(mnemonic.trim().replace(/\s+/g, ' '), wordlist));
+  if (passphrase) code += '~' + base64urlnopad.encode(new TextEncoder().encode(passphrase));
+  return code;
+}
+
+export function decodeGift(code) {
+  try {
+    const [seedPart, passPart] = code.split('~');
+    const mnemonic = entropyToMnemonic(base64urlnopad.decode(seedPart), wordlist);
+    if (!validateMnemonic(mnemonic, wordlist)) return null;
+    const passphrase = passPart ? new TextDecoder().decode(base64urlnopad.decode(passPart)) : '';
+    return { mnemonic, passphrase };
+  } catch {
+    return null;
+  }
 }
 
 function firstUnused(chain) {

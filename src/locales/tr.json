@@ -145,5 +145,15 @@
   "bumpFee": "Ücreti artır",
   "bumpConfirm": "Daha yüksek ücretle değiştirilsin mi?",
   "replaceTx": "Değiştir",
-  "bumpInsufficient": "Bu oranda artırmak için yeterli bakiye yok. Daha düşük bir oran deneyin."
+  "bumpInsufficient": "Bu oranda artırmak için yeterli bakiye yok. Daha düşük bir oran deneyin.",
+  "giftWelcome": "Size Bitcoin gönderildi",
+  "giftWelcomeBody": "Bu cüzdan artık sizin. Kurtarma ifadesine sahip olan herkes paraları kontrol eder, bu yüzden başka bir şey yapmadan önce yedekleyin.",
+  "giftBackup": "Bu cüzdanı yedekle",
+  "giftSkip": "Şimdilik atla",
+  "giftBackedUp": "Yazdım",
+  "giftLink": "Bu cüzdanı hediye et",
+  "giftLinkDesc": "Bu cüzdanı, parasıyla birlikte açan bir bağlantı oluşturun; birini hızlıca başlatmak için.",
+  "giftLinkWarn": "⚠ Bu bağlantıyı açan herkes cüzdandaki tüm parayı kontrol eder. Yalnızca cüzdanı devretmek için paylaşın ve tutarı küçük tutun.",
+  "giftLinkReveal": "Hediye bağlantısı oluştur",
+  "copyLink": "Bağlantıyı kopyala"
 }

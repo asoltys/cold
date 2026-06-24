@@ -145,5 +145,15 @@
   "bumpFee": "수수료 올리기",
   "bumpConfirm": "더 높은 수수료로 교체할까요?",
   "replaceTx": "교체",
-  "bumpInsufficient": "이 수수료율로 올릴 자금이 부족합니다. 더 낮은 율을 시도하세요."
+  "bumpInsufficient": "이 수수료율로 올릴 자금이 부족합니다. 더 낮은 율을 시도하세요.",
+  "giftWelcome": "Bitcoin을 받았습니다",
+  "giftWelcomeBody": "이제 이 지갑은 당신의 것입니다. 복구 문구를 가진 사람은 누구나 코인을 통제할 수 있으니, 다른 작업을 하기 전에 먼저 백업하세요.",
+  "giftBackup": "이 지갑 백업하기",
+  "giftSkip": "나중에 하기",
+  "giftBackedUp": "적어 두었습니다",
+  "giftLink": "이 지갑 선물하기",
+  "giftLinkDesc": "자금이 들어 있는 이 지갑을 여는 링크를 만들어 빠르게 다른 사람을 시작하게 하세요.",
+  "giftLinkWarn": "⚠ 이 링크를 여는 사람은 누구나 이 지갑의 모든 자금을 통제합니다. 지갑을 넘겨줄 때만 공유하고, 금액은 적게 유지하세요.",
+  "giftLinkReveal": "선물 링크 만들기",
+  "copyLink": "링크 복사"
 }
