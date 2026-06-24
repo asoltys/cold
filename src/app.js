@@ -1079,7 +1079,12 @@ function reviewView() {
         : wallet.offline
           ? h('button', { class: 'btn-primary grow', onClick: signForExport }, t('signTx'))
           : h('button', { class: 'btn-primary grow', onClick: broadcast }, t('signBroadcast'))
-    )
+    ),
+    // Online: also allow signing without broadcasting, to relay the signed tx
+    // from another device (air-gapped, or a different network).
+    !wallet.offline && !ui.busy
+      ? h('button', { class: 'btn-block', style: 'margin-top:8px', onClick: signForExport }, t('signExport'))
+      : null
   );
 }
 
@@ -1122,7 +1127,7 @@ function sendResultView() {
     return h(
       'div',
       { class: 'card col' },
-      h('div', { class: 'notice ok' }, t('txSignedNote')),
+      h('div', { class: 'warn-box' }, t('txSignedNote')),
       h('div', { class: 'small muted' }, t('transactionId')),
       h('div', { class: 'addr-box' }, r.txid),
       h('div', { class: 'small muted mt8' }, t('signedTxRaw')),
