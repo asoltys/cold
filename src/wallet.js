@@ -341,7 +341,12 @@ export class Wallet {
         }
         const list = await this.api.addressTxs(a.address);
         for (const tx of list) {
-          if (!this.txs.some((t) => t.txid === tx.txid)) this.txs.push(this._txSummary(tx));
+          const summary = this._txSummary(tx);
+          const at = this.txs.findIndex((t) => t.txid === tx.txid);
+          // Refresh in place so a tx that has since confirmed loses its pending
+          // status — not just append new ones (which left confirmations stale).
+          if (at >= 0) this.txs[at] = summary;
+          else this.txs.push(summary);
         }
       }
 
@@ -445,7 +450,11 @@ export class Wallet {
       // balance/addresses actually changed. Idle polls stay /address-only.
       const balanceChanged =
         `${this.confirmed}|${this.pending}|${this.nextReceiveIndex}|${this.nextChangeIndex}` !== prevBal;
-      if (!silent || balanceChanged || !this.loaded) {
+      // Always re-pull history while any tx is still pending, so confirmations
+      // get reconciled even when the balance itself hasn't changed (e.g. a
+      // received coin that simply moved from mempool to a block).
+      const hasPending = this.txs.some((t) => !t.confirmed);
+      if (!silent || balanceChanged || !this.loaded || hasPending) {
         // Balance + receive address are already known from the chain_stats above.
         // Show them right away so the wallet looks ready, then keep loading the
         // heavier UTXO set and full history in the background.
