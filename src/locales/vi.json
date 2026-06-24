@@ -172,5 +172,21 @@
   "giftReclaimed": "Đã thu lại coin",
   "giftRevokeConfirm": "Thu hồi quà này ngay? Việc này chuyển đồng coin về ví của bạn và vô hiệu hóa liên kết.",
   "giftReclaimedTag": "vẫn có thể nhận",
-  "giftMinNote": "Tối thiểu {n} ở mức phí hiện tại, để vượt mức bụi khi được nhận."
+  "giftMinNote": "Tối thiểu {n} ở mức phí hiện tại, để vượt mức bụi khi được nhận.",
+  "accounts": "Tài khoản",
+  "addWallet": "Thêm ví",
+  "lockAll": "Khóa tất cả",
+  "watchOnly": "Chỉ theo dõi",
+  "watchOnlyTag": "chỉ theo dõi",
+  "watchOnlyAdd": "Thêm ví chỉ theo dõi",
+  "watchOnlyDesc": "Theo dõi bất kỳ ví nào từ khóa công khai tài khoản của nó. Bạn có thể nhận và xem số dư cùng lịch sử, nhưng không thể gửi.",
+  "watchOnlyNote": "Đây là ví chỉ theo dõi. Bạn có thể nhận và xem, nhưng không thể gửi.",
+  "watchXpubLabel": "xpub hoặc zpub của tài khoản",
+  "labelOptional": "Nhãn (tùy chọn)",
+  "walletLabelN": "Ví {n}",
+  "watchLabelN": "Theo dõi {n}",
+  "publicKey": "Khóa công khai",
+  "publicKeyDesc": "Chia sẻ khóa này để theo dõi ví này ở chế độ chỉ đọc trên thiết bị hoặc ứng dụng khác. Nó tiết lộ địa chỉ của bạn, chứ không phải khóa của bạn.",
+  "copyKey": "Sao chép khóa",
+  "showPublicKey": "Hiện khóa công khai"
 }

@@ -172,5 +172,22 @@
   "giftReclaimed": "Moeda recuperada",
   "giftRevokeConfirm": "Revogar este presente agora? Isso devolve a moeda à sua carteira e desativa o link.",
   "giftReclaimedTag": "ainda resgatável",
-  "giftMinNote": "Mínimo {n} com as taxas atuais, para superar a poeira ao ser resgatado."
+  "giftMinNote": "Mínimo {n} com as taxas atuais, para superar a poeira ao ser resgatado.",
+  "accounts": "Contas",
+  "addWallet": "Adicionar carteira",
+  "lockAll": "Bloquear tudo",
+  "remove": "Remover",
+  "watchOnly": "Somente leitura",
+  "watchOnlyTag": "somente leitura",
+  "watchOnlyAdd": "Adicionar somente leitura",
+  "watchOnlyDesc": "Acompanhe qualquer carteira a partir da chave pública da conta. Você pode receber e ver o saldo e o histórico, mas não enviar.",
+  "watchOnlyNote": "Esta é uma carteira somente leitura. Você pode receber e visualizar, mas não pode enviar.",
+  "watchXpubLabel": "xpub ou zpub da conta",
+  "labelOptional": "Rótulo (opcional)",
+  "walletLabelN": "Carteira {n}",
+  "watchLabelN": "Observação {n}",
+  "publicKey": "Chave pública",
+  "publicKeyDesc": "Compartilhe isto para acompanhar esta carteira somente leitura em outro dispositivo ou aplicativo. Revela seus endereços, não suas chaves.",
+  "copyKey": "Copiar chave",
+  "showPublicKey": "Mostrar chave pública"
 }

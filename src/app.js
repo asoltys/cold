@@ -4,7 +4,7 @@
 // which rebuilds the active screen. Text inputs write back into `ui` on `input`
 // (without re-rendering) so their values survive structural re-renders.
 
-import { Wallet, newMnemonic, isValidMnemonic, utxoId, previewGift, buildClaimTx, giftMinimum } from './wallet.js';
+import { Wallet, newMnemonic, isValidMnemonic, utxoId, previewGift, buildClaimTx, giftMinimum, parseAccountKey, xpubToZpub } from './wallet.js';
 import { qrSvg } from './qr.js';
 import { scanQr } from './scan.js';
 import { getSyncConfig, setSyncConfig } from './nostr.js';
@@ -26,7 +26,10 @@ const ui = {
   screen: 'unlock', // 'unlock' | 'wallet' | 'claim' | 'howItWorks'
   claimStep: null, // 'welcome' | 'backup' when opening a gift link
   returnScreen: 'unlock', // where 'howItWorks' returns to (Back / logo)
-  unlockTab: 'create', // 'create' | 'import'
+  unlockTab: 'create', // 'create' | 'import' | 'watch'
+  watchXpub: '', // watch-only xpub/zpub input
+  watchLabel: '', // watch-only account label input
+  fromWallet: false, // unlock screen reached as "add wallet" (show a back button)
   createStep: 'gen', // 'gen' | 'confirm'
   draftMnemonic: '',
   confirm: [], // [{ index, value }]
@@ -35,6 +38,7 @@ const ui = {
   passphrase: '',
   showPass: false,
   revealShown: false, // recovery phrase unmasked on the Backup tab (after the warning)
+  pubkeyShown: false, // account public key revealed in Settings
   giftMode: false, // gift sub-view active on the Send page
   giftAmount: '', // gift-create amount input
   giftCode: null, // last-created gift PSBT code
@@ -157,11 +161,13 @@ function render() {
   const screen =
     ui.screen === 'wallet'
       ? walletScreen()
-      : ui.screen === 'claim'
-        ? claimScreen()
-        : ui.screen === 'howItWorks'
-          ? howItWorksScreen()
-          : unlockScreen();
+      : ui.screen === 'accounts'
+        ? accountsScreen()
+        : ui.screen === 'claim'
+          ? claimScreen()
+          : ui.screen === 'howItWorks'
+            ? howItWorksScreen()
+            : unlockScreen();
   root.replaceChildren(screen, footer());
 }
 wallet.subscribe(render);
@@ -249,19 +255,52 @@ function unlockScreen() {
       h(
         'div',
         { class: 'tabs' },
-        tabBtn(t('createNew'), ui.unlockTab === 'create', () => {
-          ui.unlockTab = 'create';
-          render();
-        }),
-        tabBtn(t('importExisting'), ui.unlockTab === 'import', () => {
-          ui.unlockTab = 'import';
-          render();
-        })
+        tabBtn(t('createNew'), ui.unlockTab === 'create', () => { ui.unlockTab = 'create'; ui.unlockError = ''; render(); }),
+        tabBtn(t('importExisting'), ui.unlockTab === 'import', () => { ui.unlockTab = 'import'; ui.unlockError = ''; render(); }),
+        tabBtn(t('watchOnly'), ui.unlockTab === 'watch', () => { ui.unlockTab = 'watch'; ui.unlockError = ''; render(); })
       ),
-      ui.unlockTab === 'create' ? createPane() : importPane(),
+      ui.unlockTab === 'create' ? createPane() : ui.unlockTab === 'import' ? importPane() : watchPane(),
       ui.unlockError && h('div', { class: 'notice err' }, ui.unlockError)
-    )
+    ),
+    ui.fromWallet && accounts.length
+      ? h('button', { class: 'btn-ghost btn-block', onClick: () => { ui.fromWallet = false; ui.screen = 'wallet'; ui.unlockError = ''; render(); } }, t('back'))
+      : null
   );
+}
+
+function watchPane() {
+  return h(
+    'div',
+    { class: 'col', style: 'gap:12px; margin-top:14px' },
+    h('p', { class: 'small muted', style: 'margin:0' }, t('watchOnlyDesc')),
+    h('div', { class: 'field' },
+      h('span', { class: 'lab' }, t('watchXpubLabel')),
+      h('textarea', { rows: '3', placeholder: 'zpub… / xpub…', value: ui.watchXpub, onInput: (e) => (ui.watchXpub = e.target.value) })
+    ),
+    h('div', { class: 'field' },
+      h('span', { class: 'lab' }, t('labelOptional')),
+      h('input', { type: 'text', placeholder: defaultLabel('watch'), value: ui.watchLabel, onInput: (e) => (ui.watchLabel = e.target.value) })
+    ),
+    h('button', { class: 'btn-primary btn-block', onClick: addWatchOnly }, t('watchOnlyAdd'))
+  );
+}
+
+function addWatchOnly() {
+  ui.unlockError = '';
+  let xpub;
+  try {
+    xpub = parseAccountKey(ui.watchXpub);
+  } catch (e) {
+    ui.unlockError = e.message;
+    render();
+    return;
+  }
+  const label = (ui.watchLabel || '').trim() || defaultLabel('watch');
+  const acc = addOrGetAccount({ type: 'watch', label, xpub });
+  ui.watchXpub = '';
+  ui.watchLabel = '';
+  ui.fromWallet = false;
+  activateAccount(acc);
 }
 
 // ================================================================ HOW IT WORKS
@@ -501,11 +540,24 @@ async function openWallet(mnemonic) {
   await enterWallet(m, ui.passphrase);
 }
 
-// Load a wallet and start scanning. Persists to sessionStorage so a refresh
-// restores the open wallet (cleared on logout or when the tab closes).
+// Register a full (seed) wallet as an account and open it.
 async function enterWallet(mnemonic, passphrase, opts = {}) {
-  wallet.load({ mnemonic, passphrase, netName: 'mainnet', offline: false });
-  persistSession(mnemonic, passphrase);
+  const acc = addOrGetAccount({
+    type: 'full',
+    label: defaultLabel('full'),
+    mnemonic: (mnemonic || '').trim().replace(/\s+/g, ' '),
+    passphrase: passphrase || '',
+  });
+  await activateAccount(acc, opts);
+}
+
+// Load an account into the wallet and start scanning. Full-account seeds are
+// kept in sessionStorage (ephemeral); a refresh restores the open account.
+async function activateAccount(acc, opts = {}) {
+  activeId = acc.id;
+  if (acc.type === 'watch') wallet.load({ xpub: acc.xpub, netName: 'mainnet', offline: false });
+  else wallet.load({ mnemonic: acc.mnemonic, passphrase: acc.passphrase || '', netName: 'mainnet', offline: false });
+  persistAccounts();
   const hadCache = wallet.restoreCache(); // show last-known balance/history instantly
   // An opened gift link starts on a claim/back-up screen instead of the wallet.
   ui.screen = opts.gift ? 'claim' : 'wallet';
@@ -520,6 +572,7 @@ async function enterWallet(mnemonic, passphrase, opts = {}) {
   ui.send = blankSend();
   ui.draft = null;
   ui.sendResult = null;
+  ui.giftMode = false;
   ui.offlineFallback = false;
   render();
 
@@ -531,8 +584,9 @@ async function enterWallet(mnemonic, passphrase, opts = {}) {
   }
   try {
     // Cross-device state: pull the latest from Nostr (may supply state on a
-    // device with no local cache, or a newer copy from another device).
-    const hadNostr = await wallet.syncFromNostr();
+    // device with no local cache, or a newer copy from another device). Skipped
+    // for watch-only accounts, which have no seed-derived sync key.
+    const hadNostr = wallet.watchOnly ? false : await wallet.syncFromNostr();
     // Always do a full scan to fully reconcile (balance, history confirmations,
     // spends, stale cache/relay state). Cache/Nostr just gave us something to
     // show instantly; a partial frontier-only refresh leaves the state stale and
@@ -553,28 +607,91 @@ async function enterWallet(mnemonic, passphrase, opts = {}) {
   }
 }
 
-const SESSION_KEY = 'btc-wallet-session';
+// --- accounts -------------------------------------------------------------
+// The working set of wallets you can switch between. Full (seed-bearing)
+// accounts live only in sessionStorage — ephemeral, wiped when the browser
+// closes (no seed on disk by default). Watch-only accounts hold just an xpub,
+// so they're additionally persisted in localStorage and reload across restarts.
+const ACCOUNTS_KEY = 'btc-wallet-accounts'; // sessionStorage: session list + active
+const WATCH_KEY = 'btc-wallet-watch'; // localStorage: persisted watch-only accounts
 
-function persistSession(mnemonic, passphrase) {
-  try {
-    sessionStorage.setItem(SESSION_KEY, JSON.stringify({ mnemonic, passphrase }));
-  } catch {}
+let accounts = [];
+let activeId = null;
+
+const genId = () => 'a' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+const credId = (a) => (a.type === 'watch' ? 'w:' + a.xpub : 'f:' + a.mnemonic + '|' + (a.passphrase || ''));
+const activeAccount = () => accounts.find((a) => a.id === activeId) || null;
+
+function defaultLabel(type) {
+  const n = accounts.filter((a) => a.type === type).length + 1;
+  return t(type === 'watch' ? 'watchLabelN' : 'walletLabelN', { n });
 }
 
-function clearSession() {
+function loadWatchAccounts() {
+  try { return JSON.parse(localStorage.getItem(WATCH_KEY) || '[]'); } catch { return []; }
+}
+function saveWatchAccounts() {
   try {
-    sessionStorage.removeItem(SESSION_KEY);
+    const watch = accounts.filter((a) => a.type === 'watch').map((a) => ({ id: a.id, label: a.label, type: 'watch', xpub: a.xpub }));
+    localStorage.setItem(WATCH_KEY, JSON.stringify(watch));
   } catch {}
 }
+function persistAccounts() {
+  try { sessionStorage.setItem(ACCOUNTS_KEY, JSON.stringify({ accounts, activeId })); } catch {}
+}
+function clearAccounts() {
+  accounts = [];
+  activeId = null;
+  try { sessionStorage.removeItem(ACCOUNTS_KEY); } catch {}
+}
 
-// Restore an open wallet after a page refresh (same tab session only).
-function restoreSession() {
-  let saved;
-  try {
-    saved = JSON.parse(sessionStorage.getItem(SESSION_KEY) || 'null');
-  } catch {}
-  if (saved && saved.mnemonic && isValidMnemonic(saved.mnemonic)) {
-    enterWallet(saved.mnemonic, saved.passphrase || '');
+// Add an account (deduped by credential), returning the stored object.
+function addOrGetAccount(partial) {
+  const cid = credId(partial);
+  let acc = accounts.find((a) => credId(a) === cid);
+  if (!acc) {
+    acc = { id: genId(), ...partial };
+    accounts.push(acc);
+    if (acc.type === 'watch') saveWatchAccounts();
+    persistAccounts();
+  }
+  return acc;
+}
+
+function removeAccount(id) {
+  const acc = accounts.find((a) => a.id === id);
+  if (!acc) return;
+  accounts = accounts.filter((a) => a.id !== id);
+  if (acc.type === 'watch') saveWatchAccounts();
+  persistAccounts();
+  if (activeId === id) {
+    if (accounts.length) activateAccount(accounts[0]);
+    else lock();
+  } else {
+    render();
+  }
+}
+
+function switchAccount(id) {
+  const acc = accounts.find((a) => a.id === id);
+  if (acc) activateAccount(acc);
+}
+
+// Restore accounts after a refresh (sessionStorage), or on a fresh session seed
+// the list from persisted watch-only accounts. Returns true if one was opened.
+function restoreAccountsState() {
+  let sess = null;
+  try { sess = JSON.parse(sessionStorage.getItem(ACCOUNTS_KEY) || 'null'); } catch {}
+  if (sess && Array.isArray(sess.accounts) && sess.accounts.length) {
+    accounts = sess.accounts;
+    const active = accounts.find((a) => a.id === sess.activeId) || accounts[0];
+    activateAccount(active);
+    return true;
+  }
+  const watch = loadWatchAccounts();
+  if (watch.length) {
+    accounts = watch.slice();
+    activateAccount(accounts[0]);
     return true;
   }
   return false;
@@ -603,16 +720,21 @@ async function retryOnline() {
 
 function lock() {
   wallet.stopRealtime();
-  clearSession();
+  clearAccounts();
   wallet.load({ mnemonic: '', passphrase: '', netName: 'mainnet', offline: false });
   wallet.mnemonic = '';
   ui.screen = 'unlock';
+  ui.unlockTab = 'create';
+  ui.fromWallet = false;
+  ui.watchXpub = '';
+  ui.watchLabel = '';
   ui.createStep = 'gen';
   ui.draftMnemonic = '';
   ui.importText = '';
   ui.passphrase = '';
   ui.confirm = [];
   ui.revealShown = false;
+  ui.pubkeyShown = false;
   ui.giftMode = false;
   ui.giftAmount = '';
   ui.giftCode = null;
@@ -627,6 +749,7 @@ function lock() {
 
 // ================================================================ WALLET
 function brandHeader(withLock) {
+  const acc = activeAccount();
   return h(
     'div',
     { class: 'row between' },
@@ -636,7 +759,9 @@ function brandHeader(withLock) {
       h('div', { class: 'logo' }, '₿'),
       h('h1', {}, t('appTitle'))
     ),
-    withLock && h('button', { class: 'btn-sm', onClick: lock }, t('logout'))
+    withLock &&
+      h('button', { class: 'btn-sm', onClick: () => { ui.screen = 'accounts'; render(); } },
+        (acc ? acc.label : t('accounts')) + ' ▾')
   );
 }
 
@@ -657,32 +782,40 @@ function settingsTab() {
   return h(
     'div',
     { class: 'col', style: 'gap:16px' },
-    h(
-      'div',
-      { class: 'card col' },
-      h('h3', {}, t('recoveryPhrase')),
-      h('div', { class: 'warn-box' }, t('recoveryWarn')),
-      h('div', { class: 'words' }, cells),
-      shown && wallet.passphrase
-        ? h('div', { class: 'col gap6' },
-            h('span', { class: 'lab' }, t('bip39Passphrase')),
-            h('div', { class: 'addr-box' }, wallet.passphrase)
-          )
-        : null,
-      shown
-        ? h('div', { class: 'row gap6 wrap' },
-            copyBtn(wallet.mnemonic, t('copyPhrase')),
-            wallet.passphrase ? copyBtn(wallet.passphrase, t('copyPassphrase')) : null,
-            h('button', { class: 'btn-sm grow', onClick: () => { ui.revealShown = false; render(); } }, t('hide'))
-          )
-        : h('button', { class: 'btn-primary btn-block', onClick: () => { ui.revealShown = true; render(); } }, t('revealRecovery'))
-    ),
-    h(
-      'div',
-      { class: 'card col' },
-      h('h3', {}, t('offlineTransfer')),
-      snapshotActions()
-    ),
+    wallet.watchOnly
+      ? h('div', { class: 'card col' },
+          h('h3', {}, t('watchOnly')),
+          h('p', { class: 'small muted', style: 'margin:0' }, t('watchOnlyNote'))
+        )
+      : h(
+          'div',
+          { class: 'card col' },
+          h('h3', {}, t('recoveryPhrase')),
+          h('div', { class: 'warn-box' }, t('recoveryWarn')),
+          h('div', { class: 'words' }, cells),
+          shown && wallet.passphrase
+            ? h('div', { class: 'col gap6' },
+                h('span', { class: 'lab' }, t('bip39Passphrase')),
+                h('div', { class: 'addr-box' }, wallet.passphrase)
+              )
+            : null,
+          shown
+            ? h('div', { class: 'row gap6 wrap' },
+                copyBtn(wallet.mnemonic, t('copyPhrase')),
+                wallet.passphrase ? copyBtn(wallet.passphrase, t('copyPassphrase')) : null,
+                h('button', { class: 'btn-sm grow', onClick: () => { ui.revealShown = false; render(); } }, t('hide'))
+              )
+            : h('button', { class: 'btn-primary btn-block', onClick: () => { ui.revealShown = true; render(); } }, t('revealRecovery'))
+        ),
+    pubkeyCard(),
+    wallet.watchOnly
+      ? null
+      : h(
+          'div',
+          { class: 'card col' },
+          h('h3', {}, t('offlineTransfer')),
+          snapshotActions()
+        ),
     h(
       'div',
       { class: 'card col' },
@@ -695,13 +828,35 @@ function settingsTab() {
             wallet.scanning ? t('scanning') : t('rescanWallet'))
     ),
     explorerCard(),
-    syncCard(),
+    wallet.watchOnly ? null : syncCard(),
     h(
       'div',
       { class: 'card col' },
       h('h3', {}, t('language')),
       languagePicker()
     )
+  );
+}
+
+// Public key export: the account zpub, for watching this wallet elsewhere
+// (read-only). Gated behind a reveal since it exposes all your addresses.
+function pubkeyCard() {
+  let zpub = '';
+  try { zpub = xpubToZpub(wallet.accountXpub()); } catch {}
+  return h(
+    'div',
+    { class: 'card col' },
+    h('h3', {}, t('publicKey')),
+    h('p', { class: 'small muted', style: 'margin:0' }, t('publicKeyDesc')),
+    ui.pubkeyShown
+      ? h('div', { class: 'col gap6' },
+          h('div', { class: 'addr-box break', style: 'font-size:12px' }, zpub),
+          h('div', { class: 'row gap6 wrap' },
+            copyBtn(zpub, t('copyKey')),
+            h('button', { class: 'btn-sm grow', onClick: () => { ui.pubkeyShown = false; render(); } }, t('hide'))
+          )
+        )
+      : h('button', { class: 'btn-block', onClick: () => { ui.pubkeyShown = true; render(); } }, t('showPublicKey'))
   );
 }
 
@@ -1022,6 +1177,33 @@ function claimScreen() {
   );
 }
 
+// Account switcher: pick a wallet, add another, or lock the session.
+function accountsScreen() {
+  return h(
+    'div',
+    { class: 'col', style: 'gap:16px' },
+    brandHeader(false),
+    h('div', { class: 'card col' },
+      h('h3', {}, t('accounts')),
+      h('div', { class: 'col', style: 'gap:0' },
+        accounts.map((a) => {
+          const isActive = a.id === activeId;
+          return h('div', { class: 'row between', style: 'padding:10px 0;border-bottom:1px solid var(--line)' },
+            h('button', {
+              class: 'linklike', style: 'text-align:left;flex:1;font-size:15px;' + (isActive ? 'font-weight:600' : ''),
+              onClick: () => { if (isActive) { ui.screen = 'wallet'; render(); } else switchAccount(a.id); },
+            }, (isActive ? '● ' : '○ ') + a.label + (a.type === 'watch' ? ' · ' + t('watchOnlyTag') : '')),
+            h('button', { class: 'btn-sm', title: t('remove'), onClick: () => removeAccount(a.id) }, '✕')
+          );
+        })
+      ),
+      h('button', { class: 'btn-block', onClick: () => { ui.screen = 'unlock'; ui.unlockTab = 'create'; ui.fromWallet = true; ui.unlockError = ''; render(); } }, t('addWallet')),
+      h('button', { class: 'btn-ghost btn-block', onClick: lock }, t('lockAll'))
+    ),
+    h('button', { class: 'btn-ghost btn-block', onClick: () => { ui.screen = 'wallet'; render(); } }, t('back'))
+  );
+}
+
 function walletScreen() {
   return h(
     'div',
@@ -1066,7 +1248,8 @@ function balanceCard() {
 function tabsBar() {
   const tabs = [
     ['receive', t('tabReceive')],
-    ['send', t('tabSend')],
+    // Watch-only wallets can't sign, so no Send tab.
+    ...(wallet.watchOnly ? [] : [['send', t('tabSend')]]),
     ['history', t('tabHistory')],
     ['settings', t('tabSettings')],
   ];
@@ -1862,7 +2045,7 @@ applyDir();
 loadLocale(getLang()).finally(() => {
   const code = readGiftHash();
   if (code) { enterWallet(newMnemonic(), '', { gift: code }); return; }
-  if (!restoreSession()) render();
+  if (!restoreAccountsState()) render();
 });
 
 

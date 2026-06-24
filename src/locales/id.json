@@ -172,5 +172,21 @@
   "giftReclaimed": "Koin ditarik kembali",
   "giftRevokeConfirm": "Cabut hadiah ini sekarang? Ini mengembalikan koin ke dompet Anda dan menonaktifkan tautannya.",
   "giftReclaimedTag": "masih bisa diklaim",
-  "giftMinNote": "Minimal {n} pada biaya saat ini, agar melampaui dust saat diklaim."
+  "giftMinNote": "Minimal {n} pada biaya saat ini, agar melampaui dust saat diklaim.",
+  "accounts": "Akun",
+  "addWallet": "Tambah dompet",
+  "lockAll": "Kunci semua",
+  "watchOnly": "Hanya pantau",
+  "watchOnlyTag": "hanya pantau",
+  "watchOnlyAdd": "Tambah hanya pantau",
+  "watchOnlyDesc": "Pantau dompet apa pun dari kunci publik akunnya. Anda bisa menerima serta melihat saldo dan riwayat, tetapi tidak bisa mengirim.",
+  "watchOnlyNote": "Ini dompet hanya pantau. Anda bisa menerima dan melihat, tetapi tidak bisa mengirim.",
+  "watchXpubLabel": "xpub atau zpub akun",
+  "labelOptional": "Label (opsional)",
+  "walletLabelN": "Dompet {n}",
+  "watchLabelN": "Pantau {n}",
+  "publicKey": "Kunci publik",
+  "publicKeyDesc": "Bagikan ini untuk memantau dompet ini secara baca-saja di perangkat atau aplikasi lain. Ini menampilkan alamat Anda, bukan kunci Anda.",
+  "copyKey": "Salin kunci",
+  "showPublicKey": "Tampilkan kunci publik"
 }

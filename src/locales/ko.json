@@ -172,5 +172,22 @@
   "giftReclaimed": "코인 회수됨",
   "giftRevokeConfirm": "이 선물을 지금 취소할까요? 코인이 지갑으로 돌아가고 링크가 비활성화됩니다.",
   "giftReclaimedTag": "아직 청구 가능",
-  "giftMinNote": "현재 수수료 기준 최소 {n}, 청구 시 더스트를 넘도록."
+  "giftMinNote": "현재 수수료 기준 최소 {n}, 청구 시 더스트를 넘도록.",
+  "accounts": "계정",
+  "addWallet": "지갑 추가",
+  "lockAll": "모두 잠그기",
+  "remove": "삭제",
+  "watchOnly": "조회 전용",
+  "watchOnlyTag": "조회 전용",
+  "watchOnlyAdd": "조회 전용 추가",
+  "watchOnlyDesc": "계정 공개키로 지갑을 조회만 할 수 있습니다. 잔액과 내역을 받고 볼 수 있지만 보낼 수는 없습니다.",
+  "watchOnlyNote": "조회 전용 지갑입니다. 받고 볼 수는 있지만 보낼 수는 없습니다.",
+  "watchXpubLabel": "계정 xpub 또는 zpub",
+  "labelOptional": "라벨 (선택)",
+  "walletLabelN": "지갑 {n}",
+  "watchLabelN": "조회 {n}",
+  "publicKey": "공개키",
+  "publicKeyDesc": "이 키를 공유하면 다른 기기나 앱에서 이 지갑을 조회 전용으로 볼 수 있습니다. 주소는 드러나지만 키는 드러나지 않습니다.",
+  "copyKey": "키 복사",
+  "showPublicKey": "공개키 표시"
 }

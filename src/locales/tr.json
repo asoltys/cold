@@ -172,5 +172,21 @@
   "giftReclaimed": "Para geri alındı",
   "giftRevokeConfirm": "Bu hediye şimdi iptal edilsin mi? Bu, parayı cüzdanınıza geri gönderir ve bağlantıyı devre dışı bırakır.",
   "giftReclaimedTag": "hâlâ talep edilebilir",
-  "giftMinNote": "Mevcut ücretlerde en az {n}, böylece talep edildiğinde tozu aşar."
+  "giftMinNote": "Mevcut ücretlerde en az {n}, böylece talep edildiğinde tozu aşar.",
+  "accounts": "Hesaplar",
+  "addWallet": "Cüzdan ekle",
+  "lockAll": "Tümünü kilitle",
+  "watchOnly": "Yalnızca izleme",
+  "watchOnlyTag": "yalnızca izleme",
+  "watchOnlyAdd": "Yalnızca izleme ekle",
+  "watchOnlyDesc": "Herhangi bir cüzdanı hesap genel anahtarından izleyin. Bakiyeyi ve geçmişi alıp görüntüleyebilirsiniz, ancak gönderemezsiniz.",
+  "watchOnlyNote": "Bu yalnızca izleme amaçlı bir cüzdandır. Alıp görüntüleyebilir, ancak gönderemezsiniz.",
+  "watchXpubLabel": "Hesap xpub veya zpub",
+  "labelOptional": "Etiket (isteğe bağlı)",
+  "walletLabelN": "Cüzdan {n}",
+  "watchLabelN": "İzleme {n}",
+  "publicKey": "Genel anahtar",
+  "publicKeyDesc": "Bu cüzdanı başka bir cihaz veya uygulamada salt okunur izlemek için bunu paylaşın. Anahtarlarınızı değil, adreslerinizi açığa çıkarır.",
+  "copyKey": "Anahtarı kopyala",
+  "showPublicKey": "Genel anahtarı göster"
 }

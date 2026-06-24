@@ -172,5 +172,22 @@
   "giftReclaimed": "已收回",
   "giftRevokeConfirm": "立即撤销此礼物？这会将这笔币退回你的钱包并使链接失效。",
   "giftReclaimedTag": "仍可领取",
-  "giftMinNote": "按当前手续费至少 {n}，以便领取时高于尘埃。"
+  "giftMinNote": "按当前手续费至少 {n}，以便领取时高于尘埃。",
+  "accounts": "账户",
+  "addWallet": "添加钱包",
+  "lockAll": "全部锁定",
+  "remove": "移除",
+  "watchOnly": "仅查看",
+  "watchOnlyTag": "仅查看",
+  "watchOnlyAdd": "添加仅查看",
+  "watchOnlyDesc": "通过账户公钥查看任意钱包。你可以接收并查看余额和历史记录，但无法发送。",
+  "watchOnlyNote": "这是一个仅查看钱包。你可以接收并查看，但无法发送。",
+  "watchXpubLabel": "账户 xpub 或 zpub",
+  "labelOptional": "标签（可选）",
+  "walletLabelN": "钱包 {n}",
+  "watchLabelN": "查看 {n}",
+  "publicKey": "公钥",
+  "publicKeyDesc": "分享它即可在另一台设备或应用上以只读方式查看此钱包。它会暴露你的地址，而非你的密钥。",
+  "copyKey": "复制密钥",
+  "showPublicKey": "显示公钥"
 }

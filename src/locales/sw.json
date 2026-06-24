@@ -172,5 +172,22 @@
   "giftReclaimed": "Sarafu imerudishwa",
   "giftRevokeConfirm": "Batilisha zawadi hii sasa? Hii inarudisha sarafu kwenye pochi yako na kuzima kiungo.",
   "giftReclaimedTag": "bado inaweza kudaiwa",
-  "giftMinNote": "Kima cha chini {n} kwa ada za sasa, ili kuzidi vumbi inapodaiwa."
+  "giftMinNote": "Kima cha chini {n} kwa ada za sasa, ili kuzidi vumbi inapodaiwa.",
+  "accounts": "Akaunti",
+  "addWallet": "Ongeza pochi",
+  "lockAll": "Funga zote",
+  "remove": "Ondoa",
+  "watchOnly": "Kutazama tu",
+  "watchOnlyTag": "kutazama tu",
+  "watchOnlyAdd": "Ongeza ya kutazama tu",
+  "watchOnlyDesc": "Tazama pochi yoyote kwa kutumia ufunguo wa umma wa akaunti yake. Unaweza kupokea na kuona salio na historia, lakini si kutuma.",
+  "watchOnlyNote": "Hii ni pochi ya kutazama tu. Unaweza kupokea na kutazama, lakini huwezi kutuma.",
+  "watchXpubLabel": "xpub au zpub ya akaunti",
+  "labelOptional": "Lebo (si lazima)",
+  "walletLabelN": "Pochi {n}",
+  "watchLabelN": "Tazama {n}",
+  "publicKey": "Ufunguo wa umma",
+  "publicKeyDesc": "Shiriki huu ili kutazama pochi hii kwa kusoma tu kwenye kifaa au programu nyingine. Unaonyesha anwani zako, si funguo zako.",
+  "copyKey": "Nakili ufunguo",
+  "showPublicKey": "Onyesha ufunguo wa umma"
 }

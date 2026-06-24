@@ -172,5 +172,21 @@
   "giftReclaimed": "Münze zurückgeholt",
   "giftRevokeConfirm": "Dieses Geschenk jetzt widerrufen? Die Münze geht zurück in deine Wallet und der Link wird deaktiviert.",
   "giftReclaimedTag": "noch einlösbar",
-  "giftMinNote": "Mindestens {n} bei aktuellen Gebühren, damit es beim Einlösen über dem Dust-Limit liegt."
+  "giftMinNote": "Mindestens {n} bei aktuellen Gebühren, damit es beim Einlösen über dem Dust-Limit liegt.",
+  "accounts": "Konten",
+  "addWallet": "Wallet hinzufügen",
+  "lockAll": "Alle sperren",
+  "watchOnly": "Nur-Lesen",
+  "watchOnlyTag": "nur-lesen",
+  "watchOnlyAdd": "Nur-Lesen hinzufügen",
+  "watchOnlyDesc": "Beobachte eine beliebige Wallet über ihren öffentlichen Account-Schlüssel. Du kannst empfangen sowie Guthaben und Verlauf einsehen, aber nicht senden.",
+  "watchOnlyNote": "Dies ist eine Nur-Lesen-Wallet. Du kannst empfangen und einsehen, aber nicht senden.",
+  "watchXpubLabel": "Account-xpub oder -zpub",
+  "labelOptional": "Bezeichnung (optional)",
+  "walletLabelN": "Wallet {n}",
+  "watchLabelN": "Beobachtung {n}",
+  "publicKey": "Öffentlicher Schlüssel",
+  "publicKeyDesc": "Teile dies, um diese Wallet auf einem anderen Gerät oder in einer anderen App nur-lesend zu beobachten. Er gibt deine Adressen preis, nicht deine Schlüssel.",
+  "copyKey": "Schlüssel kopieren",
+  "showPublicKey": "Öffentlichen Schlüssel anzeigen"
 }

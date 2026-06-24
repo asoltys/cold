@@ -172,5 +172,21 @@
   "giftReclaimed": "Pièce récupérée",
   "giftRevokeConfirm": "Révoquer ce cadeau maintenant ? La pièce revient dans votre portefeuille et le lien est désactivé.",
   "giftReclaimedTag": "encore réclamable",
-  "giftMinNote": "Minimum {n} aux frais actuels, pour dépasser la poussière lors de la réclamation."
+  "giftMinNote": "Minimum {n} aux frais actuels, pour dépasser la poussière lors de la réclamation.",
+  "accounts": "Comptes",
+  "addWallet": "Ajouter un portefeuille",
+  "lockAll": "Tout verrouiller",
+  "watchOnly": "Lecture seule",
+  "watchOnlyTag": "lecture seule",
+  "watchOnlyAdd": "Ajouter en lecture seule",
+  "watchOnlyDesc": "Surveillez n’importe quel portefeuille à partir de sa clé publique de compte. Vous pouvez recevoir et consulter le solde et l’historique, mais pas envoyer.",
+  "watchOnlyNote": "Ceci est un portefeuille en lecture seule. Vous pouvez recevoir et consulter, mais vous ne pouvez pas envoyer.",
+  "watchXpubLabel": "xpub ou zpub du compte",
+  "labelOptional": "Libellé (facultatif)",
+  "walletLabelN": "Portefeuille {n}",
+  "watchLabelN": "Surveillance {n}",
+  "publicKey": "Clé publique",
+  "publicKeyDesc": "Partagez-la pour surveiller ce portefeuille en lecture seule sur un autre appareil ou une autre application. Elle révèle vos adresses, pas vos clés.",
+  "copyKey": "Copier la clé",
+  "showPublicKey": "Afficher la clé publique"
 }

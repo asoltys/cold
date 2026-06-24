@@ -11,7 +11,7 @@
 import { HDKey } from '@scure/bip32';
 import { generateMnemonic, mnemonicToSeedSync, validateMnemonic } from '@scure/bip39';
 import { wordlist } from '@scure/bip39/wordlists/english';
-import { hex, base64urlnopad } from '@scure/base';
+import { hex, base64urlnopad, base58check } from '@scure/base';
 import { sha256 } from '@noble/hashes/sha256';
 import * as btc from '@scure/btc-signer';
 import { p2wpkh } from '@scure/btc-signer/payment';
@@ -110,15 +110,18 @@ export class Wallet {
   }
 
   // --- setup --------------------------------------------------------------
-  load({ mnemonic, passphrase = '', netName = 'mainnet', offline = false }) {
+  load({ mnemonic = '', passphrase = '', xpub = '', netName = 'mainnet', offline = false }) {
     this.stopRealtime();
-    this.mnemonic = mnemonic.trim().replace(/\s+/g, ' ');
+    this.mnemonic = (mnemonic || '').trim().replace(/\s+/g, ' ');
     this.passphrase = passphrase;
+    this.xpub = xpub || '';
+    this.watchOnly = !!this.xpub && !this.mnemonic; // no seed = view/receive only
     this.netName = netName;
     this.offline = offline;
     this.api = new Api(netName);
     this.api.offline = offline;
     this._account = null;
+    this._accountKey = null;
     this._addrCache.clear();
     this._reserved = null; // gift coins set aside from spending (lazy-loaded)
     this._reclaimed = null; // gift coins freed for spending but link still live
@@ -169,6 +172,15 @@ export class Wallet {
 
   // --- derivation ---------------------------------------------------------
   account() {
+    // Watch-only wallets are loaded directly from the account public key.
+    if (this.watchOnly) {
+      if (!this._account || this._accountKey !== this.xpub) {
+        this._account = HDKey.fromExtendedKey(this.xpub);
+        this._accountKey = this.xpub;
+        this._addrCache.clear();
+      }
+      return this._account;
+    }
     const key = `${this.netName}|${this.mnemonic}|${this.passphrase}`;
     if (this._account && this._accountKey === key) return this._account;
     const seed = mnemonicToSeedSync(this.mnemonic, this.passphrase);
@@ -178,6 +190,11 @@ export class Wallet {
     this._accountKey = key;
     this._addrCache.clear();
     return this._account;
+  }
+
+  // The account-level extended public key (xpub / zpub) for export → watch-only.
+  accountXpub() {
+    return this.account().publicExtendedKey;
   }
 
   node(chain, index) {
@@ -633,6 +650,7 @@ export class Wallet {
 
   // Sign every input of an already-built Transaction with the matching HD key.
   sign(tx) {
+    if (this.watchOnly) throw new Error('Watch-only wallet — no keys to sign with.');
     const byOutpoint = new Map();
     for (const u of this.utxos) byOutpoint.set(utxoId(u), u);
     for (let i = 0; i < tx.inputsLength; i++) {
@@ -1113,7 +1131,8 @@ export class Wallet {
   // then shows the last-known balance/history instantly while a fresh scan
   // runs in the background.
   _cacheKey() {
-    const bytes = new TextEncoder().encode(`${this.mnemonic}\n${this.passphrase}`);
+    const id = this.watchOnly ? this.xpub : `${this.mnemonic}\n${this.passphrase}`;
+    const bytes = new TextEncoder().encode(id);
     return 'btc-wallet-cache:' + hex.encode(sha256(bytes)).slice(0, 32);
   }
 
@@ -1289,6 +1308,41 @@ export class Wallet {
 
 export function utxoId(u) {
   return `${u.txid}:${u.vout}`;
+}
+
+// Watch-only: accept a native-segwit account xpub or zpub and normalize it to
+// xpub version bytes (the key material is identical; only the prefix differs),
+// so HDKey can load it. Throws on anything else (private keys, wrong type).
+const _b58c = base58check(sha256);
+const _XPUB_VER = Uint8Array.from([0x04, 0x88, 0xb2, 0x1e]);
+const _ZPUB_VER = Uint8Array.from([0x04, 0xb2, 0x47, 0x46]);
+export function parseAccountKey(s) {
+  let data;
+  try {
+    data = _b58c.decode((s || '').trim());
+  } catch {
+    throw new Error('Not a valid extended public key.');
+  }
+  if (data.length !== 78) throw new Error('Not a valid extended public key.');
+  const ver = hex.encode(data.slice(0, 4));
+  if (ver !== hex.encode(_XPUB_VER) && ver !== hex.encode(_ZPUB_VER))
+    throw new Error('Use an account xpub or zpub (native segwit).');
+  const out = new Uint8Array(data);
+  out.set(_XPUB_VER, 0);
+  const xpub = _b58c.encode(out);
+  try {
+    HDKey.fromExtendedKey(xpub);
+  } catch {
+    throw new Error('Not a valid extended public key.');
+  }
+  return xpub;
+}
+
+// Convert a standard account xpub to a BIP84 zpub for export/interop.
+export function xpubToZpub(xpub) {
+  const data = new Uint8Array(_b58c.decode(xpub));
+  data.set(_ZPUB_VER, 0);
+  return _b58c.encode(data);
 }
 
 // Gift-link claiming (sender side is Wallet.createGift). A gift code is a

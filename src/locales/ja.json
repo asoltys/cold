@@ -172,5 +172,21 @@
   "giftReclaimed": "コインを取り戻しました",
   "giftRevokeConfirm": "このギフトを今すぐ取り消しますか？コインがウォレットに戻り、リンクが無効になります。",
   "giftReclaimedTag": "まだ請求可能",
-  "giftMinNote": "現在の手数料で最低 {n}。請求時にダストを上回ります。"
+  "giftMinNote": "現在の手数料で最低 {n}。請求時にダストを上回ります。",
+  "accounts": "アカウント",
+  "addWallet": "ウォレットを追加",
+  "lockAll": "すべてロック",
+  "watchOnly": "ウォッチ専用",
+  "watchOnlyTag": "ウォッチ専用",
+  "watchOnlyAdd": "ウォッチ専用を追加",
+  "watchOnlyDesc": "アカウントの公開鍵から任意のウォレットをウォッチできます。受取、残高と履歴の表示はできますが、送金はできません。",
+  "watchOnlyNote": "これはウォッチ専用ウォレットです。受取と表示はできますが、送金はできません。",
+  "watchXpubLabel": "アカウントの xpub または zpub",
+  "labelOptional": "ラベル（任意）",
+  "walletLabelN": "ウォレット {n}",
+  "watchLabelN": "ウォッチ {n}",
+  "publicKey": "公開鍵",
+  "publicKeyDesc": "これを共有すると、別の端末やアプリでこのウォレットを読み取り専用でウォッチできます。鍵ではなくアドレスが公開されます。",
+  "copyKey": "鍵をコピー",
+  "showPublicKey": "公開鍵を表示"
 }
