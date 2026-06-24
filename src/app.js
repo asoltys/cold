@@ -305,7 +305,7 @@ function addWatchOnly() {
   ui.watchXpub = '';
   ui.watchLabel = '';
   ui.fromWallet = false;
-  activateAccount(acc);
+  activateAccount(acc, { fresh: true });
 }
 
 // ================================================================ HOW IT WORKS
@@ -553,7 +553,7 @@ async function enterWallet(mnemonic, passphrase, opts = {}) {
     mnemonic: (mnemonic || '').trim().replace(/\s+/g, ' '),
     passphrase: passphrase || '',
   });
-  await activateAccount(acc, opts);
+  await activateAccount(acc, { ...opts, fresh: true });
 }
 
 // Load an account into the wallet and start scanning. Full-account seeds are
@@ -597,13 +597,21 @@ async function activateAccount(acc, opts = {}) {
     // show instantly; a partial frontier-only refresh leaves the state stale and
     // would let the celebration baseline before a known payment is even counted.
     await wallet.scan({ silent: hadCache || hadNostr });
-    // Persisted acknowledgement: first time, baseline to the current index so we
-    // don't celebrate historical payments. After that, any advance beyond the
-    // acknowledged index shows the celebration (and survives refreshes).
-    let ack = wallet.getReceiveAck();
-    if (ack == null) {
+    // Celebration baseline. Opening/importing/switching a wallet (opts.fresh)
+    // baselines to the current frontier, so payments already received before
+    // opening never trigger the "payment received" screen. A same-session
+    // refresh keeps the persisted ack, so an unacknowledged celebration
+    // survives the refresh.
+    let ack;
+    if (opts.fresh) {
       ack = wallet.nextReceiveIndex;
       wallet.setReceiveAck(ack);
+    } else {
+      ack = wallet.getReceiveAck();
+      if (ack == null) {
+        ack = wallet.nextReceiveIndex;
+        wallet.setReceiveAck(ack);
+      }
     }
     ui.receiveSeenIndex = ack;
     wallet.startRealtime();
@@ -670,7 +678,7 @@ function removeAccount(id) {
   if (acc.type === 'watch') saveWatchAccounts();
   persistAccounts();
   if (activeId === id) {
-    if (accounts.length) activateAccount(accounts[0]);
+    if (accounts.length) activateAccount(accounts[0], { fresh: true });
     else lock();
   } else {
     render();
@@ -679,7 +687,7 @@ function removeAccount(id) {
 
 function switchAccount(id) {
   const acc = accounts.find((a) => a.id === id);
-  if (acc) activateAccount(acc);
+  if (acc) activateAccount(acc, { fresh: true });
 }
 
 // Restore accounts after a refresh (sessionStorage); on a fresh session, prompt
@@ -698,7 +706,7 @@ function restoreAccountsState() {
   const watch = loadWatchAccounts();
   if (watch.length) {
     accounts = watch.slice();
-    activateAccount(accounts[0]);
+    activateAccount(accounts[0], { fresh: true });
     return true;
   }
   return false;
@@ -782,13 +790,13 @@ function unlockVault() {
     .concat(loadWatchAccounts());
   ui.vaultPw = '';
   ui.vaultError = '';
-  activateAccount(accounts[0]);
+  activateAccount(accounts[0], { fresh: true });
 }
 function skipVault() {
   ui.vaultPw = '';
   ui.vaultError = '';
   const watch = loadWatchAccounts();
-  if (watch.length) { accounts = watch.slice(); activateAccount(accounts[0]); }
+  if (watch.length) { accounts = watch.slice(); activateAccount(accounts[0], { fresh: true }); }
   else { ui.screen = 'unlock'; render(); }
 }
 
