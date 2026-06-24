@@ -50,6 +50,7 @@ h1, h2, h3 { margin: 0; font-weight: 650; letter-spacing: -0.01em; }
 .break { word-break: break-all; }
 a { color: var(--accent-ink); text-decoration: none; }
 a:hover { text-decoration: underline; }
+summary { cursor: pointer; }
 
 /* ---- layout helpers ---- */
 .row { display: flex; align-items: center; gap: 10px; }

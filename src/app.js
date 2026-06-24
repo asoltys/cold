@@ -757,7 +757,9 @@ function balanceCard() {
     'div',
     { class: 'card balance' },
     h('div', { class: 'small faint', style: 'text-transform:uppercase;letter-spacing:.05em' }, t('balance')),
-    h('div', { class: 'amt', style: firstLoad ? 'opacity:.3' : '' }, fmtAmount(wallet.confirmed), ' ', unitTag('unit')),
+    // Headline is the projected balance (confirmed + mempool), so a pending
+    // spend is debited immediately rather than waiting for confirmation.
+    h('div', { class: 'amt', style: firstLoad ? 'opacity:.3' : '' }, fmtAmount(wallet.total), ' ', unitTag('unit')),
     wallet.pending > 0
       ? h(
           'div',
