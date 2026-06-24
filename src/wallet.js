@@ -309,6 +309,12 @@ export class Wallet {
         }
       }
 
+      // Re-verify the addresses that currently hold coins, to catch spends from
+      // an already-scanned address (the frontier walk above only looks forward,
+      // so a coin spent here — including by a tx broadcast on another device —
+      // would otherwise never reconcile without a full rescan).
+      if (await this._reconcileHeld()) changed = true;
+
       if (changed) {
         this.utxos.sort((x, y) => y.value - x.value);
         this._sortTxs();
@@ -322,6 +328,58 @@ export class Wallet {
     } finally {
       this._polling = false;
     }
+  }
+
+  // Re-check every address that currently holds a UTXO: refresh its balance from
+  // chain/mempool stats and rebuild its UTXOs. This is what reconciles spends
+  // (a held coin that's now gone) — confirmed or still in the mempool, regardless
+  // of which device broadcast the spending transaction. Returns true if anything
+  // changed. Only touches addresses we already know, so it stays cheap.
+  async _reconcileHeld() {
+    const addrs = [...new Set(this.utxos.map((u) => u.address))];
+    let changed = false;
+    for (const address of addrs) {
+      const p = this.addrMap.get(address);
+      if (!p) continue;
+      let info;
+      try {
+        info = await this.api.addressInfo(address);
+      } catch {
+        continue;
+      }
+      const cs = info.chain_stats || {};
+      const ms = info.mempool_stats || {};
+      const confirmed = (cs.funded_txo_sum || 0) - (cs.spent_txo_sum || 0);
+      const pending = (ms.funded_txo_sum || 0) - (ms.spent_txo_sum || 0);
+      const arr = p.chain === 0 ? this.receive : this.change;
+      const entry = arr.find((e) => e.index === p.index);
+      if (entry && entry.confirmed === confirmed && entry.pending === pending) continue;
+
+      let us;
+      try {
+        us = await this.api.addressUtxos(address);
+      } catch {
+        continue;
+      }
+      if (entry) {
+        entry.confirmed = confirmed;
+        entry.pending = pending;
+      }
+      this.utxos = this.utxos.filter((u) => u.address !== address);
+      for (const u of us) {
+        this.utxos.push({
+          txid: u.txid,
+          vout: u.vout,
+          value: u.value,
+          address,
+          chain: p.chain,
+          index: p.index,
+          confirmed: !!u.status.confirmed,
+        });
+      }
+      changed = true;
+    }
+    return changed;
   }
 
   // silent=false: foreground load (shows loading state, always re-renders).
