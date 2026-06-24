@@ -155,7 +155,7 @@
   "giftLinkDesc": "Tandatangani sejumlah dana sebagai tautan. Siapa pun yang membukanya mengklaim Bitcoin itu ke dompet baru yang hanya dia kendalikan.",
   "giftLinkWarn": "⚠ Siapa pun yang membuka tautan ini bisa mengklaim jumlahnya, jadi bagikan hanya kepada orang yang Anda beri hadiah. Jaga jumlahnya tetap kecil.",
   "giftAmountLabel": "Jumlah yang dihadiahkan",
-  "giftAmountInvalid": "Masukkan jumlah yang valid.",
+  "giftAmountInvalid": "Masukkan minimal {n}.",
   "giftAnother": "Buat lagi",
   "giftReserved": "Tautan hadiah belum diklaim ({n})",
   "claimBody": "Klaim ke dompet baru yang hanya Anda kendalikan.",
@@ -171,5 +171,6 @@
   "giftReclaimPrompt": "Menarik kembali membebaskan koin ini untuk pembayaran berikutnya, tetapi tautan tetap bisa diklaim sampai Anda membelanjakannya. Bayar biaya jaringan untuk mencabutnya sekarang?",
   "giftReclaimed": "Koin ditarik kembali",
   "giftRevokeConfirm": "Cabut hadiah ini sekarang? Ini mengembalikan koin ke dompet Anda dan menonaktifkan tautannya.",
-  "giftReclaimedTag": "masih bisa diklaim"
+  "giftReclaimedTag": "masih bisa diklaim",
+  "giftMinNote": "Minimal {n} pada biaya saat ini, agar melampaui dust saat diklaim."
 }

@@ -838,10 +838,12 @@ export class Wallet {
   // direct to their own fresh address. Reserves the coin. Returns { code, ... }.
   createGift(amountSats, feeRate) {
     const gift = BigInt(Math.round(amountSats));
-    if (gift < 546n) throw new Error('Gift amount is too small.');
     const rate = Math.max(1, Math.round(feeRate));
     const claimFee = BigInt(Math.ceil((11 + 68 + 31 * 2) * rate)); // claimer's 1-in 2-out tx
     const DUST = 294n;
+    // Require dust + one claim fee of headroom so the recipient stays well above
+    // dust even if fees rise before they claim.
+    if (gift < BigInt(giftMinimum(rate))) throw new Error('Gift amount is too small.');
     const need = gift + claimFee + DUST;
     const coin = this.utxos
       .filter((u) => u.confirmed && !this.isReserved(utxoId(u)))
@@ -1293,6 +1295,14 @@ export function utxoId(u) {
 // base64url PSBT: one SIGHASH_SINGLE-signed input + the sender's change output.
 // previewGift reports the room available to the claimer (before their fee);
 // buildClaimTx adds the claimer's output and finalizes a broadcastable tx.
+// Smallest sensible gift at a given fee rate: dust + one claim fee of headroom
+// (floored at 546 sats), so the recipient clears dust even if fees climb.
+export function giftMinimum(feeRate) {
+  const rate = Math.max(1, Math.round(feeRate));
+  const claimFee = Math.ceil((11 + 68 + 31 * 2) * rate);
+  return Math.max(546, 294 + claimFee);
+}
+
 export function previewGift(code) {
   try {
     const tx = btc.Transaction.fromPSBT(base64urlnopad.decode(code));

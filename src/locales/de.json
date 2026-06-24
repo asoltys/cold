@@ -157,7 +157,7 @@
   "giftLinkReveal": "Geschenk-Link erstellen",
   "copyLink": "Link kopieren",
   "giftAmountLabel": "Zu verschenkender Betrag",
-  "giftAmountInvalid": "Gib einen gültigen Betrag ein.",
+  "giftAmountInvalid": "Gib mindestens {n} ein.",
   "giftAnother": "Weiteres erstellen",
   "giftReserved": "Nicht eingelöste Geschenk-Links ({n})",
   "claimBody": "Beanspruche es in einer brandneuen Wallet, die nur du selbst kontrollierst.",
@@ -171,5 +171,6 @@
   "giftReclaimPrompt": "Zurückholen gibt diese Münze für deine nächste Zahlung frei, aber der Link bleibt einlösbar, bis du sie ausgibst. Stattdessen eine Netzwerkgebühr zahlen, um ihn jetzt zu widerrufen?",
   "giftReclaimed": "Münze zurückgeholt",
   "giftRevokeConfirm": "Dieses Geschenk jetzt widerrufen? Die Münze geht zurück in deine Wallet und der Link wird deaktiviert.",
-  "giftReclaimedTag": "noch einlösbar"
+  "giftReclaimedTag": "noch einlösbar",
+  "giftMinNote": "Mindestens {n} bei aktuellen Gebühren, damit es beim Einlösen über dem Dust-Limit liegt."
 }

@@ -157,7 +157,7 @@
   "giftLinkReveal": "Criar link de presente",
   "copyLink": "Copiar link",
   "giftAmountLabel": "Valor a presentear",
-  "giftAmountInvalid": "Digite um valor válido.",
+  "giftAmountInvalid": "Insira pelo menos {n}.",
   "giftAnother": "Criar outro",
   "giftReserved": "Links de presente não resgatados ({n})",
   "claimBody": "Resgate para uma carteira novinha que só você controla.",
@@ -171,5 +171,6 @@
   "giftReclaimPrompt": "Recuperar libera esta moeda para o seu próximo pagamento, mas o link continua resgatável até você gastá-la. Pagar uma taxa de rede para revogá-lo agora?",
   "giftReclaimed": "Moeda recuperada",
   "giftRevokeConfirm": "Revogar este presente agora? Isso devolve a moeda à sua carteira e desativa o link.",
-  "giftReclaimedTag": "ainda resgatável"
+  "giftReclaimedTag": "ainda resgatável",
+  "giftMinNote": "Mínimo {n} com as taxas atuais, para superar a poeira ao ser resgatado."
 }

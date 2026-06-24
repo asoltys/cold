@@ -4,7 +4,7 @@
 // which rebuilds the active screen. Text inputs write back into `ui` on `input`
 // (without re-rendering) so their values survive structural re-renders.
 
-import { Wallet, newMnemonic, isValidMnemonic, utxoId, previewGift, buildClaimTx } from './wallet.js';
+import { Wallet, newMnemonic, isValidMnemonic, utxoId, previewGift, buildClaimTx, giftMinimum } from './wallet.js';
 import { qrSvg } from './qr.js';
 import { scanQr } from './scan.js';
 import { getSyncConfig, setSyncConfig } from './nostr.js';
@@ -35,7 +35,8 @@ const ui = {
   passphrase: '',
   showPass: false,
   revealShown: false, // recovery phrase unmasked on the Backup tab (after the warning)
-  giftAmount: '', // gift-create amount input (Settings)
+  giftMode: false, // gift sub-view active on the Send page
+  giftAmount: '', // gift-create amount input
   giftCode: null, // last-created gift PSBT code
   giftError: '',
   revokeId: null, // outpoint of a gift being revoked (confirm state)
@@ -612,6 +613,7 @@ function lock() {
   ui.passphrase = '';
   ui.confirm = [];
   ui.revealShown = false;
+  ui.giftMode = false;
   ui.giftAmount = '';
   ui.giftCode = null;
   ui.giftError = '';
@@ -693,7 +695,6 @@ function settingsTab() {
             wallet.scanning ? t('scanning') : t('rescanWallet'))
     ),
     explorerCard(),
-    giftCard(),
     syncCard(),
     h(
       'div',
@@ -709,10 +710,14 @@ function settingsTab() {
 function giftUrl() {
   return `${location.origin}/#gift=${ui.giftCode}`;
 }
+function giftRate() {
+  return (wallet.feeRates && wallet.feeRates.halfHourFee) || 5;
+}
 function createGiftLink() {
+  const rate = giftRate();
+  const min = giftMinimum(rate);
   const amt = Math.round(Number(ui.giftAmount));
-  if (!amt || amt < 546) { ui.giftError = t('giftAmountInvalid'); render(); return; }
-  const rate = (wallet.feeRates && wallet.feeRates.halfHourFee) || 5;
+  if (!amt || amt < min) { ui.giftError = t('giftAmountInvalid', { n: fmtAmount(min) + ' ' + unitLabel() }); render(); return; }
   try {
     ui.giftCode = wallet.createGift(amt, rate).code;
     ui.giftError = '';
@@ -740,10 +745,11 @@ function giftCard() {
         )
       : h('div', { class: 'col gap6' },
           h('div', { class: 'input-group' },
-            h('input', { type: 'number', min: '546', inputmode: 'numeric', placeholder: t('giftAmountLabel'),
+            h('input', { type: 'number', min: String(giftMinimum(giftRate())), inputmode: 'numeric', placeholder: t('giftAmountLabel'),
               value: ui.giftAmount, onInput: (e) => (ui.giftAmount = e.target.value) }),
             h('span', { class: 'small muted', style: 'align-self:center' }, unitLabel())
           ),
+          h('div', { class: 'small faint' }, t('giftMinNote', { n: fmtAmount(giftMinimum(giftRate())) + ' ' + unitLabel() })),
           ui.giftError && h('div', { class: 'notice err' }, ui.giftError),
           h('button', { class: 'btn-block', onClick: createGiftLink }, t('giftLinkReveal'))
         ),
@@ -1073,6 +1079,7 @@ function tabsBar() {
         ui.revealShown = false; // re-mask the recovery phrase whenever tabs change
         ui.txDetail = null; // back to the history list when leaving/returning
         ui.bump = null;
+        ui.giftMode = false;
         render();
       })
     )
@@ -1130,7 +1137,18 @@ function sendTab() {
   if (ui.sendResult) return sendResultView();
   if (ui.broadcastTx) return broadcastConfirmView();
   if (ui.draft) return reviewView();
+  if (ui.giftMode) return giftView();
   return sendForm();
+}
+
+// The gift UI as a send-page sub-view (entered from a link on the send form).
+function giftView() {
+  return h(
+    'div',
+    { class: 'col', style: 'gap:12px' },
+    giftCard(),
+    h('button', { class: 'btn-ghost btn-block', onClick: () => { ui.giftMode = false; ui.giftCode = null; ui.giftError = ''; ui.revokeId = null; render(); } }, t('back'))
+  );
 }
 
 // QR scanning is only possible in a secure context with a camera.
@@ -1480,7 +1498,8 @@ function sendForm() {
     ),
     coinControl(),
     ui.sendError && h('div', { class: 'notice err' }, ui.sendError),
-    h('button', { class: 'btn-primary btn-block', onClick: reviewSend }, t('reviewTx'))
+    h('button', { class: 'btn-primary btn-block', onClick: reviewSend }, t('reviewTx')),
+    h('button', { class: 'linklike small', style: 'align-self:center;margin-top:2px', onClick: () => { ui.giftMode = true; ui.sendError = ''; render(); } }, t('giftLink'))
   );
 }
 

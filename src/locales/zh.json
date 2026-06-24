@@ -155,7 +155,7 @@
   "giftLinkDesc": "将一笔金额预签为一个链接。打开链接的人可将这笔 Bitcoin 领取到一个仅由他们自己掌控的全新钱包中。",
   "giftLinkWarn": "⚠ 任何打开此链接的人都能领取这笔金额，所以请仅分享给你要赠送的对象。请保持金额较小。",
   "giftAmountLabel": "赠送金额",
-  "giftAmountInvalid": "请输入有效金额。",
+  "giftAmountInvalid": "至少输入 {n}。",
   "giftAnother": "再创建一个",
   "giftReserved": "未领取的礼物链接（{n}）",
   "claimBody": "将它领取到一个仅由你自己掌控的全新钱包中。",
@@ -171,5 +171,6 @@
   "giftReclaimPrompt": "收回会释放这笔币用于你的下一次付款，但在你花掉它之前链接仍可被领取。改为支付网络手续费立即撤销？",
   "giftReclaimed": "已收回",
   "giftRevokeConfirm": "立即撤销此礼物？这会将这笔币退回你的钱包并使链接失效。",
-  "giftReclaimedTag": "仍可领取"
+  "giftReclaimedTag": "仍可领取",
+  "giftMinNote": "按当前手续费至少 {n}，以便领取时高于尘埃。"
 }

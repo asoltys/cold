@@ -155,7 +155,7 @@
   "giftLinkDesc": "Ký trước một số tiền thành một liên kết. Ai mở liên kết sẽ nhận số Bitcoin đó vào một ví hoàn toàn mới mà chỉ riêng họ kiểm soát.",
   "giftLinkWarn": "⚠ Bất kỳ ai mở liên kết này đều có thể nhận số tiền, vì vậy chỉ chia sẻ với người bạn muốn tặng. Hãy giữ số tiền nhỏ.",
   "giftAmountLabel": "Số tiền muốn tặng",
-  "giftAmountInvalid": "Nhập một số tiền hợp lệ.",
+  "giftAmountInvalid": "Nhập tối thiểu {n}.",
   "giftAnother": "Tạo cái khác",
   "giftReserved": "Liên kết quà chưa nhận ({n})",
   "claimBody": "Nhận nó vào một ví hoàn toàn mới mà chỉ riêng bạn kiểm soát.",
@@ -171,5 +171,6 @@
   "giftReclaimPrompt": "Thu lại giải phóng đồng coin này cho lần thanh toán tới, nhưng liên kết vẫn có thể nhận được cho đến khi bạn tiêu nó. Trả phí mạng để thu hồi ngay bây giờ thay vào đó?",
   "giftReclaimed": "Đã thu lại coin",
   "giftRevokeConfirm": "Thu hồi quà này ngay? Việc này chuyển đồng coin về ví của bạn và vô hiệu hóa liên kết.",
-  "giftReclaimedTag": "vẫn có thể nhận"
+  "giftReclaimedTag": "vẫn có thể nhận",
+  "giftMinNote": "Tối thiểu {n} ở mức phí hiện tại, để vượt mức bụi khi được nhận."
 }

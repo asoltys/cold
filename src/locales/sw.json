@@ -155,7 +155,7 @@
   "giftLinkDesc": "Tia saini kiasi mapema kama kiungo. Yeyote anayekifungua hudai Bitcoin kwenye pochi mpya kabisa anayoidhibiti yeye pekee.",
   "giftLinkWarn": "⚠ Yeyote anayefungua kiungo hiki anaweza kudai kiasi hicho, kwa hivyo kishiriki tu na mtu unayempa zawadi. Weka kiasi kidogo.",
   "giftAmountLabel": "Kiasi cha kutoa zawadi",
-  "giftAmountInvalid": "Ingiza kiasi sahihi.",
+  "giftAmountInvalid": "Weka angalau {n}.",
   "giftAnother": "Tengeneza nyingine",
   "giftReserved": "Viungo vya zawadi visivyodaiwa ({n})",
   "claimBody": "Idai kwenye pochi mpya kabisa unayoidhibiti wewe pekee.",
@@ -171,5 +171,6 @@
   "giftReclaimPrompt": "Kurudisha hufungua sarafu hii kwa malipo yako yajayo, lakini kiungo kinabaki kinaweza kudaiwa hadi uitumie. Badala yake ulipe ada ya mtandao kuibatilisha sasa hivi?",
   "giftReclaimed": "Sarafu imerudishwa",
   "giftRevokeConfirm": "Batilisha zawadi hii sasa? Hii inarudisha sarafu kwenye pochi yako na kuzima kiungo.",
-  "giftReclaimedTag": "bado inaweza kudaiwa"
+  "giftReclaimedTag": "bado inaweza kudaiwa",
+  "giftMinNote": "Kima cha chini {n} kwa ada za sasa, ili kuzidi vumbi inapodaiwa."
 }

@@ -155,7 +155,7 @@
   "giftLinkDesc": "Bir tutarı önceden imzalayıp bağlantı olarak verin. Bağlantıyı açan, Bitcoin’i yalnızca kendi kontrolündeki yepyeni bir cüzdana alır.",
   "giftLinkWarn": "⚠ Bu bağlantıyı açan herkes tutarı talep edebilir, bu yüzden yalnızca hediye ettiğiniz kişiyle paylaşın. Tutarları küçük tutun.",
   "giftAmountLabel": "Hediye edilecek tutar",
-  "giftAmountInvalid": "Geçerli bir tutar girin.",
+  "giftAmountInvalid": "En az {n} girin.",
   "giftAnother": "Bir tane daha oluştur",
   "giftReserved": "Talep edilmemiş hediye bağlantıları ({n})",
   "claimBody": "Yalnızca kendi kontrolünüzdeki yepyeni bir cüzdana alın.",
@@ -171,5 +171,6 @@
   "giftReclaimPrompt": "Geri almak bu parayı bir sonraki ödemen için serbest bırakır, ancak sen harcayana kadar bağlantı talep edilebilir kalır. Bunun yerine şimdi iptal etmek için ağ ücreti ödensin mi?",
   "giftReclaimed": "Para geri alındı",
   "giftRevokeConfirm": "Bu hediye şimdi iptal edilsin mi? Bu, parayı cüzdanınıza geri gönderir ve bağlantıyı devre dışı bırakır.",
-  "giftReclaimedTag": "hâlâ talep edilebilir"
+  "giftReclaimedTag": "hâlâ talep edilebilir",
+  "giftMinNote": "Mevcut ücretlerde en az {n}, böylece talep edildiğinde tozu aşar."
 }

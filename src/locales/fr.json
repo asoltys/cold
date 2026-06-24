@@ -157,7 +157,7 @@
   "giftLinkReveal": "Créer le lien cadeau",
   "copyLink": "Copier le lien",
   "giftAmountLabel": "Montant à offrir",
-  "giftAmountInvalid": "Saisissez un montant valide.",
+  "giftAmountInvalid": "Saisissez au moins {n}.",
   "giftAnother": "En créer un autre",
   "giftReserved": "Liens cadeaux non réclamés ({n})",
   "claimBody": "Récupérez-les dans un tout nouveau portefeuille que vous seul contrôlez.",
@@ -171,5 +171,6 @@
   "giftReclaimPrompt": "Récupérer libère cette pièce pour votre prochain paiement, mais le lien reste réclamable jusqu’à ce que vous la dépensiez. Payer des frais de réseau pour le révoquer tout de suite ?",
   "giftReclaimed": "Pièce récupérée",
   "giftRevokeConfirm": "Révoquer ce cadeau maintenant ? La pièce revient dans votre portefeuille et le lien est désactivé.",
-  "giftReclaimedTag": "encore réclamable"
+  "giftReclaimedTag": "encore réclamable",
+  "giftMinNote": "Minimum {n} aux frais actuels, pour dépasser la poussière lors de la réclamation."
 }

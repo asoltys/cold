@@ -155,7 +155,7 @@
   "giftLinkDesc": "金額をリンクとして事前署名します。リンクを開いた人が、その人だけが管理できる真新しいウォレットに Bitcoin を受け取ります。",
   "giftLinkWarn": "⚠ このリンクを開いた人は誰でもその金額を受け取れるので、贈る相手とだけ共有してください。金額は少なめにしましょう。",
   "giftAmountLabel": "贈る金額",
-  "giftAmountInvalid": "有効な金額を入力してください。",
+  "giftAmountInvalid": "{n} 以上を入力してください。",
   "giftAnother": "もう一つ作成",
   "giftReserved": "未請求のギフトリンク（{n}）",
   "claimBody": "あなただけが管理できる真新しいウォレットに受け取りましょう。",
@@ -171,5 +171,6 @@
   "giftReclaimPrompt": "取り戻すと次の支払いにこのコインを使えますが、使うまでリンクは請求可能なままです。代わりにネットワーク手数料を払って今すぐ取り消しますか？",
   "giftReclaimed": "コインを取り戻しました",
   "giftRevokeConfirm": "このギフトを今すぐ取り消しますか？コインがウォレットに戻り、リンクが無効になります。",
-  "giftReclaimedTag": "まだ請求可能"
+  "giftReclaimedTag": "まだ請求可能",
+  "giftMinNote": "現在の手数料で最低 {n}。請求時にダストを上回ります。"
 }
