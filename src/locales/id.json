@@ -144,5 +144,6 @@
   "footerSourceOn": "sumber tersedia di",
   "bumpFee": "Naikkan biaya",
   "bumpConfirm": "Ganti dengan biaya lebih tinggi?",
-  "replaceTx": "Ganti"
+  "replaceTx": "Ganti",
+  "bumpInsufficient": "Dana tidak cukup untuk menaikkan pada tarif ini. Coba tarif lebih rendah."
 }

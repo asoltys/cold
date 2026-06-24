@@ -144,5 +144,6 @@
   "footerSourceOn": "kaynak kodu",
   "bumpFee": "Ücreti artır",
   "bumpConfirm": "Daha yüksek ücretle değiştirilsin mi?",
-  "replaceTx": "Değiştir"
+  "replaceTx": "Değiştir",
+  "bumpInsufficient": "Bu oranda artırmak için yeterli bakiye yok. Daha düşük bir oran deneyin."
 }

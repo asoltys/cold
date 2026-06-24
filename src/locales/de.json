@@ -144,5 +144,6 @@
   "footerSourceOn": "Quellcode auf",
   "bumpFee": "Gebühr erhöhen",
   "bumpConfirm": "Mit höherer Gebühr ersetzen?",
-  "replaceTx": "Ersetzen"
+  "replaceTx": "Ersetzen",
+  "bumpInsufficient": "Nicht genug Guthaben für diese Gebührenrate. Versuche eine niedrigere Rate."
 }

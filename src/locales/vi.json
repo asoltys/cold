@@ -144,5 +144,6 @@
   "footerSourceOn": "mã nguồn tại",
   "bumpFee": "Tăng phí",
   "bumpConfirm": "Thay thế với phí cao hơn?",
-  "replaceTx": "Thay thế"
+  "replaceTx": "Thay thế",
+  "bumpInsufficient": "Không đủ tiền để tăng ở mức phí này. Hãy thử mức thấp hơn."
 }

@@ -144,5 +144,6 @@
   "footerSourceOn": "code source sur",
   "bumpFee": "Augmenter les frais",
   "bumpConfirm": "Remplacer avec des frais plus élevés ?",
-  "replaceTx": "Remplacer"
+  "replaceTx": "Remplacer",
+  "bumpInsufficient": "Fonds insuffisants pour augmenter à ce taux. Essayez un taux plus bas."
 }

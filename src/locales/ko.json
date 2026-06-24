@@ -144,5 +144,6 @@
   "footerSourceOn": "소스 공개:",
   "bumpFee": "수수료 올리기",
   "bumpConfirm": "더 높은 수수료로 교체할까요?",
-  "replaceTx": "교체"
+  "replaceTx": "교체",
+  "bumpInsufficient": "이 수수료율로 올릴 자금이 부족합니다. 더 낮은 율을 시도하세요."
 }

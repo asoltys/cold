@@ -144,5 +144,6 @@
   "footerSourceOn": "msimbo unapatikana",
   "bumpFee": "Ongeza ada",
   "bumpConfirm": "Badilisha kwa ada ya juu zaidi?",
-  "replaceTx": "Badilisha"
+  "replaceTx": "Badilisha",
+  "bumpInsufficient": "Fedha hazitoshi kuongeza kwa kiwango hiki. Jaribu kiwango cha chini."
 }

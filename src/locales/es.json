@@ -144,5 +144,6 @@
   "footerSourceOn": "código disponible en",
   "bumpFee": "Aumentar comisión",
   "bumpConfirm": "¿Reemplazar con una comisión más alta?",
-  "replaceTx": "Reemplazar"
+  "replaceTx": "Reemplazar",
+  "bumpInsufficient": "Fondos insuficientes para aumentar a esta tasa. Prueba una tasa más baja."
 }

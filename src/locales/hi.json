@@ -144,5 +144,6 @@
   "footerSourceOn": "सोर्स यहाँ",
   "bumpFee": "फ़ीस बढ़ाएँ",
   "bumpConfirm": "अधिक फ़ीस के साथ बदलें?",
-  "replaceTx": "बदलें"
+  "replaceTx": "बदलें",
+  "bumpInsufficient": "इस दर पर बढ़ाने के लिए पर्याप्त धन नहीं। कम दर आज़माएँ।"
 }

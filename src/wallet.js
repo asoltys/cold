@@ -668,15 +668,15 @@ export class Wallet {
     return { txid: tx.id, total, outputs };
   }
 
-  // Build + sign an RBF replacement of an unconfirmed outgoing tx at a higher
-  // fee rate. Reuses the original inputs and recipient outputs, taking the extra
-  // fee from the change output (pulling in a confirmed coin if change can't
-  // cover it). Returns a signed draft { hex, txid, fee, oldFee, feeRate, outputs }.
-  async bumpTx(origTxid, feeRate) {
+  // RBF fee bumping, in three steps so the UI can preview a fee per rate before
+  // building: prepareBump() fetches + reconstructs the original (async), then
+  // planBump()/buildBump() are pure and reuse that prep.
+
+  // Fetch an unconfirmed outgoing tx and reconstruct what's needed to replace it.
+  async prepareBump(origTxid) {
     const orig = await this.api.getTx(origTxid);
     if (orig.status && orig.status.confirmed) throw new Error('Transaction already confirmed.');
 
-    // Every input of our own send is ours; reconstruct them with values + paths.
     const ins = [];
     let totalIn = 0;
     for (const vin of orig.vin || []) {
@@ -687,8 +687,8 @@ export class Wallet {
       ins.push({ txid: vin.txid, vout: vin.vout, value: vin.prevout.value, chain: p.chain, index: p.index });
     }
 
-    // Split outputs: our first change-chain output is the change we'll shrink;
-    // everything else is a recipient and stays fixed.
+    // Our first change-chain output is the change we'll shrink; the rest are
+    // recipients and stay fixed.
     const recipients = [];
     let outTotal = 0;
     let changeSeen = false;
@@ -698,50 +698,64 @@ export class Wallet {
       if (p && p.chain === 1 && !changeSeen) { changeSeen = true; continue; }
       recipients.push({ address: o.scriptpubkey_address, value: o.value });
     }
-    const recipTotal = recipients.reduce((s, r) => s + r.value, 0);
-    const oldFee = totalIn - outTotal;
+    const usedIds = new Set(ins.map((i) => `${i.txid}:${i.vout}`));
+    const spare = this.utxos.filter((u) => u.confirmed && !usedIds.has(utxoId(u)));
+    return {
+      txid: origTxid,
+      ins,
+      recipients,
+      totalIn,
+      recipTotal: recipients.reduce((s, r) => s + r.value, 0),
+      oldFee: totalIn - outTotal,
+      spare,
+    };
+  }
 
+  // Pure: pick the fee/change (and any extra inputs) for a given rate.
+  planBump(prep, feeRate) {
     const rate = Math.max(1, Math.round(feeRate));
     const DUST = 294; // p2wpkh dust
     const vsizeOf = (nIn, nOut) => 11 + 68 * nIn + 31 * nOut;
-    const usedIds = new Set(ins.map((i) => `${i.txid}:${i.vout}`));
-    const spare = this.utxos.filter((u) => u.confirmed && !usedIds.has(utxoId(u)));
+    const spare = prep.spare.slice();
     const extra = [];
-
-    const plan = () => {
-      const nIn = ins.length + extra.length;
-      const inAmt = totalIn + extra.reduce((s, u) => s + u.value, 0);
-      let nOut = recipients.length + 1;
+    const compute = () => {
+      const nIn = prep.ins.length + extra.length;
+      const inAmt = prep.totalIn + extra.reduce((s, u) => s + u.value, 0);
+      let nOut = prep.recipients.length + 1;
       let fee = Math.ceil(vsizeOf(nIn, nOut) * rate);
-      let change = inAmt - recipTotal - fee;
-      if (change < DUST) { nOut = recipients.length; fee = inAmt - recipTotal; change = 0; }
-      // BIP125: beat old fee by at least the replacement's vsize (incremental relay).
-      const minFee = oldFee + vsizeOf(nIn, nOut);
+      let change = inAmt - prep.recipTotal - fee;
+      if (change < DUST) { nOut = prep.recipients.length; fee = inAmt - prep.recipTotal; change = 0; }
+      const minFee = prep.oldFee + vsizeOf(nIn, nOut); // BIP125 incremental relay
       if (change > 0 && fee < minFee) {
-        fee = minFee; change = inAmt - recipTotal - fee;
-        if (change < DUST) { fee = inAmt - recipTotal; change = 0; }
+        fee = minFee; change = inAmt - prep.recipTotal - fee;
+        if (change < DUST) { fee = inAmt - prep.recipTotal; change = 0; }
       }
-      return { inAmt, fee, change, ok: inAmt - recipTotal >= fee && fee > oldFee };
+      return { fee, change, ok: inAmt - prep.recipTotal >= fee && fee > prep.oldFee };
     };
-    let pl = plan();
-    while (!pl.ok && spare.length) { extra.push(spare.shift()); pl = plan(); }
-    if (!pl.ok) throw new Error('Not enough funds to bump at this rate. Try a lower rate or CPFP.');
+    let pl = compute();
+    while (!pl.ok && spare.length) { extra.push(spare.shift()); pl = compute(); }
+    return { fee: pl.fee, change: pl.change, extra, ok: pl.ok, rate };
+  }
 
-    const allIns = [...ins, ...extra.map((u) => ({ txid: u.txid, vout: u.vout, value: u.value, chain: u.chain, index: u.index }))];
+  // Build + sign the replacement at a rate. Returns { hex, txid, fee, oldFee, ... }.
+  buildBump(prep, feeRate) {
+    const pl = this.planBump(prep, feeRate);
+    if (!pl.ok) throw new Error('Not enough funds to bump at this rate. Try a lower rate or CPFP.');
+    const allIns = [...prep.ins, ...pl.extra.map((u) => ({ txid: u.txid, vout: u.vout, value: u.value, chain: u.chain, index: u.index }))];
     const t = new btc.Transaction();
     for (const i of allIns) {
       const pay = p2wpkh(this.derive(i.chain, i.index).pubkey, this.netCfg.net);
       t.addInput({ ...pay, txid: i.txid, index: i.vout, sequence: 0xfffffffd, witnessUtxo: { script: pay.script, amount: BigInt(i.value) } });
     }
-    for (const r of recipients) t.addOutputAddress(r.address, BigInt(r.value), this.netCfg.net);
+    for (const r of prep.recipients) t.addOutputAddress(r.address, BigInt(r.value), this.netCfg.net);
     const changeAddr = this.freshChange().address;
     if (pl.change > 0) t.addOutputAddress(changeAddr, BigInt(pl.change), this.netCfg.net);
     for (let k = 0; k < allIns.length; k++) t.signIdx(this.node(allIns[k].chain, allIns[k].index).privateKey, k);
     t.finalize();
 
-    const outputs = recipients.map((r) => ({ address: r.address, value: r.value }));
+    const outputs = prep.recipients.map((r) => ({ address: r.address, value: r.value }));
     if (pl.change > 0) outputs.push({ address: changeAddr, value: pl.change, change: true });
-    return { hex: t.hex, txid: t.id, fee: pl.fee, oldFee, feeRate: rate, outputs, replaces: origTxid };
+    return { hex: t.hex, txid: t.id, fee: pl.fee, oldFee: prep.oldFee, feeRate: pl.rate, outputs, replaces: prep.txid };
   }
 
   // --- realtime (mempool.space WebSocket) ---------------------------------

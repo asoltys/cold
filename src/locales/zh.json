@@ -144,5 +144,6 @@
   "footerSourceOn": "源代码见",
   "bumpFee": "提高手续费",
   "bumpConfirm": "用更高手续费替换？",
-  "replaceTx": "替换"
+  "replaceTx": "替换",
+  "bumpInsufficient": "资金不足，无法以此费率提升。请尝试更低的费率。"
 }

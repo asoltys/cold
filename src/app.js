@@ -43,6 +43,7 @@ const ui = {
   send: blankSend(),
   draft: null, // built tx summary awaiting review
   broadcastTx: null, // scanned signed tx awaiting broadcast confirmation
+  bump: null, // RBF bump in progress: { prep, feeChoice, customFee }
   sendError: '',
   sendResult: null, // { txid } | { signedHex, txid }
   busy: false,
@@ -600,6 +601,7 @@ function lock() {
   ui.receiveSeenIndex = null;
   ui.txDetail = null;
   ui.broadcastTx = null;
+  ui.bump = null;
   render();
 }
 
@@ -869,6 +871,7 @@ function tabsBar() {
         ui.tab = id;
         ui.revealShown = false; // re-mask the recovery phrase whenever tabs change
         ui.txDetail = null; // back to the history list when leaving/returning
+        ui.bump = null;
         render();
       })
     )
@@ -1008,7 +1011,7 @@ function broadcastConfirmView() {
   return h(
     'div',
     { class: 'card col' },
-    h('h3', {}, b.bump ? t('bumpConfirm') : t('broadcastScanned')),
+    h('h3', {}, t('broadcastScanned')),
     h(
       'div',
       { class: 'summary col', style: 'gap:0' },
@@ -1018,11 +1021,6 @@ function broadcastConfirmView() {
           h('span', { class: 'v' }, fmtAmount(o.value), ' ', unitTag())
         )
       ),
-      b.bump
-        ? h('div', { class: 'line' },
-            h('span', { class: 'k' }, t('networkFee')),
-            h('span', { class: 'v' }, fmtAmount(b.bump.oldFee) + ' → ' + fmtAmount(b.bump.newFee) + ' ' + unitLabel()))
-        : null,
       h('div', { class: 'line' },
         h('span', { class: 'k' }, t('transactionId')),
         h('span', { class: 'v mono break' }, shortTxid(b.txid))
@@ -1033,26 +1031,105 @@ function broadcastConfirmView() {
       h('button', { class: 'btn-ghost', onClick: () => { ui.broadcastTx = null; ui.sendError = ''; render(); } }, t('back')),
       ui.busy
         ? h('button', { class: 'btn-primary grow', disabled: true }, h('span', { class: 'spinner' }))
-        : h('button', { class: 'btn-primary grow', onClick: broadcastScanned }, b.bump ? t('replaceTx') : t('broadcastNow'))
+        : h('button', { class: 'btn-primary grow', onClick: broadcastScanned }, t('broadcastNow'))
     )
   );
 }
 
-// Build a higher-fee RBF replacement of an unconfirmed send and route it to the
-// broadcast confirmation. Bumps to the Priority rate.
+// --- RBF fee bump (with a fee-rate picker) ---------------------------------
+function bumpRate() {
+  const s = ui.bump;
+  if (s.feeChoice === 'custom') return Math.max(1, Math.round(Number(s.customFee) || 1));
+  const fr = wallet.feeRates;
+  return (fr && fr[s.feeChoice]) || 5;
+}
+
+// Open the bump screen: fetch + reconstruct the original, default to Priority.
 async function bumpFee(txid) {
   if (wallet.offline) { toast(t('scanOffline')); return; }
-  const rate = (wallet.feeRates && wallet.feeRates.fastestFee) || 10;
   ui.busy = true;
   render();
   try {
-    const d = await wallet.bumpTx(txid, rate);
-    ui.broadcastTx = { hex: d.hex, txid: d.txid, outputs: d.outputs, bump: { oldFee: d.oldFee, newFee: d.fee } };
-    ui.txDetail = null;
-    ui.tab = 'send';
+    const prep = await wallet.prepareBump(txid);
+    ui.bump = { prep, feeChoice: 'fastestFee', customFee: '' };
     ui.sendError = '';
   } catch (e) {
     toast(e.message);
+  }
+  ui.busy = false;
+  render();
+}
+
+function bumpView() {
+  const s = ui.bump;
+  const feeOpts = [
+    ['economyFee', t('feeEconomy')],
+    ['halfHourFee', t('feeNormal')],
+    ['fastestFee', t('feePriority')],
+    ['custom', t('feeCustom')],
+  ];
+  const rate = bumpRate();
+  let pl = null;
+  try { pl = wallet.planBump(s.prep, rate); } catch {}
+  const newFee = pl && pl.ok ? pl.fee : null;
+  const planErr = pl && !pl.ok ? t('bumpInsufficient') : '';
+  return h(
+    'div',
+    { class: 'card col' },
+    h('h3', {}, t('bumpConfirm')),
+    h('div', { class: 'summary col', style: 'gap:0' },
+      ...s.prep.recipients.map((r) =>
+        h('div', { class: 'line' },
+          h('span', { class: 'k mono break' }, r.address ? shortAddr(r.address, 14, 8) : '—'),
+          h('span', { class: 'v' }, fmtAmount(r.value), ' ', unitTag())
+        )
+      ),
+      h('div', { class: 'line' },
+        h('span', { class: 'k' }, t('networkFee')),
+        h('span', { class: 'v' }, fmtAmount(s.prep.oldFee) + ' → ' + (newFee != null ? fmtAmount(newFee) : '—') + ' ' + unitLabel())
+      )
+    ),
+    h('div', { class: 'field' },
+      h('span', { class: 'lab' }, t('feeRate')),
+      h('div', { class: 'seg', style: 'display:flex;width:100%' },
+        feeOpts.map(([k, label]) =>
+          h('button', {
+            type: 'button', class: (s.feeChoice === k ? 'active ' : '') + 'grow',
+            onClick: () => { s.feeChoice = k; if (k === 'custom' && !s.customFee) s.customFee = String(rate); render(); },
+          }, label)
+        )
+      ),
+      s.feeChoice === 'custom'
+        ? h('div', { class: 'input-group mt8' },
+            h('input', { type: 'number', min: '1', placeholder: 'sat/vB', value: s.customFee,
+              onInput: (e) => (s.customFee = e.target.value), onChange: () => render() }),
+            h('span', { class: 'small muted', style: 'align-self:center' }, 'sat/vB'))
+        : h('div', { class: 'small faint mt8' }, t('selectedRate', { n: rate }))
+    ),
+    (ui.sendError || planErr) && h('div', { class: 'notice err' }, ui.sendError || planErr),
+    h('div', { class: 'row gap6' },
+      h('button', { class: 'btn-ghost', onClick: () => { ui.bump = null; ui.sendError = ''; render(); } }, t('back')),
+      ui.busy
+        ? h('button', { class: 'btn-primary grow', disabled: true }, h('span', { class: 'spinner' }))
+        : h('button', { class: 'btn-primary grow', disabled: !newFee, onClick: doBump }, t('replaceTx'))
+    )
+  );
+}
+
+async function doBump() {
+  ui.busy = true;
+  ui.sendError = '';
+  render();
+  try {
+    const d = wallet.buildBump(ui.bump.prep, bumpRate());
+    const txid = await wallet.broadcast(d.hex);
+    ui.sendResult = { txid };
+    ui.bump = null;
+    ui.txDetail = null;
+    ui.tab = 'send';
+    await wallet.scan().catch(() => {});
+  } catch (e) {
+    ui.sendError = t('broadcastFailed', { msg: e.message });
   }
   ui.busy = false;
   render();
@@ -1424,6 +1501,7 @@ function sendResultView() {
 
 // ---------------------------------------------------------------- History
 function historyTab() {
+  if (ui.bump) return bumpView();
   if (ui.txDetail) {
     const tx = wallet.txs.find((x) => x.txid === ui.txDetail);
     if (tx) return txDetailView(tx);

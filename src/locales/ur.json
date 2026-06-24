@@ -144,5 +144,6 @@
   "footerSourceOn": "سورس کوڈ یہاں",
   "bumpFee": "فیس بڑھائیں",
   "bumpConfirm": "زیادہ فیس کے ساتھ بدلیں؟",
-  "replaceTx": "بدلیں"
+  "replaceTx": "بدلیں",
+  "bumpInsufficient": "اس ریٹ پر بڑھانے کے لیے کافی رقم نہیں۔ کم ریٹ آزمائیں۔"
 }

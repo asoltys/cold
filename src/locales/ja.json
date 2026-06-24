@@ -144,5 +144,6 @@
   "footerSourceOn": "ソースは",
   "bumpFee": "手数料を上げる",
   "bumpConfirm": "より高い手数料で置き換えますか？",
-  "replaceTx": "置き換える"
+  "replaceTx": "置き換える",
+  "bumpInsufficient": "この手数料率に上げる資金が足りません。低い率をお試しください。"
 }

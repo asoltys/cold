@@ -113,6 +113,7 @@ const STR = {
     bumpFee: 'Bump fee',
     bumpConfirm: 'Replace with a higher fee?',
     replaceTx: 'Replace',
+    bumpInsufficient: 'Not enough funds to bump at this rate. Try a lower rate.',
     scanOffline: 'You’re offline — reconnect to broadcast this transaction.',
     broadcastFailed: 'Broadcast failed: {msg}',
     signingFailed: 'Signing failed: {msg}',

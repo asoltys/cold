@@ -144,5 +144,6 @@
   "footerSourceOn": "código disponível no",
   "bumpFee": "Aumentar taxa",
   "bumpConfirm": "Substituir com uma taxa maior?",
-  "replaceTx": "Substituir"
+  "replaceTx": "Substituir",
+  "bumpInsufficient": "Fundos insuficientes para aumentar nessa taxa. Tente uma taxa menor."
 }
