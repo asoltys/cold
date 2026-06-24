@@ -1,14 +1,19 @@
 // Dev server: rebuilds the inlined bundle on every request so you just refresh
 // the browser to see changes. Same output as `bun run build`, unminified.
 
-import { buildHtml } from './build.js';
+import { buildHtml, buildJsQr } from './build.js';
 
 const port = Number(process.env.PORT || 5173);
 
 Bun.serve({
   port,
-  async fetch() {
+  async fetch(req) {
     try {
+      if (new URL(req.url).pathname === '/jsqr.js') {
+        return new Response(await buildJsQr({ minify: false }), {
+          headers: { 'content-type': 'text/javascript; charset=utf-8' },
+        });
+      }
       const html = await buildHtml({ minify: false });
       return new Response(html, {
         headers: { 'content-type': 'text/html; charset=utf-8' },

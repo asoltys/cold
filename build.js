@@ -42,7 +42,9 @@ const MANIFEST = {
 // cross-origin explorer/Nostr requests. CACHE carries a build token so each
 // deploy supersedes the previous cache. {{VERSION}} is filled in at build time.
 const SW = `const CACHE = 'cold-{{VERSION}}';
-const SHELL = ['./', 'manifest.webmanifest', 'icon-192.png', 'icon-512.png'];
+// jsqr.js is precached so the lazy QR decoder is available offline too (for
+// installed PWAs on browsers without a native BarcodeDetector).
+const SHELL = ['./', 'manifest.webmanifest', 'icon-192.png', 'icon-512.png', 'jsqr.js'];
 
 self.addEventListener('install', (e) => {
   self.skipWaiting();
@@ -91,6 +93,20 @@ const PWA_HEAD = `<link rel="manifest" href="manifest.webmanifest">
 const SW_REGISTER =
   `<script>if('serviceWorker'in navigator)addEventListener('load',function(){navigator.serviceWorker.register('sw.js').catch(function(){})});</script>`;
 
+// Bundle the standalone jsQR decoder (sets window.jsQR) for lazy loading.
+export async function buildJsQr({ minify = true } = {}) {
+  const result = await Bun.build({
+    entrypoints: ['./src/jsqr-global.js'],
+    target: 'browser',
+    minify,
+  });
+  if (!result.success) {
+    for (const log of result.logs) console.error(log);
+    throw new Error('jsqr bundle failed');
+  }
+  return result.outputs[0].text();
+}
+
 export async function buildHtml({ minify = true, pwa = minify } = {}) {
   const result = await Bun.build({
     entrypoints: ['./src/app.js'],
@@ -128,6 +144,10 @@ if (import.meta.main) {
   const html = await buildHtml({ minify: true });
   await Bun.write('dist/index.html', html);
 
+  // Lazy-loaded QR decoder — kept out of index.html, fetched only when a
+  // browser without BarcodeDetector opens the scanner.
+  await Bun.write('dist/jsqr.js', await buildJsQr());
+
   // PWA sidecars.
   await Bun.write('dist/manifest.webmanifest', JSON.stringify(MANIFEST, null, 2));
   const version = Bun.hash(html).toString(36);
@@ -136,5 +156,5 @@ if (import.meta.main) {
 
   const kb = (Buffer.byteLength(html) / 1024).toFixed(0);
   console.log(`✓ dist/index.html written (${kb} KB) — open it offline, no server needed`);
-  console.log(`✓ PWA: manifest.webmanifest, sw.js (cold-${version}), ${STATIC.length} icons`);
+  console.log(`✓ PWA: manifest.webmanifest, sw.js (cold-${version}), ${STATIC.length} icons, jsqr.js`);
 }

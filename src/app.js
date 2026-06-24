@@ -6,6 +6,7 @@
 
 import { Wallet, newMnemonic, isValidMnemonic, utxoId } from './wallet.js';
 import { qrSvg } from './qr.js';
+import { scanQr } from './scan.js';
 import { t, LANGS, getLang, setLang, isRTL } from './i18n.js';
 import {
   fmtBtc,
@@ -39,6 +40,7 @@ const ui = {
   txDetail: null, // txid being viewed in the history detail view
   send: blankSend(),
   draft: null, // built tx summary awaiting review
+  broadcastTx: null, // scanned signed tx awaiting broadcast confirmation
   sendError: '',
   sendResult: null, // { txid } | { signedHex, txid }
   busy: false,
@@ -600,6 +602,7 @@ function lock() {
   ui.revealShown = false;
   ui.receiveSeenIndex = null;
   ui.txDetail = null;
+  ui.broadcastTx = null;
   render();
 }
 
@@ -835,8 +838,130 @@ function receiveTab() {
 // ---------------------------------------------------------------- Send
 function sendTab() {
   if (ui.sendResult) return sendResultView();
+  if (ui.broadcastTx) return broadcastConfirmView();
   if (ui.draft) return reviewView();
   return sendForm();
+}
+
+// QR scanning is only possible in a secure context with a camera.
+const canScan = () =>
+  typeof navigator !== 'undefined' && !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+
+// Open the camera, then route the decoded payload: a BIP21 URI or address fills
+// the form; a raw signed-tx hex goes to a broadcast confirmation.
+async function scanIntoSend() {
+  let text;
+  try {
+    text = await scanQr(t);
+  } catch (e) {
+    ui.sendError = e.message;
+    render();
+    return;
+  }
+  if (text) handleScanned(text);
+}
+
+function handleScanned(raw) {
+  const text = raw.trim();
+  const s = ui.send;
+  ui.sendError = '';
+
+  if (/^bitcoin:/i.test(text)) {
+    const { address, amount } = parseBip21(text);
+    if (!address) {
+      ui.sendError = t('scanUnrecognized');
+      render();
+      return;
+    }
+    s.recipients[0].address = address;
+    if (amount != null) {
+      s.recipients[0].amount = amount;
+      s.max = false;
+    }
+    render();
+    return;
+  }
+
+  // A raw signed transaction (hex) — confirm before broadcasting.
+  const compact = text.replace(/\s+/g, '');
+  if (/^[0-9a-fA-F]+$/.test(compact) && compact.length >= 100 && compact.length % 2 === 0) {
+    try {
+      const info = wallet.parseRawTx(compact);
+      ui.broadcastTx = { hex: compact, ...info };
+      render();
+      return;
+    } catch {
+      /* not a parseable tx — fall through and treat as an address */
+    }
+  }
+
+  // Otherwise treat it as an address (review will validate it).
+  s.recipients[0].address = text;
+  render();
+}
+
+// bitcoin:<address>?amount=<btc>&label=... — amount is in BTC; convert to the
+// current display unit so it lands in the form's amount field correctly.
+function parseBip21(uri) {
+  const m = /^bitcoin:([^?]*)(?:\?(.*))?$/i.exec(uri.trim());
+  if (!m) return {};
+  const address = decodeURIComponent((m[1] || '').trim());
+  let amount = null;
+  if (m[2]) {
+    const amt = new URLSearchParams(m[2]).get('amount');
+    if (amt && isFinite(Number(amt)) && Number(amt) > 0) {
+      const sats = Math.round(Number(amt) * SATS);
+      amount = unit === 'sats' ? String(sats) : String(Number(amt));
+    }
+  }
+  return { address, amount };
+}
+
+function broadcastConfirmView() {
+  const b = ui.broadcastTx;
+  return h(
+    'div',
+    { class: 'card col' },
+    h('h3', {}, t('broadcastScanned')),
+    h(
+      'div',
+      { class: 'summary col', style: 'gap:0' },
+      ...b.outputs.map((o) =>
+        h('div', { class: 'line' },
+          h('span', { class: 'k mono break' }, o.address ? shortAddr(o.address, 14, 8) : '—'),
+          h('span', { class: 'v' }, fmtAmount(o.value), ' ', unitTag())
+        )
+      ),
+      h('div', { class: 'line' },
+        h('span', { class: 'k' }, t('transactionId')),
+        h('span', { class: 'v mono break' }, shortTxid(b.txid))
+      )
+    ),
+    ui.sendError && h('div', { class: 'notice err' }, ui.sendError),
+    h('div', { class: 'row gap6' },
+      h('button', { class: 'btn-ghost', onClick: () => { ui.broadcastTx = null; ui.sendError = ''; render(); } }, t('back')),
+      ui.busy
+        ? h('button', { class: 'btn-primary grow', disabled: true }, h('span', { class: 'spinner' }))
+        : h('button', { class: 'btn-primary grow', onClick: broadcastScanned }, t('broadcastNow'))
+    )
+  );
+}
+
+async function broadcastScanned() {
+  if (wallet.offline) { ui.sendError = t('scanOffline'); render(); return; }
+  ui.busy = true;
+  ui.sendError = '';
+  render();
+  try {
+    const txid = await wallet.broadcast(ui.broadcastTx.hex);
+    ui.sendResult = { txid };
+    ui.broadcastTx = null;
+    await wallet.scan().catch(() => {});
+  } catch (e) {
+    ui.sendError = t('broadcastFailed', { msg: e.message });
+  }
+  ui.busy = false;
+  render();
 }
 
 // One recipient: address + amount. Max is only offered for a single recipient.
@@ -851,6 +976,10 @@ function recipientRow(s, r, i) {
         type: 'text', class: 'mono-input grow', placeholder: 'bc1q…',
         autocapitalize: 'none', autocomplete: 'off', spellcheck: 'false', value: r.address,
         onInput: (e) => (r.address = e.target.value),
+      }),
+      i === 0 && canScan() && h('button', {
+        type: 'button', class: 'btn-sm', title: t('scanQr'), onClick: scanIntoSend,
+        html: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3"/></svg>',
       }),
       !single && h('button', { type: 'button', class: 'btn-sm', title: t('remove'), onClick: () => { s.recipients.splice(i, 1); render(); } }, '✕')
     ),

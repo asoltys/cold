@@ -577,6 +577,25 @@ export class Wallet {
     return this.api.broadcast(hexTx);
   }
 
+  // Parse a raw (signed) transaction hex — used by scan-to-broadcast to show a
+  // confirmation (txid + outputs) before relaying someone's exported tx.
+  parseRawTx(rawHex) {
+    const tx = btc.Transaction.fromRaw(hex.decode(rawHex.trim()), { allowUnknownOutputs: true });
+    const network = NETS[this.netName].net;
+    const outputs = [];
+    let total = 0;
+    for (let i = 0; i < tx.outputsLength; i++) {
+      const o = tx.getOutput(i);
+      total += Number(o.amount);
+      let address = '';
+      try {
+        address = btc.Address(network).encode(btc.OutScript.decode(o.script));
+      } catch {}
+      outputs.push({ address, value: Number(o.amount) });
+    }
+    return { txid: tx.id, total, outputs };
+  }
+
   // --- realtime (mempool.space WebSocket) ---------------------------------
   // Pushes us new mempool/confirmed transactions for our addresses so history
   // and balances update with no polling.
