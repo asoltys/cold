@@ -8,6 +8,7 @@ import { Wallet, newMnemonic, isValidMnemonic, utxoId } from './wallet.js';
 import { qrSvg } from './qr.js';
 import { scanQr } from './scan.js';
 import { getSyncConfig, setSyncConfig } from './nostr.js';
+import { getExplorerConfig, setExplorerConfig, EXPLORER_PRESETS } from './api.js';
 import { t, LANGS, getLang, setLang, isRTL } from './i18n.js';
 import {
   fmtBtc,
@@ -268,19 +269,9 @@ function howItWorksScreen() {
       h('h3', {}, t('hiwBasicsTitle')),
       para('hiwBasics1'),
       para('hiwBasics2'),
+      para('hiwBasics3'),
       para('hiwBasics4'),
-      h(
-        'details',
-        { class: 'hiw-tech' },
-        h('summary', {}, t('hiwTechTitle')),
-        h(
-          'div',
-          { class: 'col', style: 'gap:12px;margin-top:12px' },
-          para('hiwTech1'),
-          para('hiwTech2'),
-          para('hiwTech4')
-        )
-      )
+      para('hiwBasics5')
     ),
     h('button', { class: 'btn-block', onClick: back }, t('back'))
   );
@@ -677,6 +668,7 @@ function settingsTab() {
         : h('button', { disabled: wallet.scanning, onClick: () => wallet.scan() },
             wallet.scanning ? t('scanning') : t('rescanWallet'))
     ),
+    explorerCard(),
     syncCard(),
     h(
       'div',
@@ -684,6 +676,46 @@ function settingsTab() {
       h('h3', {}, t('language')),
       languagePicker()
     )
+  );
+}
+
+// Block explorer / server selection: a preset (mempool.space, blockstream.info)
+// or a custom Esplora/electrs REST URL (e.g. your own node).
+function explorerCard() {
+  const cfg = getExplorerConfig();
+  return h(
+    'div',
+    { class: 'card col' },
+    h('h3', {}, t('explorer')),
+    h('p', { class: 'small muted', style: 'margin:0' }, t('explorerDesc')),
+    h(
+      'select',
+      {
+        onChange: (e) => {
+          const server = e.target.value;
+          setExplorerConfig({ server, url: cfg.url });
+          render();
+          if (server !== 'custom' || cfg.url) wallet.reloadExplorer();
+        },
+      },
+      EXPLORER_PRESETS.map((o) => h('option', { value: o.id, selected: o.id === cfg.server }, o.label))
+    ),
+    cfg.server === 'custom'
+      ? h('label', { class: 'field' },
+          h('span', { class: 'lab' }, t('explorerUrl')),
+          h('input', {
+            type: 'text', class: 'mono-input', placeholder: 'https://mempool.space/api',
+            autocapitalize: 'none', autocomplete: 'off', spellcheck: 'false',
+            value: cfg.url,
+            // Apply on blur/Enter, not every keystroke (each change rescans).
+            onChange: (e) => {
+              setExplorerConfig({ server: 'custom', url: e.target.value.trim() });
+              wallet.reloadExplorer();
+            },
+          }),
+          h('div', { class: 'small faint' }, t('explorerUrlHint'))
+        )
+      : null
   );
 }
 

@@ -6,46 +6,50 @@
 //   - a 429 from ANY request immediately backs off ALL subsequent requests
 //     (global exponential pause), easing back as requests succeed.
 
-// Explorer endpoint. Defaults to the public explorers (correct for a hosted,
-// multi-user deploy — each visitor uses their own IP). A specific machine whose
-// IP is rate-limited can opt into a proxy at runtime:
-//   localStorage.setItem('explorer-proxy', 'http://51.79.52.200:8088')
-// (http proxy only works when the page itself is served over http/localhost).
-const PROXY = (() => {
+// Block explorer selection (global, persisted in localStorage). Defaults to
+// mempool.space, with blockstream.info as a silent failover for reliability.
+// Users can pick blockstream.info only, or a custom Esplora/electrs REST URL
+// (e.g. their own node) in Settings.
+const EXPLORER_KEY = 'btc-wallet-explorer';
+
+export const EXPLORER_PRESETS = [
+  { id: 'mempool', label: 'mempool.space' },
+  { id: 'blockstream', label: 'blockstream.info' },
+  { id: 'custom', label: 'Custom' },
+];
+
+export function getExplorerConfig() {
   try {
-    return localStorage.getItem('explorer-proxy') || '';
-  } catch {
-    return '';
+    const c = JSON.parse(localStorage.getItem(EXPLORER_KEY) || 'null');
+    if (c && c.server) return { server: c.server, url: c.url || '' };
+  } catch {}
+  return { server: 'mempool', url: '' };
+}
+
+export function setExplorerConfig({ server, url }) {
+  try {
+    localStorage.setItem(EXPLORER_KEY, JSON.stringify({ server, url: url || '' }));
+  } catch {}
+}
+
+// Resolve the configured explorer to the host list the Api tries in order.
+function resolveHosts(net) {
+  const cfg = getExplorerConfig();
+  const apiPath = net === 'testnet' ? '/testnet/api' : '/api';
+  const host = (web, kind) => ({ base: web + apiPath, kind, web, cooldownUntil: 0 });
+  if (cfg.server === 'custom' && cfg.url) {
+    const base = cfg.url.trim().replace(/\/+$/, '');
+    return [{ base, kind: 'esplora', web: base.replace(/\/api$/, ''), cooldownUntil: 0 }];
   }
-})();
+  if (cfg.server === 'blockstream') return [host('https://blockstream.info', 'esplora')];
+  return [host('https://mempool.space', 'mempool'), host('https://blockstream.info', 'esplora')];
+}
 
-const BACKENDS = PROXY
-  ? {
-      mainnet: [
-        { base: `${PROXY}/mp/api`, kind: 'mempool' },
-        { base: `${PROXY}/bs/api`, kind: 'esplora' },
-      ],
-      testnet: [
-        { base: `${PROXY}/mp/testnet/api`, kind: 'mempool' },
-        { base: `${PROXY}/bs/testnet/api`, kind: 'esplora' },
-      ],
-    }
-  : {
-      mainnet: [
-        { base: 'https://mempool.space/api', kind: 'mempool' },
-        { base: 'https://blockstream.info/api', kind: 'esplora' },
-      ],
-      testnet: [
-        { base: 'https://mempool.space/testnet/api', kind: 'mempool' },
-        { base: 'https://blockstream.info/testnet/api', kind: 'esplora' },
-      ],
-    };
-
-// WebSocket URL (mempool) — through the proxy when configured.
+// WebSocket URL for live updates — only mempool.space exposes one, so other
+// explorers fall back to polling (returns null → no socket).
 export function wsUrl(net) {
-  const path = net === 'testnet' ? '/testnet/api/v1/ws' : '/api/v1/ws';
-  if (PROXY) return PROXY.replace(/^http/, 'ws') + '/mp' + path;
-  return 'wss://mempool.space' + path;
+  if (getExplorerConfig().server !== 'mempool') return null;
+  return 'wss://mempool.space' + (net === 'testnet' ? '/testnet/api/v1/ws' : '/api/v1/ws');
 }
 
 const REQUEST_TIMEOUT_MS = 10000;
@@ -55,9 +59,9 @@ export class Api {
     this.net = net;
     this.offline = false;
 
-    // Hosts are tried in order (mempool first); a host that 429s is parked on
-    // cooldown so we stop hammering it (Blockstream rate-limits aggressively).
-    this._hosts = (BACKENDS[net] || BACKENDS.mainnet).map((h) => ({ ...h, cooldownUntil: 0 }));
+    // Hosts are tried in order; a host that 429s is parked on cooldown so we
+    // stop hammering it (Blockstream rate-limits aggressively).
+    this._hosts = resolveHosts(net);
     this._timeoutMs = REQUEST_TIMEOUT_MS;
 
     // Serialized scheduler: one request at a time, min gap between starts.
@@ -74,8 +78,8 @@ export class Api {
   }
 
   explorerTx(txid) {
-    const path = this.net === 'testnet' ? 'testnet/tx' : 'tx';
-    return `https://mempool.space/${path}/${txid}`;
+    const web = (this._hosts[0] && this._hosts[0].web) || 'https://mempool.space';
+    return web + (this.net === 'testnet' ? '/testnet/tx/' : '/tx/') + txid;
   }
 
   // ---- rate-aware global scheduler --------------------------------------

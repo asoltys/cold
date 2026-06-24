@@ -148,6 +148,19 @@ export class Wallet {
     this.emit();
   }
 
+  // Rebuild the Api against the currently-configured explorer, then rescan and
+  // reconnect realtime (called when the user switches explorer in Settings).
+  async reloadExplorer() {
+    this.stopRealtime();
+    this.api = new Api(this.netName);
+    this.api.offline = this.offline;
+    if (this.offline) return;
+    try {
+      await this.scan();
+    } catch {}
+    this.startRealtime();
+  }
+
   get netCfg() {
     return NETS[this.netName];
   }
@@ -683,7 +696,9 @@ export class Wallet {
     // Periodic full scan: reconciles everything refreshLive can't see on its own
     // — pending→confirmed history, spends, and stale cache/relay state.
     this._deepTimer = setInterval(() => this.scan({ silent: true }).catch(() => {}), 120000);
-    if (typeof WebSocket === 'undefined') return;
+    // Only mempool.space has a live socket; other explorers rely on the poll
+    // and deep scan above (wsUrl returns null → no socket).
+    if (typeof WebSocket === 'undefined' || !this.wsUrl()) return;
     this._wsWant = true;
 
     // Heartbeat: ping every 15s; if no message (incl. pong) for 45s the socket

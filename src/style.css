@@ -248,11 +248,6 @@ hr.divider { margin: 16px 0; }
 .linklike:hover { text-decoration: underline; background: none; }
 
 /* ---- how it works ---- */
-.hiw-tech {border-top: 1px solid var(--line); padding-top: 14px; }
-.hiw-tech > summary { font-weight: 650; cursor: pointer; list-style: none; color: var(--accent-ink); display: flex; align-items: center; gap: 7px; }
-.hiw-tech > summary::-webkit-details-marker { display: none; }
-.hiw-tech > summary::before { content: '▸'; font-size: 12px; transition: transform .15s; }
-.hiw-tech[open] > summary::before { transform: rotate(90deg); }
 
 @media (max-width: 420px) {
   .words { grid-template-columns: repeat(2, 1fr); }
