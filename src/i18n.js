@@ -153,7 +153,7 @@ const STR = {
     rescanWallet: 'Rescan wallet',
     scanning: 'Scanning…',
     explorer: 'Block explorer',
-    explorerDesc: 'The server this wallet queries for balances and history. Use blockstream.info, or point it at your own node for maximum privacy.',
+    explorerDesc: 'The server this wallet queries for balances and history. Point it at your own node for maximum privacy.',
     explorerUrl: 'Server URL',
     explorerUrlHint: 'Esplora / electrs REST base, e.g. https://mempool.space/api',
     deviceSync: 'Device sync',
