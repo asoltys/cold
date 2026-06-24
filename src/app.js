@@ -92,7 +92,7 @@ function footer() {
       h('a', { href: 'https://adamsoltys.com', target: '_blank', rel: 'noopener' }, 'Adam Soltys'),
       h('span', { class: 'faint' }, ' · '),
       t('footerSourceOn') + ' ',
-      h('a', { href: 'https://github.com/asoltys/cold', target: '_blank', rel: 'noopener' }, 'GitHub')
+      h('a', { href: 'https://github.com/asoltys/halwallet', target: '_blank', rel: 'noopener' }, 'GitHub')
     ),
     h(
       'div',
