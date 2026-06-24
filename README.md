@@ -1,38 +1,48 @@
-# Bitcoin Wallet
+# Hal Wallet
 
 A self-contained, **single-file** Bitcoin wallet that runs entirely in the
-browser — think bitaddress.org, but a modern BIP84 HD wallet from a seed
-phrase that scans history, watches for payments in real time, and spends.
+browser — think bitaddress.org, but a modern BIP84 HD wallet from a seed phrase
+that scans history, watches for payments, and spends. The whole wallet is one
+static `index.html` you can save and run offline, forever.
 
-Live at **https://bitcoin.coinos.io** (and the built `index.html` runs offline
-straight from the filesystem).
+Live at **https://halwallet.app** (the built `index.html` also runs straight
+from the filesystem with no server).
+
+The name is a nod to [Hal Finney](https://en.wikipedia.org/wiki/Hal_Finney_(computer_scientist)).
 
 ## Features
 
-- **BIP84 / native SegWit (p2wpkh)** HD wallet from a 12/24-word BIP39 seed
-  (optional passphrase). Mainnet.
+- **BIP84 / native SegWit (p2wpkh)** HD wallet from a 12-word BIP39 seed
+  (imports any valid BIP39 phrase; optional passphrase). Mainnet.
 - **One fresh address at a time** — a new receive address is only handed out
   after the current one is paid, so used addresses stay contiguous and scans
   stay tiny (no 20-address gap probing).
-- **Real-time** via the mempool.space WebSocket: an incoming payment shows a
-  "Payment received!" screen the moment it hits the mempool, then reveals the
-  next address. A ping/pong heartbeat keeps the socket alive (auto-reconnect on
+- **Choose your own block explorer** — mempool.space by default (with
+  blockstream.info as a silent failover), blockstream.info only, or a **custom
+  Esplora / electrs REST URL** (e.g. your own node) in Settings.
+- **Real-time** via the mempool.space WebSocket (when that explorer is
+  selected): an incoming payment shows a "Payment received!" screen the moment
+  it hits the mempool. Other explorers fall back to polling plus a periodic full
+  reconcile. A ping/pong heartbeat keeps the socket alive (auto-reconnect on
   drop, sleep, or network change).
 - **Spending** with proper coin selection + fee estimation (`@scure/btc-signer`
   `selectUTXO`), multiple recipients, a fee-rate picker, send-max, and manual
   coin control.
-- **Encrypted cross-device sync over Nostr** — wallet state is NIP-44-encrypted
-  to yourself and stored as a replaceable event (kind 30078) on
-  relay.coinos.io. The Nostr identity is derived from the same seed (NIP-06),
-  so opening the wallet on another device restores state with no rescan.
-- **Offline signing** — export a keyless JSON snapshot of your coins on an
-  online device, import it on an offline one, sign locally, and export the
-  signed transaction (hex / file / QR) to broadcast elsewhere.
+- **QR scanner** on the send page — scan a Bitcoin address, a BIP21 URI (fills
+  the amount too), or a signed transaction to broadcast it. Uses the native
+  `BarcodeDetector` where available and lazy-loads jsQR otherwise.
+- **Optional encrypted cross-device sync over Nostr** — wallet state is
+  NIP-44-encrypted to yourself and stored as a replaceable event (kind 30078) on
+  the relay(s) you choose (default relay.coinos.io). The Nostr identity is
+  derived from the same seed (NIP-06). On by default, toggled off in Settings.
+- **Offline / air-gapped signing** — export a keyless JSON snapshot of your
+  coins on an online device, import it on an offline one, sign locally, and
+  export the signed transaction (hex / file / QR) to broadcast elsewhere. You
+  can also sign-and-export online (broadcast from another device).
+- **Installable PWA** — installs to your home screen and works offline once
+  installed (the app shell, icons, and QR decoder are precached).
 - **Global sats/BTC toggle** (defaults to sats) — every amount label is
   clickable to switch, persisted across sessions.
-- **Resilient explorer access** — mempool.space + Blockstream with a global
-  request throttle, per-host cooldown on 429s, request timeouts with failover,
-  and a localStorage cache so reloads are instant.
 
 Built with the audited [`@scure`](https://github.com/paulmillr/scure-btc-signer)
 / [`@noble`](https://github.com/paulmillr/noble-hashes) libraries plus
@@ -51,12 +61,14 @@ bun run dev      # http://localhost:5173 (rebuilds on each refresh)
 ## Build
 
 ```bash
-bun run build    # → dist/index.html  (one self-contained file)
+bun run build    # → dist/  (index.html + PWA sidecars)
 ```
 
-`dist/index.html` inlines all code, the crypto/QR/Nostr libraries, and the CSS.
-Save that one file and open it directly in a browser — no server, no internet
-needed (network features simply stay idle until you're online).
+`dist/index.html` inlines all code, the crypto/QR/Nostr libraries, and the CSS —
+save that one file and open it directly in a browser, no server or internet
+needed. The build also emits PWA extras (`manifest.webmanifest`, `sw.js`,
+icons, and a lazy-loaded `jsqr.js`) for the hosted site; they're optional and
+simply 404 when `index.html` is opened on its own.
 
 ## How state is kept
 
@@ -66,12 +78,12 @@ Three layers, fastest first:
    logout / tab close).
 2. **localStorage** — caches scanned state (addresses, UTXOs, history) keyed by
    a hash of the seed, so a reload shows balances instantly.
-3. **Nostr** — encrypted, replaceable cross-device state on relay.coinos.io.
+3. **Nostr** — encrypted, replaceable cross-device state on your configured
+   relay(s) (when sync is enabled).
 
-Idle polling only ever re-checks the fresh receive/change address; already-
-scanned coin addresses are never re-polled (spends come over the WebSocket /
-post-send refresh / Nostr). A manual **Settings → Rescan** covers anything
-missed (e.g. a payment to a reused old address).
+On load and on a 2-minute timer the wallet does a full reconcile; between those,
+a light poll re-checks the fresh frontier and the addresses currently holding
+coins. A manual **Settings → Rescan** forces a full re-scan on demand.
 
 ## Offline / air-gapped spending
 
@@ -88,20 +100,26 @@ missed (e.g. a payment to a reused old address).
 | File | Purpose |
 | --- | --- |
 | `src/wallet.js` | BIP84 derivation, scanning, coin selection, signing, realtime, cache, sync |
-| `src/api.js` | Esplora wrapper (mempool.space + Blockstream) with throttle/cooldown/timeout |
-| `src/nostr.js` | Encrypted cross-device state sync over Nostr |
+| `src/api.js` | Esplora wrapper + explorer selection (mempool / blockstream / custom) with throttle/cooldown/timeout |
+| `src/nostr.js` | Optional encrypted cross-device state sync over Nostr (configurable relays) |
+| `src/scan.js` | Camera QR scanner (native BarcodeDetector / lazy jsQR) |
 | `src/app.js` | UI controller (vanilla DOM) |
 | `src/qr.js` | QR → SVG (zero-dep) |
 | `src/format.js` | sat/BTC formatting helpers |
+| `src/i18n.js` | UI strings + translations |
 | `src/style.css` | Hand-rolled styles |
-| `build.js` / `dev.js` | Bun bundler → single inlined `index.html`, and dev server |
+| `build.js` / `dev.js` | Bun bundler → inlined `index.html` + PWA sidecars, and dev server |
 
 ## Security notes
 
 - Self-custody software handling real keys — review the code before trusting it
-  with funds, and prefer an offline machine for the seed phrase.
+  with funds, and prefer an offline machine for the seed phrase. It's a hot
+  wallet (keys live in the browser); for large amounts use a hardware signer or
+  run this air-gapped on a dedicated offline device.
 - The seed/passphrase live in memory while the page is open and in
   sessionStorage for the tab session; locking or closing the tab clears them.
 - The localStorage cache and the Nostr event hold public chain data (addresses,
   UTXOs, amounts); the Nostr copy is encrypted and keyed to your seed-derived
-  identity, but the relay can see that an identity is publishing app data.
+  identity, but a relay can see that an identity is publishing app data.
+- Whichever block explorer you query sees your addresses and IP — point it at
+  your own node for full privacy.
