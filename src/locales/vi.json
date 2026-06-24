@@ -188,5 +188,22 @@
   "publicKey": "Khóa công khai",
   "publicKeyDesc": "Chia sẻ khóa này để theo dõi ví này ở chế độ chỉ đọc trên thiết bị hoặc ứng dụng khác. Nó tiết lộ địa chỉ của bạn, chứ không phải khóa của bạn.",
   "copyKey": "Sao chép khóa",
-  "showPublicKey": "Hiện khóa công khai"
+  "showPublicKey": "Hiện khóa công khai",
+  "saveDevice": "Lưu trên thiết bị này",
+  "forgetDevice": "Đã lưu · xóa",
+  "savedTag": "đã lưu",
+  "setPassword": "Đặt mật khẩu",
+  "setPasswordDesc": "Mã hóa ví này trên thiết bị này. Bạn sẽ cần nó để mở khóa các ví đã lưu sau này.",
+  "enterPassword": "Nhập mật khẩu của bạn",
+  "enterPasswordDesc": "Mở khóa các ví đã lưu để tiếp tục.",
+  "password": "Mật khẩu",
+  "confirmPassword": "Xác nhận mật khẩu",
+  "pwTooShort": "Dùng ít nhất 8 ký tự.",
+  "pwMismatch": "Mật khẩu không khớp.",
+  "pwWrong": "Sai mật khẩu.",
+  "unlockSaved": "Mở khóa ví đã lưu",
+  "unlockSavedDesc": "Nhập mật khẩu để mở các ví đã lưu trên thiết bị này.",
+  "unlock": "Mở khóa",
+  "useAnotherWallet": "Dùng ví khác",
+  "save": "Lưu"
 }

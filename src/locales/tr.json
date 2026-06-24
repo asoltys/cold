@@ -188,5 +188,22 @@
   "publicKey": "Genel anahtar",
   "publicKeyDesc": "Bu cüzdanı başka bir cihaz veya uygulamada salt okunur izlemek için bunu paylaşın. Anahtarlarınızı değil, adreslerinizi açığa çıkarır.",
   "copyKey": "Anahtarı kopyala",
-  "showPublicKey": "Genel anahtarı göster"
+  "showPublicKey": "Genel anahtarı göster",
+  "saveDevice": "Bu cihaza kaydet",
+  "forgetDevice": "Kaydedildi · unut",
+  "savedTag": "kaydedildi",
+  "setPassword": "Parola belirleyin",
+  "setPasswordDesc": "Bu cüzdanı bu cihazda şifreler. Kaydedilen cüzdanları daha sonra açmak için bu parolaya ihtiyacınız olacak.",
+  "enterPassword": "Parolanızı girin",
+  "enterPasswordDesc": "Devam etmek için kaydedilen cüzdanlarınızı açın.",
+  "password": "Parola",
+  "confirmPassword": "Parolayı onayla",
+  "pwTooShort": "En az 8 karakter kullanın.",
+  "pwMismatch": "Parolalar eşleşmiyor.",
+  "pwWrong": "Yanlış parola.",
+  "unlockSaved": "Kaydedilen cüzdanları aç",
+  "unlockSavedDesc": "Bu cihaza kaydedilen cüzdanları açmak için parolanızı girin.",
+  "unlock": "Aç",
+  "useAnotherWallet": "Başka bir cüzdan kullan",
+  "save": "Kaydet"
 }

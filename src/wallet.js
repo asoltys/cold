@@ -13,6 +13,10 @@ import { generateMnemonic, mnemonicToSeedSync, validateMnemonic } from '@scure/b
 import { wordlist } from '@scure/bip39/wordlists/english';
 import { hex, base64urlnopad, base58check } from '@scure/base';
 import { sha256 } from '@noble/hashes/sha256';
+import { scrypt } from '@noble/hashes/scrypt';
+import { randomBytes } from '@noble/hashes/utils';
+import { xchacha20poly1305 } from '@noble/ciphers/chacha.js';
+import { utf8ToBytes, bytesToUtf8 } from '@noble/ciphers/utils.js';
 import * as btc from '@scure/btc-signer';
 import { p2wpkh } from '@scure/btc-signer/payment';
 
@@ -1336,6 +1340,25 @@ export function parseAccountKey(s) {
     throw new Error('Not a valid extended public key.');
   }
   return xpub;
+}
+
+// Encrypted vault for persisting seed-bearing accounts on this device. Key is
+// scrypt(password, salt); payload is XChaCha20-Poly1305 (authenticated, so a
+// wrong password fails to decrypt rather than returning garbage). All fields
+// are hex so the blob is JSON-serializable for localStorage.
+const _SCRYPT = { N: 2 ** 15, r: 8, p: 1, dkLen: 32 };
+function _vaultKey(password, salt) {
+  return scrypt(utf8ToBytes(password), salt, _SCRYPT);
+}
+export function encryptVault(obj, password) {
+  const salt = randomBytes(16);
+  const nonce = randomBytes(24);
+  const ct = xchacha20poly1305(_vaultKey(password, salt), nonce).encrypt(utf8ToBytes(JSON.stringify(obj)));
+  return { v: 1, salt: hex.encode(salt), nonce: hex.encode(nonce), ct: hex.encode(ct) };
+}
+export function decryptVault(blob, password) {
+  const pt = xchacha20poly1305(_vaultKey(password, hex.decode(blob.salt)), hex.decode(blob.nonce)).decrypt(hex.decode(blob.ct));
+  return JSON.parse(bytesToUtf8(pt));
 }
 
 // Convert a standard account xpub to a BIP84 zpub for export/interop.

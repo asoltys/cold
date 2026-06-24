@@ -188,5 +188,22 @@
   "giftReclaimed": "Moneda reclamada",
   "giftRevokeConfirm": "¿Revocar este regalo ahora? Esto devuelve la moneda a tu monedero y desactiva el enlace.",
   "giftReclaimedTag": "aún reclamable",
-  "giftMinNote": "Mínimo {n} con las comisiones actuales, para que supere el polvo al reclamarse."
+  "giftMinNote": "Mínimo {n} con las comisiones actuales, para que supere el polvo al reclamarse.",
+  "saveDevice": "Guardar en este dispositivo",
+  "forgetDevice": "Guardado · olvidar",
+  "savedTag": "guardado",
+  "setPassword": "Establecer una contraseña",
+  "setPasswordDesc": "Cifra este monedero en este dispositivo. La necesitarás para desbloquear los monederos guardados más adelante.",
+  "enterPassword": "Introduce tu contraseña",
+  "enterPasswordDesc": "Desbloquea tus monederos guardados para continuar.",
+  "password": "Contraseña",
+  "confirmPassword": "Confirmar contraseña",
+  "pwTooShort": "Usa al menos 8 caracteres.",
+  "pwMismatch": "Las contraseñas no coinciden.",
+  "pwWrong": "Contraseña incorrecta.",
+  "unlockSaved": "Desbloquear monederos guardados",
+  "unlockSavedDesc": "Introduce tu contraseña para abrir los monederos guardados en este dispositivo.",
+  "unlock": "Desbloquear",
+  "useAnotherWallet": "Usar otro monedero",
+  "save": "Guardar"
 }

@@ -188,5 +188,22 @@
   "publicKey": "Kunci publik",
   "publicKeyDesc": "Bagikan ini untuk memantau dompet ini secara baca-saja di perangkat atau aplikasi lain. Ini menampilkan alamat Anda, bukan kunci Anda.",
   "copyKey": "Salin kunci",
-  "showPublicKey": "Tampilkan kunci publik"
+  "showPublicKey": "Tampilkan kunci publik",
+  "saveDevice": "Simpan di perangkat ini",
+  "forgetDevice": "Tersimpan · lupakan",
+  "savedTag": "tersimpan",
+  "setPassword": "Atur kata sandi",
+  "setPasswordDesc": "Mengenkripsi dompet ini di perangkat ini. Anda akan membutuhkannya untuk membuka dompet tersimpan nanti.",
+  "enterPassword": "Masukkan kata sandi Anda",
+  "enterPasswordDesc": "Buka dompet tersimpan Anda untuk melanjutkan.",
+  "password": "Kata sandi",
+  "confirmPassword": "Konfirmasi kata sandi",
+  "pwTooShort": "Gunakan minimal 8 karakter.",
+  "pwMismatch": "Kata sandi tidak cocok.",
+  "pwWrong": "Kata sandi salah.",
+  "unlockSaved": "Buka dompet tersimpan",
+  "unlockSavedDesc": "Masukkan kata sandi Anda untuk membuka dompet yang tersimpan di perangkat ini.",
+  "unlock": "Buka",
+  "useAnotherWallet": "Gunakan dompet lain",
+  "save": "Simpan"
 }

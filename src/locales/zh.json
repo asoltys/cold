@@ -189,5 +189,22 @@
   "publicKey": "公钥",
   "publicKeyDesc": "分享它即可在另一台设备或应用上以只读方式查看此钱包。它会暴露你的地址，而非你的密钥。",
   "copyKey": "复制密钥",
-  "showPublicKey": "显示公钥"
+  "showPublicKey": "显示公钥",
+  "saveDevice": "保存到此设备",
+  "forgetDevice": "已保存 · 忘记",
+  "savedTag": "已保存",
+  "setPassword": "设置密码",
+  "setPasswordDesc": "在此设备上加密此钱包。日后需用它解锁已保存的钱包。",
+  "enterPassword": "输入你的密码",
+  "enterPasswordDesc": "解锁已保存的钱包以继续。",
+  "password": "密码",
+  "confirmPassword": "确认密码",
+  "pwTooShort": "请至少使用 8 个字符。",
+  "pwMismatch": "两次密码不一致。",
+  "pwWrong": "密码错误。",
+  "unlockSaved": "解锁已保存的钱包",
+  "unlockSavedDesc": "输入你的密码以打开此设备上保存的钱包。",
+  "unlock": "解锁",
+  "useAnotherWallet": "使用其他钱包",
+  "save": "保存"
 }

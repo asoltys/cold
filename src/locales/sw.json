@@ -189,5 +189,22 @@
   "publicKey": "Ufunguo wa umma",
   "publicKeyDesc": "Shiriki huu ili kutazama pochi hii kwa kusoma tu kwenye kifaa au programu nyingine. Unaonyesha anwani zako, si funguo zako.",
   "copyKey": "Nakili ufunguo",
-  "showPublicKey": "Onyesha ufunguo wa umma"
+  "showPublicKey": "Onyesha ufunguo wa umma",
+  "saveDevice": "Hifadhi kwenye kifaa hiki",
+  "forgetDevice": "Imehifadhiwa · sahau",
+  "savedTag": "imehifadhiwa",
+  "setPassword": "Weka nenosiri",
+  "setPasswordDesc": "Husimba pochi hii kwa njia fiche kwenye kifaa hiki. Utalihitaji ili kufungua pochi zilizohifadhiwa baadaye.",
+  "enterPassword": "Ingiza nenosiri lako",
+  "enterPasswordDesc": "Fungua pochi zako zilizohifadhiwa ili kuendelea.",
+  "password": "Nenosiri",
+  "confirmPassword": "Thibitisha nenosiri",
+  "pwTooShort": "Tumia angalau herufi 8.",
+  "pwMismatch": "Manenosiri hayalingani.",
+  "pwWrong": "Nenosiri si sahihi.",
+  "unlockSaved": "Fungua pochi zilizohifadhiwa",
+  "unlockSavedDesc": "Ingiza nenosiri lako ili kufungua pochi zilizohifadhiwa kwenye kifaa hiki.",
+  "unlock": "Fungua",
+  "useAnotherWallet": "Tumia pochi nyingine",
+  "save": "Hifadhi"
 }

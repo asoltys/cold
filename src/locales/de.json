@@ -188,5 +188,22 @@
   "publicKey": "Öffentlicher Schlüssel",
   "publicKeyDesc": "Teile dies, um diese Wallet auf einem anderen Gerät oder in einer anderen App nur-lesend zu beobachten. Er gibt deine Adressen preis, nicht deine Schlüssel.",
   "copyKey": "Schlüssel kopieren",
-  "showPublicKey": "Öffentlichen Schlüssel anzeigen"
+  "showPublicKey": "Öffentlichen Schlüssel anzeigen",
+  "saveDevice": "Auf diesem Gerät speichern",
+  "forgetDevice": "Gespeichert · entfernen",
+  "savedTag": "gespeichert",
+  "setPassword": "Passwort festlegen",
+  "setPasswordDesc": "Verschlüsselt diese Wallet auf diesem Gerät. Du brauchst es, um gespeicherte Wallets später zu entsperren.",
+  "enterPassword": "Passwort eingeben",
+  "enterPasswordDesc": "Entsperre deine gespeicherten Wallets, um fortzufahren.",
+  "password": "Passwort",
+  "confirmPassword": "Passwort bestätigen",
+  "pwTooShort": "Verwende mindestens 8 Zeichen.",
+  "pwMismatch": "Die Passwörter stimmen nicht überein.",
+  "pwWrong": "Falsches Passwort.",
+  "unlockSaved": "Gespeicherte Wallets entsperren",
+  "unlockSavedDesc": "Gib dein Passwort ein, um die auf diesem Gerät gespeicherten Wallets zu öffnen.",
+  "unlock": "Entsperren",
+  "useAnotherWallet": "Andere Wallet verwenden",
+  "save": "Speichern"
 }

@@ -4,7 +4,7 @@
 // which rebuilds the active screen. Text inputs write back into `ui` on `input`
 // (without re-rendering) so their values survive structural re-renders.
 
-import { Wallet, newMnemonic, isValidMnemonic, utxoId, previewGift, buildClaimTx, giftMinimum, parseAccountKey, xpubToZpub } from './wallet.js';
+import { Wallet, newMnemonic, isValidMnemonic, utxoId, previewGift, buildClaimTx, giftMinimum, parseAccountKey, xpubToZpub, encryptVault, decryptVault } from './wallet.js';
 import { qrSvg } from './qr.js';
 import { scanQr } from './scan.js';
 import { getSyncConfig, setSyncConfig } from './nostr.js';
@@ -30,6 +30,9 @@ const ui = {
   watchXpub: '', // watch-only xpub/zpub input
   watchLabel: '', // watch-only account label input
   fromWallet: false, // unlock screen reached as "add wallet" (show a back button)
+  pw: null, // { purpose, accId, mode, v1, v2, error } — vault password prompt
+  vaultPw: '', // on-open vault unlock input
+  vaultError: '',
   createStep: 'gen', // 'gen' | 'confirm'
   draftMnemonic: '',
   confirm: [], // [{ index, value }]
@@ -163,7 +166,9 @@ function render() {
       ? walletScreen()
       : ui.screen === 'accounts'
         ? accountsScreen()
-        : ui.screen === 'claim'
+        : ui.screen === 'vault'
+          ? vaultScreen()
+          : ui.screen === 'claim'
           ? claimScreen()
           : ui.screen === 'howItWorks'
             ? howItWorksScreen()
@@ -677,8 +682,9 @@ function switchAccount(id) {
   if (acc) activateAccount(acc);
 }
 
-// Restore accounts after a refresh (sessionStorage), or on a fresh session seed
-// the list from persisted watch-only accounts. Returns true if one was opened.
+// Restore accounts after a refresh (sessionStorage); on a fresh session, prompt
+// to unlock the encrypted vault if there is one, else seed from watch-only
+// accounts. Returns true if it handled the entry (opened or showed a prompt).
 function restoreAccountsState() {
   let sess = null;
   try { sess = JSON.parse(sessionStorage.getItem(ACCOUNTS_KEY) || 'null'); } catch {}
@@ -688,6 +694,7 @@ function restoreAccountsState() {
     activateAccount(active);
     return true;
   }
+  if (hasVault()) { ui.screen = 'vault'; render(); return true; }
   const watch = loadWatchAccounts();
   if (watch.length) {
     accounts = watch.slice();
@@ -695,6 +702,94 @@ function restoreAccountsState() {
     return true;
   }
   return false;
+}
+
+// --- encrypted vault (optional password-persisted full accounts) ----------
+const VAULT_KEY = 'btc-wallet-vault';
+let vaultPassword = null; // in memory once unlocked/set this session; cleared on lock
+
+function loadVaultBlob() {
+  try { return JSON.parse(localStorage.getItem(VAULT_KEY) || 'null'); } catch { return null; }
+}
+function hasVault() { return !!loadVaultBlob(); }
+
+// Re-encrypt the vault from the currently-persisted full accounts (needs the
+// in-memory password). Removes the blob when nothing is persisted.
+function writeVault() {
+  if (vaultPassword == null) return;
+  const list = accounts.filter((a) => a.type === 'full' && a.persisted)
+    .map((a) => ({ label: a.label, mnemonic: a.mnemonic, passphrase: a.passphrase || '' }));
+  try {
+    if (!list.length) localStorage.removeItem(VAULT_KEY);
+    else localStorage.setItem(VAULT_KEY, JSON.stringify(encryptVault(list, vaultPassword)));
+  } catch {}
+}
+
+function mergeVaultList(list) {
+  for (const v of list) {
+    const acc = addOrGetAccount({ type: 'full', label: v.label || defaultLabel('full'), mnemonic: v.mnemonic, passphrase: v.passphrase || '' });
+    acc.persisted = true;
+  }
+}
+
+// Toggle persistence on a full account. Prompts for the vault password when it
+// isn't unlocked this session ('set' the first time, 'enter' if a vault exists).
+function startSave(id) {
+  const acc = accounts.find((a) => a.id === id);
+  if (!acc || acc.type !== 'full') return;
+  if (vaultPassword != null) { acc.persisted = true; writeVault(); persistAccounts(); render(); return; }
+  ui.pw = { purpose: 'save', accId: id, mode: hasVault() ? 'enter' : 'set', v1: '', v2: '', error: '' };
+  render();
+}
+function startForget(id) {
+  if (vaultPassword != null) {
+    const acc = accounts.find((a) => a.id === id);
+    if (acc) acc.persisted = false;
+    writeVault(); persistAccounts(); render();
+    return;
+  }
+  ui.pw = { purpose: 'forget', accId: id, mode: 'enter', v1: '', v2: '', error: '' };
+  render();
+}
+function cancelPw() { ui.pw = null; render(); }
+function submitPw() {
+  const p = ui.pw;
+  if (p.mode === 'set') {
+    if ((p.v1 || '').length < 8) { p.error = t('pwTooShort'); render(); return; }
+    if (p.v1 !== p.v2) { p.error = t('pwMismatch'); render(); return; }
+    vaultPassword = p.v1;
+  } else {
+    let list;
+    try { list = decryptVault(loadVaultBlob(), p.v1); } catch { p.error = t('pwWrong'); render(); return; }
+    vaultPassword = p.v1;
+    mergeVaultList(list); // bring existing persisted accounts into the session
+  }
+  const acc = accounts.find((a) => a.id === p.accId);
+  if (acc) acc.persisted = p.purpose === 'save';
+  writeVault();
+  persistAccounts();
+  ui.pw = null;
+  render();
+}
+
+// On-open vault unlock.
+function unlockVault() {
+  let list;
+  try { list = decryptVault(loadVaultBlob(), ui.vaultPw); } catch { ui.vaultError = t('pwWrong'); render(); return; }
+  vaultPassword = ui.vaultPw;
+  accounts = list
+    .map((v) => ({ id: genId(), type: 'full', label: v.label || defaultLabel('full'), mnemonic: v.mnemonic, passphrase: v.passphrase || '', persisted: true }))
+    .concat(loadWatchAccounts());
+  ui.vaultPw = '';
+  ui.vaultError = '';
+  activateAccount(accounts[0]);
+}
+function skipVault() {
+  ui.vaultPw = '';
+  ui.vaultError = '';
+  const watch = loadWatchAccounts();
+  if (watch.length) { accounts = watch.slice(); activateAccount(accounts[0]); }
+  else { ui.screen = 'unlock'; render(); }
 }
 
 function enterOfflineFallback() {
@@ -721,13 +816,17 @@ async function retryOnline() {
 function lock() {
   wallet.stopRealtime();
   clearAccounts();
+  vaultPassword = null;
   wallet.load({ mnemonic: '', passphrase: '', netName: 'mainnet', offline: false });
   wallet.mnemonic = '';
-  ui.screen = 'unlock';
+  ui.screen = hasVault() ? 'vault' : 'unlock';
   ui.unlockTab = 'create';
   ui.fromWallet = false;
   ui.watchXpub = '';
   ui.watchLabel = '';
+  ui.pw = null;
+  ui.vaultPw = '';
+  ui.vaultError = '';
   ui.createStep = 'gen';
   ui.draftMnemonic = '';
   ui.importText = '';
@@ -1179,6 +1278,7 @@ function claimScreen() {
 
 // Account switcher: pick a wallet, add another, or lock the session.
 function accountsScreen() {
+  if (ui.pw) return h('div', { class: 'col', style: 'gap:16px' }, brandHeader(false), pwPromptCard());
   return h(
     'div',
     { class: 'col', style: 'gap:16px' },
@@ -1188,12 +1288,19 @@ function accountsScreen() {
       h('div', { class: 'col', style: 'gap:0' },
         accounts.map((a) => {
           const isActive = a.id === activeId;
-          return h('div', { class: 'row between', style: 'padding:10px 0;border-bottom:1px solid var(--line)' },
-            h('button', {
-              class: 'linklike', style: 'text-align:left;flex:1;font-size:15px;' + (isActive ? 'font-weight:600' : ''),
-              onClick: () => { if (isActive) { ui.screen = 'wallet'; render(); } else switchAccount(a.id); },
-            }, (isActive ? '● ' : '○ ') + a.label + (a.type === 'watch' ? ' · ' + t('watchOnlyTag') : '')),
-            h('button', { class: 'btn-sm', title: t('remove'), onClick: () => removeAccount(a.id) }, '✕')
+          const tag = a.type === 'watch' ? ' · ' + t('watchOnlyTag') : a.persisted ? ' · ' + t('savedTag') : '';
+          return h('div', { class: 'col', style: 'gap:4px; padding:10px 0; border-bottom:1px solid var(--line)' },
+            h('div', { class: 'row between' },
+              h('button', {
+                class: 'linklike', style: 'text-align:left;flex:1;font-size:15px;' + (isActive ? 'font-weight:600' : ''),
+                onClick: () => { if (isActive) { ui.screen = 'wallet'; render(); } else switchAccount(a.id); },
+              }, (isActive ? '● ' : '○ ') + a.label + tag),
+              h('button', { class: 'btn-sm', title: t('remove'), onClick: () => removeAccount(a.id) }, '✕')
+            ),
+            a.type === 'full'
+              ? h('button', { class: 'linklike small', style: 'align-self:flex-start', onClick: () => (a.persisted ? startForget(a.id) : startSave(a.id)) },
+                  a.persisted ? t('forgetDevice') : t('saveDevice'))
+              : null
           );
         })
       ),
@@ -1201,6 +1308,38 @@ function accountsScreen() {
       h('button', { class: 'btn-ghost btn-block', onClick: lock }, t('lockAll'))
     ),
     h('button', { class: 'btn-ghost btn-block', onClick: () => { ui.screen = 'wallet'; render(); } }, t('back'))
+  );
+}
+
+function pwPromptCard() {
+  const p = ui.pw;
+  return h('div', { class: 'card col' },
+    h('h3', {}, p.mode === 'set' ? t('setPassword') : t('enterPassword')),
+    h('p', { class: 'small muted', style: 'margin:0' }, p.mode === 'set' ? t('setPasswordDesc') : t('enterPasswordDesc')),
+    h('input', { type: 'password', placeholder: t('password'), value: p.v1, onInput: (e) => (p.v1 = e.target.value) }),
+    p.mode === 'set' ? h('input', { type: 'password', placeholder: t('confirmPassword'), value: p.v2, onInput: (e) => (p.v2 = e.target.value) }) : null,
+    p.error && h('div', { class: 'notice err' }, p.error),
+    h('div', { class: 'row gap6' },
+      h('button', { class: 'btn-ghost grow', onClick: cancelPw }, t('back')),
+      h('button', { class: 'btn-primary grow', onClick: submitPw }, p.mode === 'set' ? t('save') : t('unlock'))
+    )
+  );
+}
+
+function vaultScreen() {
+  return h(
+    'div',
+    { class: 'col', style: 'gap:16px' },
+    brandHeader(false),
+    h('div', { class: 'card col' },
+      h('h3', {}, t('unlockSaved')),
+      h('p', { class: 'small muted', style: 'margin:0' }, t('unlockSavedDesc')),
+      h('input', { type: 'password', placeholder: t('password'), value: ui.vaultPw,
+        onInput: (e) => (ui.vaultPw = e.target.value), onKeyDown: (e) => { if (e.key === 'Enter') unlockVault(); } }),
+      ui.vaultError && h('div', { class: 'notice err' }, ui.vaultError),
+      h('button', { class: 'btn-primary btn-block', onClick: unlockVault }, t('unlock')),
+      h('button', { class: 'btn-ghost btn-block', onClick: skipVault }, t('useAnotherWallet'))
+    )
   );
 }
 

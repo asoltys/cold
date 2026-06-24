@@ -189,5 +189,22 @@
   "publicKey": "Chave pública",
   "publicKeyDesc": "Compartilhe isto para acompanhar esta carteira somente leitura em outro dispositivo ou aplicativo. Revela seus endereços, não suas chaves.",
   "copyKey": "Copiar chave",
-  "showPublicKey": "Mostrar chave pública"
+  "showPublicKey": "Mostrar chave pública",
+  "saveDevice": "Salvar neste dispositivo",
+  "forgetDevice": "Salva · esquecer",
+  "savedTag": "salva",
+  "setPassword": "Definir uma senha",
+  "setPasswordDesc": "Criptografa esta carteira neste dispositivo. Você precisará dela para desbloquear as carteiras salvas depois.",
+  "enterPassword": "Digite sua senha",
+  "enterPasswordDesc": "Desbloqueie suas carteiras salvas para continuar.",
+  "password": "Senha",
+  "confirmPassword": "Confirmar senha",
+  "pwTooShort": "Use ao menos 8 caracteres.",
+  "pwMismatch": "As senhas não coincidem.",
+  "pwWrong": "Senha incorreta.",
+  "unlockSaved": "Desbloquear carteiras salvas",
+  "unlockSavedDesc": "Digite sua senha para abrir as carteiras salvas neste dispositivo.",
+  "unlock": "Desbloquear",
+  "useAnotherWallet": "Usar outra carteira",
+  "save": "Salvar"
 }

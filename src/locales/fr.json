@@ -188,5 +188,22 @@
   "publicKey": "Clé publique",
   "publicKeyDesc": "Partagez-la pour surveiller ce portefeuille en lecture seule sur un autre appareil ou une autre application. Elle révèle vos adresses, pas vos clés.",
   "copyKey": "Copier la clé",
-  "showPublicKey": "Afficher la clé publique"
+  "showPublicKey": "Afficher la clé publique",
+  "saveDevice": "Enregistrer sur cet appareil",
+  "forgetDevice": "Enregistré · oublier",
+  "savedTag": "enregistré",
+  "setPassword": "Définir un mot de passe",
+  "setPasswordDesc": "Chiffre ce portefeuille sur cet appareil. Vous en aurez besoin pour déverrouiller les portefeuilles enregistrés plus tard.",
+  "enterPassword": "Saisissez votre mot de passe",
+  "enterPasswordDesc": "Déverrouillez vos portefeuilles enregistrés pour continuer.",
+  "password": "Mot de passe",
+  "confirmPassword": "Confirmer le mot de passe",
+  "pwTooShort": "Utilisez au moins 8 caractères.",
+  "pwMismatch": "Les mots de passe ne correspondent pas.",
+  "pwWrong": "Mot de passe incorrect.",
+  "unlockSaved": "Déverrouiller les portefeuilles enregistrés",
+  "unlockSavedDesc": "Saisissez votre mot de passe pour ouvrir les portefeuilles enregistrés sur cet appareil.",
+  "unlock": "Déverrouiller",
+  "useAnotherWallet": "Utiliser un autre portefeuille",
+  "save": "Enregistrer"
 }

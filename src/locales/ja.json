@@ -188,5 +188,22 @@
   "publicKey": "公開鍵",
   "publicKeyDesc": "これを共有すると、別の端末やアプリでこのウォレットを読み取り専用でウォッチできます。鍵ではなくアドレスが公開されます。",
   "copyKey": "鍵をコピー",
-  "showPublicKey": "公開鍵を表示"
+  "showPublicKey": "公開鍵を表示",
+  "saveDevice": "この端末に保存",
+  "forgetDevice": "保存済み · 削除",
+  "savedTag": "保存済み",
+  "setPassword": "パスワードを設定",
+  "setPasswordDesc": "このウォレットをこの端末で暗号化します。後で保存したウォレットを解除するために必要です。",
+  "enterPassword": "パスワードを入力",
+  "enterPasswordDesc": "保存したウォレットを解除して続行します。",
+  "password": "パスワード",
+  "confirmPassword": "パスワードを再入力",
+  "pwTooShort": "8文字以上にしてください。",
+  "pwMismatch": "パスワードが一致しません。",
+  "pwWrong": "パスワードが違います。",
+  "unlockSaved": "保存したウォレットを解除",
+  "unlockSavedDesc": "この端末に保存したウォレットを開くにはパスワードを入力してください。",
+  "unlock": "解除",
+  "useAnotherWallet": "別のウォレットを使う",
+  "save": "保存"
 }
