@@ -205,5 +205,10 @@
   "unlockSavedDesc": "Introduce tu contraseña para abrir los monederos guardados en este dispositivo.",
   "unlock": "Desbloquear",
   "useAnotherWallet": "Usar otro monedero",
-  "save": "Guardar"
+  "save": "Guardar",
+  "importLabel": "Frase de recuperación o clave",
+  "importPlaceholder": "Tus 12 o 24 palabras, o un xpub / xprv",
+  "invalidImport": "Eso no es una frase de recuperación, xpub o xprv válida.",
+  "importedKey": "Clave importada",
+  "importedKeyNote": "Esta cartera se importó desde una clave privada extendida, así que no tiene frase de recuperación. Guarda esa clave para conservar la cartera."
 }

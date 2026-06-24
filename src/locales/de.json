@@ -205,5 +205,10 @@
   "unlockSavedDesc": "Gib dein Passwort ein, um die auf diesem Gerät gespeicherten Wallets zu öffnen.",
   "unlock": "Entsperren",
   "useAnotherWallet": "Andere Wallet verwenden",
-  "save": "Speichern"
+  "save": "Speichern",
+  "importLabel": "Wiederherstellungsphrase oder Schlüssel",
+  "importPlaceholder": "Deine 12 oder 24 Wörter oder ein xpub / xprv",
+  "invalidImport": "Das ist keine gültige Wiederherstellungsphrase, kein xpub oder xprv.",
+  "importedKey": "Importierter Schlüssel",
+  "importedKeyNote": "Diese Wallet wurde aus einem erweiterten privaten Schlüssel importiert und hat daher keine Wiederherstellungsphrase. Sichere diesen Schlüssel selbst, um die Wallet zu behalten."
 }

@@ -205,5 +205,10 @@
   "unlockSavedDesc": "Nhập mật khẩu để mở các ví đã lưu trên thiết bị này.",
   "unlock": "Mở khóa",
   "useAnotherWallet": "Dùng ví khác",
-  "save": "Lưu"
+  "save": "Lưu",
+  "importLabel": "Cụm từ khôi phục hoặc khóa",
+  "importPlaceholder": "12 hoặc 24 từ của bạn, hoặc một xpub / xprv",
+  "invalidImport": "Đó không phải là cụm từ khôi phục, xpub hoặc xprv hợp lệ.",
+  "importedKey": "Khóa đã nhập",
+  "importedKeyNote": "Ví này được nhập từ một khóa riêng tư mở rộng, nên không có cụm từ khôi phục. Hãy sao lưu chính khóa đó để giữ ví."
 }

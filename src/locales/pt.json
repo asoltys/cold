@@ -176,7 +176,6 @@
   "accounts": "Contas",
   "addWallet": "Adicionar carteira",
   "lockAll": "Bloquear tudo",
-  "remove": "Remover",
   "watchOnly": "Somente leitura",
   "watchOnlyTag": "somente leitura",
   "watchOnlyAdd": "Adicionar somente leitura",
@@ -206,5 +205,10 @@
   "unlockSavedDesc": "Digite sua senha para abrir as carteiras salvas neste dispositivo.",
   "unlock": "Desbloquear",
   "useAnotherWallet": "Usar outra carteira",
-  "save": "Salvar"
+  "save": "Salvar",
+  "importLabel": "Frase de recuperação ou chave",
+  "importPlaceholder": "Suas 12 ou 24 palavras, ou um xpub / xprv",
+  "invalidImport": "Isso não é uma frase de recuperação, xpub ou xprv válida.",
+  "importedKey": "Chave importada",
+  "importedKeyNote": "Esta carteira foi importada de uma chave privada estendida, então não há frase de recuperação. Faça backup dessa chave para manter a carteira."
 }

@@ -176,7 +176,6 @@
   "accounts": "账户",
   "addWallet": "添加钱包",
   "lockAll": "全部锁定",
-  "remove": "移除",
   "watchOnly": "仅查看",
   "watchOnlyTag": "仅查看",
   "watchOnlyAdd": "添加仅查看",
@@ -206,5 +205,10 @@
   "unlockSavedDesc": "输入你的密码以打开此设备上保存的钱包。",
   "unlock": "解锁",
   "useAnotherWallet": "使用其他钱包",
-  "save": "保存"
+  "save": "保存",
+  "importLabel": "恢复短语或密钥",
+  "importPlaceholder": "你的 12 或 24 个单词，或 xpub / xprv",
+  "invalidImport": "这不是有效的恢复短语、xpub 或 xprv。",
+  "importedKey": "导入的密钥",
+  "importedKeyNote": "该钱包是从扩展私钥导入的，因此没有恢复短语。请备份该密钥本身以保留钱包。"
 }

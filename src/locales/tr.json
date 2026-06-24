@@ -205,5 +205,10 @@
   "unlockSavedDesc": "Bu cihaza kaydedilen cüzdanları açmak için parolanızı girin.",
   "unlock": "Aç",
   "useAnotherWallet": "Başka bir cüzdan kullan",
-  "save": "Kaydet"
+  "save": "Kaydet",
+  "importLabel": "Kurtarma ifadesi veya anahtar",
+  "importPlaceholder": "12 veya 24 kelimeniz ya da bir xpub / xprv",
+  "invalidImport": "Bu geçerli bir kurtarma ifadesi, xpub veya xprv değil.",
+  "importedKey": "İçe aktarılan anahtar",
+  "importedKeyNote": "Bu cüzdan genişletilmiş bir özel anahtardan içe aktarıldı, bu yüzden kurtarma ifadesi yok. Cüzdanı korumak için o anahtarın kendisini yedekleyin."
 }

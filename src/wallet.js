@@ -114,12 +114,13 @@ export class Wallet {
   }
 
   // --- setup --------------------------------------------------------------
-  load({ mnemonic = '', passphrase = '', xpub = '', netName = 'mainnet', offline = false }) {
+  load({ mnemonic = '', passphrase = '', xpub = '', xprv = '', netName = 'mainnet', offline = false }) {
     this.stopRealtime();
     this.mnemonic = (mnemonic || '').trim().replace(/\s+/g, ' ');
     this.passphrase = passphrase;
     this.xpub = xpub || '';
-    this.watchOnly = !!this.xpub && !this.mnemonic; // no seed = view/receive only
+    this.xprv = xprv || ''; // spending wallet imported from an extended private key
+    this.watchOnly = !!this.xpub && !this.mnemonic && !this.xprv; // view/receive only
     this.netName = netName;
     this.offline = offline;
     this.api = new Api(netName);
@@ -176,24 +177,27 @@ export class Wallet {
 
   // --- derivation ---------------------------------------------------------
   account() {
-    // Watch-only wallets are loaded directly from the account public key.
-    if (this.watchOnly) {
-      if (!this._account || this._accountKey !== this.xpub) {
-        this._account = HDKey.fromExtendedKey(this.xpub);
-        this._accountKey = this.xpub;
-        this._addrCache.clear();
-      }
-      return this._account;
-    }
-    const key = `${this.netName}|${this.mnemonic}|${this.passphrase}`;
-    if (this._account && this._accountKey === key) return this._account;
-    const seed = mnemonicToSeedSync(this.mnemonic, this.passphrase);
-    const root = HDKey.fromMasterSeed(seed);
     const { coin } = this.netCfg;
-    this._account = root.derive(`m/84'/${coin}'/0'`);
+    // Cache key identifies the source so a reload rebuilds when it changes.
+    const key = this.watchOnly ? 'pub:' + this.xpub
+      : this.xprv ? 'prv:' + this.xprv
+      : `${this.netName}|${this.mnemonic}|${this.passphrase}`;
+    if (this._account && this._accountKey === key) return this._account;
+    let acct;
+    if (this.watchOnly) {
+      acct = HDKey.fromExtendedKey(this.xpub); // account-level public key
+    } else if (this.xprv) {
+      // A master xprv (depth 0) needs the BIP84 account path derived from it;
+      // an already account-level xprv is used as-is.
+      const node = HDKey.fromExtendedKey(this.xprv);
+      acct = node.depth === 0 ? node.derive(`m/84'/${coin}'/0'`) : node;
+    } else {
+      acct = HDKey.fromMasterSeed(mnemonicToSeedSync(this.mnemonic, this.passphrase)).derive(`m/84'/${coin}'/0'`);
+    }
+    this._account = acct;
     this._accountKey = key;
     this._addrCache.clear();
-    return this._account;
+    return acct;
   }
 
   // The account-level extended public key (xpub / zpub) for export → watch-only.
@@ -1144,7 +1148,7 @@ export class Wallet {
   // then shows the last-known balance/history instantly while a fresh scan
   // runs in the background.
   _cacheKey() {
-    const id = this.watchOnly ? this.xpub : `${this.mnemonic}\n${this.passphrase}`;
+    const id = this.watchOnly ? this.xpub : this.xprv ? this.xprv : `${this.mnemonic}\n${this.passphrase}`;
     const bytes = new TextEncoder().encode(id);
     return 'btc-wallet-cache:' + hex.encode(sha256(bytes)).slice(0, 32);
   }
@@ -1329,26 +1333,35 @@ export function utxoId(u) {
 const _b58c = base58check(sha256);
 const _XPUB_VER = Uint8Array.from([0x04, 0x88, 0xb2, 0x1e]);
 const _ZPUB_VER = Uint8Array.from([0x04, 0xb2, 0x47, 0x46]);
-export function parseAccountKey(s) {
+const _XPRV_VER = Uint8Array.from([0x04, 0x88, 0xad, 0xe4]);
+const _ZPRV_VER = Uint8Array.from([0x04, 0xb2, 0x43, 0x0c]);
+
+// Classify a pasted extended key. xpub/zpub → public (watch-only); xprv/zprv →
+// private (spending). Version bytes are normalized to the standard xpub/xprv set
+// (key material is identical; only the prefix differs) so HDKey can load it.
+// Returns { kind: 'xpub' | 'xprv', key } or throws.
+export function parseExtendedKey(s) {
   let data;
   try {
     data = _b58c.decode((s || '').trim());
   } catch {
-    throw new Error('Not a valid extended public key.');
+    throw new Error('Not a valid recovery phrase or key.');
   }
-  if (data.length !== 78) throw new Error('Not a valid extended public key.');
+  if (data.length !== 78) throw new Error('Not a valid recovery phrase or key.');
   const ver = hex.encode(data.slice(0, 4));
-  if (ver !== hex.encode(_XPUB_VER) && ver !== hex.encode(_ZPUB_VER))
-    throw new Error('Use an account xpub or zpub (native segwit).');
+  let kind, norm;
+  if (ver === hex.encode(_XPUB_VER) || ver === hex.encode(_ZPUB_VER)) { kind = 'xpub'; norm = _XPUB_VER; }
+  else if (ver === hex.encode(_XPRV_VER) || ver === hex.encode(_ZPRV_VER)) { kind = 'xprv'; norm = _XPRV_VER; }
+  else throw new Error('Unrecognized key type — use a native-segwit xpub/zpub or xprv/zprv.');
   const out = new Uint8Array(data);
-  out.set(_XPUB_VER, 0);
-  const xpub = _b58c.encode(out);
+  out.set(norm, 0);
+  const key = _b58c.encode(out);
   try {
-    HDKey.fromExtendedKey(xpub);
+    HDKey.fromExtendedKey(key);
   } catch {
-    throw new Error('Not a valid extended public key.');
+    throw new Error('Not a valid extended key.');
   }
-  return xpub;
+  return { kind, key };
 }
 
 // Encrypted vault for persisting seed-bearing accounts on this device. Key is

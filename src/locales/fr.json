@@ -205,5 +205,10 @@
   "unlockSavedDesc": "Saisissez votre mot de passe pour ouvrir les portefeuilles enregistrés sur cet appareil.",
   "unlock": "Déverrouiller",
   "useAnotherWallet": "Utiliser un autre portefeuille",
-  "save": "Enregistrer"
+  "save": "Enregistrer",
+  "importLabel": "Phrase de récupération ou clé",
+  "importPlaceholder": "Vos 12 ou 24 mots, ou un xpub / xprv",
+  "invalidImport": "Ce n’est pas une phrase de récupération, un xpub ou un xprv valide.",
+  "importedKey": "Clé importée",
+  "importedKeyNote": "Ce portefeuille a été importé depuis une clé privée étendue, il n’a donc pas de phrase de récupération. Sauvegardez cette clé pour conserver le portefeuille."
 }

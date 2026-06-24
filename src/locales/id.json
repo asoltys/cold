@@ -205,5 +205,10 @@
   "unlockSavedDesc": "Masukkan kata sandi Anda untuk membuka dompet yang tersimpan di perangkat ini.",
   "unlock": "Buka",
   "useAnotherWallet": "Gunakan dompet lain",
-  "save": "Simpan"
+  "save": "Simpan",
+  "importLabel": "Frasa pemulihan atau kunci",
+  "importPlaceholder": "12 atau 24 kata Anda, atau xpub / xprv",
+  "invalidImport": "Itu bukan frasa pemulihan, xpub, atau xprv yang valid.",
+  "importedKey": "Kunci yang diimpor",
+  "importedKeyNote": "Dompet ini diimpor dari kunci privat yang diperluas, jadi tidak ada frasa pemulihan. Cadangkan kunci itu sendiri untuk menyimpan dompet."
 }

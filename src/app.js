@@ -4,7 +4,7 @@
 // which rebuilds the active screen. Text inputs write back into `ui` on `input`
 // (without re-rendering) so their values survive structural re-renders.
 
-import { Wallet, newMnemonic, isValidMnemonic, utxoId, previewGift, buildClaimTx, giftMinimum, parseAccountKey, xpubToZpub, encryptVault, decryptVault } from './wallet.js';
+import { Wallet, newMnemonic, isValidMnemonic, utxoId, previewGift, buildClaimTx, giftMinimum, parseExtendedKey, xpubToZpub, encryptVault, decryptVault } from './wallet.js';
 import { qrSvg } from './qr.js';
 import { scanQr } from './scan.js';
 import { getSyncConfig, setSyncConfig } from './nostr.js';
@@ -261,51 +261,15 @@ function unlockScreen() {
         'div',
         { class: 'tabs' },
         tabBtn(t('createNew'), ui.unlockTab === 'create', () => { ui.unlockTab = 'create'; ui.unlockError = ''; render(); }),
-        tabBtn(t('importExisting'), ui.unlockTab === 'import', () => { ui.unlockTab = 'import'; ui.unlockError = ''; render(); }),
-        tabBtn(t('watchOnly'), ui.unlockTab === 'watch', () => { ui.unlockTab = 'watch'; ui.unlockError = ''; render(); })
+        tabBtn(t('importExisting'), ui.unlockTab === 'import', () => { ui.unlockTab = 'import'; ui.unlockError = ''; render(); })
       ),
-      ui.unlockTab === 'create' ? createPane() : ui.unlockTab === 'import' ? importPane() : watchPane(),
+      ui.unlockTab === 'create' ? createPane() : importPane(),
       ui.unlockError && h('div', { class: 'notice err' }, ui.unlockError)
     ),
     ui.fromWallet && accounts.length
       ? h('button', { class: 'btn-ghost btn-block', onClick: () => { ui.fromWallet = false; ui.screen = 'wallet'; ui.unlockError = ''; render(); } }, t('back'))
       : null
   );
-}
-
-function watchPane() {
-  return h(
-    'div',
-    { class: 'col', style: 'gap:12px; margin-top:14px' },
-    h('p', { class: 'small muted', style: 'margin:0' }, t('watchOnlyDesc')),
-    h('div', { class: 'field' },
-      h('span', { class: 'lab' }, t('watchXpubLabel')),
-      h('textarea', { rows: '3', placeholder: 'zpub… / xpub…', value: ui.watchXpub, onInput: (e) => (ui.watchXpub = e.target.value) })
-    ),
-    h('div', { class: 'field' },
-      h('span', { class: 'lab' }, t('labelOptional')),
-      h('input', { type: 'text', placeholder: defaultLabel('watch'), value: ui.watchLabel, onInput: (e) => (ui.watchLabel = e.target.value) })
-    ),
-    h('button', { class: 'btn-primary btn-block', onClick: addWatchOnly }, t('watchOnlyAdd'))
-  );
-}
-
-function addWatchOnly() {
-  ui.unlockError = '';
-  let xpub;
-  try {
-    xpub = parseAccountKey(ui.watchXpub);
-  } catch (e) {
-    ui.unlockError = e.message;
-    render();
-    return;
-  }
-  const label = (ui.watchLabel || '').trim() || defaultLabel('watch');
-  const acc = addOrGetAccount({ type: 'watch', label, xpub });
-  ui.watchXpub = '';
-  ui.watchLabel = '';
-  ui.fromWallet = false;
-  activateAccount(acc, { fresh: true });
 }
 
 // ================================================================ HOW IT WORKS
@@ -499,9 +463,9 @@ function importPane() {
     h(
       'label',
       { class: 'field' },
-      h('span', { class: 'lab' }, t('seedPhrase')),
+      h('span', { class: 'lab' }, t('importLabel')),
       h('textarea', {
-        placeholder: t('seedPlaceholder'),
+        placeholder: t('importPlaceholder'),
         autocapitalize: 'none',
         autocomplete: 'off',
         spellcheck: 'false',
@@ -534,15 +498,20 @@ function optionsPanel() {
   );
 }
 
-async function openWallet(mnemonic) {
+// Import accepts a recovery phrase, an xpub/zpub (watch-only), or an xprv/zprv
+// (full spending). Classify the pasted text and open the right kind of wallet.
+async function openWallet(input) {
   ui.unlockError = '';
-  const m = (mnemonic || '').trim().replace(/\s+/g, ' ');
-  if (!isValidMnemonic(m)) {
-    ui.unlockError = t('invalidSeed');
-    render();
-    return;
-  }
-  await enterWallet(m, ui.passphrase);
+  const raw = (input || '').trim();
+  const m = raw.replace(/\s+/g, ' ');
+  if (isValidMnemonic(m)) { await enterWallet(m, ui.passphrase); return; }
+  let pk;
+  try { pk = parseExtendedKey(raw); } catch { ui.unlockError = t('invalidImport'); render(); return; }
+  const acc = pk.kind === 'xpub'
+    ? addOrGetAccount({ type: 'watch', label: defaultLabel('watch'), xpub: pk.key })
+    : addOrGetAccount({ type: 'full', label: defaultLabel('full'), xprv: pk.key });
+  ui.fromWallet = false;
+  await activateAccount(acc, { fresh: true });
 }
 
 // Register a full (seed) wallet as an account and open it.
@@ -561,6 +530,7 @@ async function enterWallet(mnemonic, passphrase, opts = {}) {
 async function activateAccount(acc, opts = {}) {
   activeId = acc.id;
   if (acc.type === 'watch') wallet.load({ xpub: acc.xpub, netName: 'mainnet', offline: false });
+  else if (acc.xprv) wallet.load({ xprv: acc.xprv, netName: 'mainnet', offline: false });
   else wallet.load({ mnemonic: acc.mnemonic, passphrase: acc.passphrase || '', netName: 'mainnet', offline: false });
   persistAccounts();
   const hadCache = wallet.restoreCache(); // show last-known balance/history instantly
@@ -632,7 +602,7 @@ let accounts = [];
 let activeId = null;
 
 const genId = () => 'a' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
-const credId = (a) => (a.type === 'watch' ? 'w:' + a.xpub : 'f:' + a.mnemonic + '|' + (a.passphrase || ''));
+const credId = (a) => (a.type === 'watch' ? 'w:' + a.xpub : a.xprv ? 'x:' + a.xprv : 'f:' + a.mnemonic + '|' + (a.passphrase || ''));
 const activeAccount = () => accounts.find((a) => a.id === activeId) || null;
 
 function defaultLabel(type) {
@@ -726,7 +696,7 @@ function hasVault() { return !!loadVaultBlob(); }
 function writeVault() {
   if (vaultPassword == null) return;
   const list = accounts.filter((a) => a.type === 'full' && a.persisted)
-    .map((a) => ({ label: a.label, mnemonic: a.mnemonic, passphrase: a.passphrase || '' }));
+    .map((a) => (a.xprv ? { label: a.label, xprv: a.xprv } : { label: a.label, mnemonic: a.mnemonic, passphrase: a.passphrase || '' }));
   try {
     if (!list.length) localStorage.removeItem(VAULT_KEY);
     else localStorage.setItem(VAULT_KEY, JSON.stringify(encryptVault(list, vaultPassword)));
@@ -735,7 +705,11 @@ function writeVault() {
 
 function mergeVaultList(list) {
   for (const v of list) {
-    const acc = addOrGetAccount({ type: 'full', label: v.label || defaultLabel('full'), mnemonic: v.mnemonic, passphrase: v.passphrase || '' });
+    const acc = addOrGetAccount(
+      v.xprv
+        ? { type: 'full', label: v.label || defaultLabel('full'), xprv: v.xprv }
+        : { type: 'full', label: v.label || defaultLabel('full'), mnemonic: v.mnemonic, passphrase: v.passphrase || '' }
+    );
     acc.persisted = true;
   }
 }
@@ -786,7 +760,7 @@ function unlockVault() {
   try { list = decryptVault(loadVaultBlob(), ui.vaultPw); } catch { ui.vaultError = t('pwWrong'); render(); return; }
   vaultPassword = ui.vaultPw;
   accounts = list
-    .map((v) => ({ id: genId(), type: 'full', label: v.label || defaultLabel('full'), mnemonic: v.mnemonic, passphrase: v.passphrase || '', persisted: true }))
+    .map((v) => ({ id: genId(), type: 'full', label: v.label || defaultLabel('full'), mnemonic: v.mnemonic || '', passphrase: v.passphrase || '', xprv: v.xprv || '', persisted: true }))
     .concat(loadWatchAccounts());
   ui.vaultPw = '';
   ui.vaultError = '';
@@ -894,6 +868,11 @@ function settingsTab() {
           h('h3', {}, t('watchOnly')),
           h('p', { class: 'small muted', style: 'margin:0' }, t('watchOnlyNote'))
         )
+      : !wallet.mnemonic
+      ? h('div', { class: 'card col' },
+          h('h3', {}, t('importedKey')),
+          h('p', { class: 'small muted', style: 'margin:0' }, t('importedKeyNote'))
+        )
       : h(
           'div',
           { class: 'card col' },
@@ -935,7 +914,7 @@ function settingsTab() {
             wallet.scanning ? t('scanning') : t('rescanWallet'))
     ),
     explorerCard(),
-    wallet.watchOnly ? null : syncCard(),
+    wallet.watchOnly || !wallet.mnemonic ? null : syncCard(),
     h(
       'div',
       { class: 'card col' },

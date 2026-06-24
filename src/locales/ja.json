@@ -205,5 +205,10 @@
   "unlockSavedDesc": "この端末に保存したウォレットを開くにはパスワードを入力してください。",
   "unlock": "解除",
   "useAnotherWallet": "別のウォレットを使う",
-  "save": "保存"
+  "save": "保存",
+  "importLabel": "復元フレーズまたは鍵",
+  "importPlaceholder": "12 または 24 個の単語、または xpub / xprv",
+  "invalidImport": "有効な復元フレーズ、xpub、xprv ではありません。",
+  "importedKey": "インポートした鍵",
+  "importedKeyNote": "このウォレットは拡張秘密鍵からインポートされたため、復元フレーズはありません。ウォレットを保持するにはその鍵自体をバックアップしてください。"
 }
