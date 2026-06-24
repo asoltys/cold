@@ -160,10 +160,12 @@
   "giftAmountInvalid": "Gib einen gültigen Betrag ein.",
   "giftAnother": "Weiteres erstellen",
   "giftReserved": "{n} Coin für unbeanspruchte Geschenke zurückgelegt",
-  "giftReclaim": "Zurückfordern",
   "claimBody": "Beanspruche es in einer brandneuen Wallet, die nur du selbst kontrollierst.",
   "claimBtn": "Beanspruchen",
   "claimFailed": "Dieses Geschenk wurde bereits beansprucht oder ist nicht mehr verfügbar.",
   "claimedTitle": "Beansprucht!",
-  "claimedBody": "Dein Bitcoin ist unterwegs. Sichere deine Wiederherstellungsphrase, um es zu schützen."
+  "claimedBody": "Dein Bitcoin ist unterwegs. Sichere deine Wiederherstellungsphrase, um es zu schützen.",
+  "giftRevoke": "Widerrufen",
+  "giftRevokeConfirm": "Dieses Geschenk widerrufen? Die Münze geht zurück in deine Wallet und der Link funktioniert nicht mehr.",
+  "giftRevoked": "Geschenk widerrufen"
 }

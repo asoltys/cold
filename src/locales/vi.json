@@ -158,12 +158,14 @@
   "giftAmountInvalid": "Nhập một số tiền hợp lệ.",
   "giftAnother": "Tạo cái khác",
   "giftReserved": "{n} coin được để dành cho các món quà chưa nhận",
-  "giftReclaim": "Lấy lại",
   "claimBody": "Nhận nó vào một ví hoàn toàn mới mà chỉ riêng bạn kiểm soát.",
   "claimBtn": "Nhận ngay",
   "claimFailed": "Món quà này đã được nhận hoặc không còn khả dụng.",
   "claimedTitle": "Đã nhận!",
   "claimedBody": "Bitcoin của bạn đang trên đường tới. Hãy sao lưu cụm từ khôi phục để giữ an toàn.",
   "giftLinkReveal": "Tạo liên kết tặng",
-  "copyLink": "Sao chép liên kết"
+  "copyLink": "Sao chép liên kết",
+  "giftRevoke": "Thu hồi",
+  "giftRevokeConfirm": "Thu hồi quà này? Việc này chuyển đồng coin về ví của bạn và khiến liên kết ngừng hoạt động.",
+  "giftRevoked": "Đã thu hồi quà"
 }

@@ -160,10 +160,12 @@
   "giftAmountInvalid": "Saisissez un montant valide.",
   "giftAnother": "En créer un autre",
   "giftReserved": "{n} de fonds mis de côté pour des cadeaux non réclamés",
-  "giftReclaim": "Récupérer",
   "claimBody": "Récupérez-les dans un tout nouveau portefeuille que vous seul contrôlez.",
   "claimBtn": "Récupérer",
   "claimFailed": "Ce cadeau a déjà été réclamé ou n’est plus disponible.",
   "claimedTitle": "Récupéré !",
-  "claimedBody": "Vos Bitcoin sont en route. Sauvegardez votre phrase de récupération pour les garder en sécurité."
+  "claimedBody": "Vos Bitcoin sont en route. Sauvegardez votre phrase de récupération pour les garder en sécurité.",
+  "giftRevoke": "Révoquer",
+  "giftRevokeConfirm": "Révoquer ce cadeau ? La pièce revient dans votre portefeuille et le lien cesse de fonctionner.",
+  "giftRevoked": "Cadeau révoqué"
 }

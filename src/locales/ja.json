@@ -158,12 +158,14 @@
   "giftAmountInvalid": "有効な金額を入力してください。",
   "giftAnother": "もう一つ作成",
   "giftReserved": "未受取のギフト用に {n} のコインを確保中",
-  "giftReclaim": "回収",
   "claimBody": "あなただけが管理できる真新しいウォレットに受け取りましょう。",
   "claimBtn": "受け取る",
   "claimFailed": "このギフトはすでに受け取られたか、現在利用できません。",
   "claimedTitle": "受け取りました！",
   "claimedBody": "Bitcoin が間もなく届きます。安全に保つため、復元フレーズをバックアップしてください。",
   "giftLinkReveal": "ギフトリンクを作成",
-  "copyLink": "リンクをコピー"
+  "copyLink": "リンクをコピー",
+  "giftRevoke": "取り消す",
+  "giftRevokeConfirm": "このギフトを取り消しますか？コインがウォレットに戻り、リンクは無効になります。",
+  "giftRevoked": "ギフトを取り消しました"
 }

@@ -160,10 +160,12 @@
   "giftAmountInvalid": "Introduce un importe válido.",
   "giftAnother": "Crear otro",
   "giftReserved": "{n} de monedas reservadas para regalos sin reclamar",
-  "giftReclaim": "Recuperar",
   "claimBody": "Reclámalo en una billetera totalmente nueva que solo tú controlas.",
   "claimBtn": "Reclamarlo",
   "claimFailed": "Este regalo ya ha sido reclamado o ya no está disponible.",
   "claimedTitle": "¡Reclamado!",
-  "claimedBody": "Tu Bitcoin está en camino. Haz una copia de seguridad de tu frase de recuperación para mantenerlo a salvo."
+  "claimedBody": "Tu Bitcoin está en camino. Haz una copia de seguridad de tu frase de recuperación para mantenerlo a salvo.",
+  "giftRevoke": "Revocar",
+  "giftRevokeConfirm": "¿Revocar este regalo? Esto devuelve la moneda a tu monedero y desactiva el enlace.",
+  "giftRevoked": "Regalo revocado"
 }

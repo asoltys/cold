@@ -160,10 +160,12 @@
   "giftAmountInvalid": "Digite um valor válido.",
   "giftAnother": "Criar outro",
   "giftReserved": "{n} de moeda reservada para presentes não resgatados",
-  "giftReclaim": "Recuperar",
   "claimBody": "Resgate para uma carteira novinha que só você controla.",
   "claimBtn": "Resgatar",
   "claimFailed": "Este presente já foi resgatado ou não está mais disponível.",
   "claimedTitle": "Resgatado!",
-  "claimedBody": "Seus Bitcoin estão a caminho. Faça backup da sua frase de recuperação para mantê-los seguros."
+  "claimedBody": "Seus Bitcoin estão a caminho. Faça backup da sua frase de recuperação para mantê-los seguros.",
+  "giftRevoke": "Revogar",
+  "giftRevokeConfirm": "Revogar este presente? Isso devolve a moeda à sua carteira e o link para de funcionar.",
+  "giftRevoked": "Presente revogado"
 }

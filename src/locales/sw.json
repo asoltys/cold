@@ -158,12 +158,14 @@
   "giftAmountInvalid": "Ingiza kiasi sahihi.",
   "giftAnother": "Tengeneza nyingine",
   "giftReserved": "{n} sarafu imewekwa kando kwa zawadi ambazo hazijadaiwa",
-  "giftReclaim": "Dai tena",
   "claimBody": "Idai kwenye pochi mpya kabisa unayoidhibiti wewe pekee.",
   "claimBtn": "Idai",
   "claimFailed": "Zawadi hii tayari imedaiwa au haipatikani tena.",
   "claimedTitle": "Imedaiwa!",
   "claimedBody": "Bitcoin yako inakuja. Hifadhi kifungu chako cha kurejesha ili kuilinda.",
   "giftLinkReveal": "Tengeneza kiungo cha zawadi",
-  "copyLink": "Nakili kiungo"
+  "copyLink": "Nakili kiungo",
+  "giftRevoke": "Batilisha",
+  "giftRevokeConfirm": "Batilisha zawadi hii? Hii inarudisha sarafu kwenye pochi yako na kiungo kinaacha kufanya kazi.",
+  "giftRevoked": "Zawadi imebatilishwa"
 }

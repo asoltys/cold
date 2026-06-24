@@ -158,12 +158,14 @@
   "giftAmountInvalid": "请输入有效金额。",
   "giftAnother": "再创建一个",
   "giftReserved": "{n} 枚币已预留给未领取的礼物",
-  "giftReclaim": "收回",
   "claimBody": "将它领取到一个仅由你自己掌控的全新钱包中。",
   "claimBtn": "领取",
   "claimFailed": "此礼物已被领取或不再可用。",
   "claimedTitle": "已领取！",
   "claimedBody": "你的 Bitcoin 正在到账。请备份你的恢复助记词以妥善保管。",
   "giftLinkReveal": "创建赠送链接",
-  "copyLink": "复制链接"
+  "copyLink": "复制链接",
+  "giftRevoke": "撤销",
+  "giftRevokeConfirm": "撤销此礼物？这会将这笔币退回你的钱包，并使链接失效。",
+  "giftRevoked": "礼物已撤销"
 }

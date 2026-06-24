@@ -787,6 +787,17 @@ export class Wallet {
     this.reservedSet().delete(id);
     this._saveReserved();
   }
+
+  // Truly revoke an unclaimed gift: spend its coin back into our own wallet,
+  // which double-spends the gift's presigned input so the link can't be claimed
+  // once this confirms. Uses a high fee to win any race with a claimer.
+  async revokeGift(id, feeRate) {
+    const draft = this.buildTx({ recipients: [{ address: this.freshChange().address }], feeRate, coinIds: [id], sendMax: true });
+    const hexTx = this.sign(draft.tx);
+    const txid = await this.broadcast(hexTx);
+    this.unreserve(id);
+    return txid;
+  }
   // Active gifts whose coin is still unspent (drops claimed/spent ones).
   activeGifts() {
     const live = new Set(this.utxos.map((u) => utxoId(u)));

@@ -38,6 +38,7 @@ const ui = {
   giftAmount: '', // gift-create amount input (Settings)
   giftCode: null, // last-created gift PSBT code
   giftError: '',
+  revokeId: null, // outpoint of a gift being revoked (confirm state)
   claimCode: null, // gift code being claimed (opened from a #gift= link)
   claimedAmount: 0,
   claimError: '',
@@ -614,6 +615,7 @@ function lock() {
   ui.giftAmount = '';
   ui.giftCode = null;
   ui.giftError = '';
+  ui.revokeId = null;
   ui.receiveSeenIndex = null;
   ui.txDetail = null;
   ui.broadcastTx = null;
@@ -750,14 +752,43 @@ function giftCard() {
           h('span', { class: 'small muted' }, t('giftReserved', { n: active.length })),
           ...active.map((id) => {
             const u = wallet.utxos.find((x) => utxoId(x) === id);
+            const label = u ? fmtAmount(u.value) + ' ' + unitLabel() : id.slice(0, 12) + '…';
+            if (ui.revokeId === id) {
+              return h('div', { class: 'col gap6' },
+                h('span', { class: 'small muted' }, t('giftRevokeConfirm')),
+                h('div', { class: 'row gap6' },
+                  ui.busy
+                    ? h('button', { class: 'btn-primary grow', disabled: true }, h('span', { class: 'spinner' }))
+                    : h('button', { class: 'btn-primary grow', onClick: () => doRevoke(id) }, t('giftRevoke')),
+                  h('button', { class: 'btn-ghost grow', onClick: () => { ui.revokeId = null; render(); } }, t('back'))
+                )
+              );
+            }
             return h('div', { class: 'row between' },
-              h('span', { class: 'small mono' }, u ? fmtAmount(u.value) + ' ' + unitLabel() : id.slice(0, 12) + '…'),
-              h('button', { class: 'btn-sm', onClick: () => { wallet.unreserve(id); render(); } }, t('giftReclaim'))
+              h('span', { class: 'small mono' }, label),
+              h('button', { class: 'btn-sm', onClick: () => { ui.revokeId = id; render(); } }, t('giftRevoke'))
             );
           })
         )
       : null
   );
+}
+
+async function doRevoke(id) {
+  if (wallet.offline) { toast(t('scanOffline')); return; }
+  ui.busy = true;
+  render();
+  try {
+    const rate = (wallet.feeRates && wallet.feeRates.fastestFee) || 10;
+    await wallet.revokeGift(id, rate);
+    ui.revokeId = null;
+    toast(t('giftRevoked'));
+    wallet.scan().catch(() => {});
+  } catch (e) {
+    toast(e.message);
+  }
+  ui.busy = false;
+  render();
 }
 
 // Block explorer / server selection: a preset (mempool.space, blockstream.info)
