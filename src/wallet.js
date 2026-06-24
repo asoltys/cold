@@ -17,7 +17,7 @@ import * as btc from '@scure/btc-signer';
 import { p2wpkh } from '@scure/btc-signer/payment';
 
 import { Api, pool, wsUrl } from './api.js';
-import { NostrSync } from './nostr.js';
+import { NostrSync, getSyncConfig } from './nostr.js';
 
 // No look-ahead: stop scanning a chain at the first unused address. This wallet
 // only ever exposes ONE unused address at a time (freshReceive = first unused;
@@ -678,8 +678,11 @@ export class Wallet {
     this.stopRealtime();
     // Safety-net poll: only the fresh frontier (next receive/change address),
     // in case the WebSocket misses a deposit. Already-scanned addresses are
-    // never re-polled. No periodic full scan — use the manual Rescan for that.
+    // never re-polled — the deep scan below covers spends/confirmations.
     this._pollTimer = setInterval(() => this.refreshLive(), 20000);
+    // Periodic full scan: reconciles everything refreshLive can't see on its own
+    // — pending→confirmed history, spends, and stale cache/relay state.
+    this._deepTimer = setInterval(() => this.scan({ silent: true }).catch(() => {}), 120000);
     if (typeof WebSocket === 'undefined') return;
     this._wsWant = true;
 
@@ -832,10 +835,17 @@ export class Wallet {
         const a = vin.prevout && vin.prevout.scriptpubkey_address;
         if (a && mine.has(a)) relevant = true;
       }
-      // Record it in history (so a pending deposit shows up there too).
-      if (relevant && !this.txs.some((t) => t.txid === tx.txid)) {
-        this.txs.push(this._txSummary(tx));
-        changed = true;
+      // Record it in history — or refresh it, so a pending tx flips to confirmed.
+      if (relevant) {
+        const idx = this.txs.findIndex((t) => t.txid === tx.txid);
+        const summary = this._txSummary(tx);
+        if (idx < 0) {
+          this.txs.push(summary);
+          changed = true;
+        } else if (this.txs[idx].confirmed !== summary.confirmed) {
+          this.txs[idx] = summary;
+          changed = true;
+        }
       }
     }
     if (changed) {
@@ -952,8 +962,11 @@ export class Wallet {
     try {
       localStorage.setItem(this._cacheKey(), JSON.stringify(snap));
     } catch {}
-    // Push to Nostr too (debounced), so other devices get the update.
-    if (!this.offline) {
+    // Push to the configured relays too (debounced), so other devices get the
+    // update — unless cross-device sync is turned off.
+    const sync = getSyncConfig();
+    if (!this.offline && sync.enabled) {
+      this.nostr.setRelays(sync.relays);
       clearTimeout(this._nostrPubTimer);
       this._nostrPubTimer = setTimeout(() => this.nostr.publish(snap), 2500);
     }
@@ -974,7 +987,9 @@ export class Wallet {
   // Pull the latest state from Nostr; apply it if it's newer than what we have.
   // Returns true if state was applied (so the caller can skip a full scan).
   async syncFromNostr() {
-    if (this.offline) return false;
+    const sync = getSyncConfig();
+    if (this.offline || !sync.enabled) return false;
+    this.nostr.setRelays(sync.relays);
     let remote;
     try {
       remote = await this.nostr.fetch();

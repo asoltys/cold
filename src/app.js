@@ -7,6 +7,7 @@
 import { Wallet, newMnemonic, isValidMnemonic, utxoId } from './wallet.js';
 import { qrSvg } from './qr.js';
 import { scanQr } from './scan.js';
+import { getSyncConfig, setSyncConfig } from './nostr.js';
 import { t, LANGS, getLang, setLang, isRTL } from './i18n.js';
 import {
   fmtBtc,
@@ -521,10 +522,11 @@ async function enterWallet(mnemonic, passphrase) {
     // Cross-device state: pull the latest from Nostr (may supply state on a
     // device with no local cache, or a newer copy from another device).
     const hadNostr = await wallet.syncFromNostr();
-    // With existing state (local or remote), only check the live frontier;
-    // a brand-new wallet does one full scan.
-    if (hadCache || hadNostr) await wallet.refreshLive();
-    else await wallet.scan();
+    // Always do a full scan to fully reconcile (balance, history confirmations,
+    // spends, stale cache/relay state). Cache/Nostr just gave us something to
+    // show instantly; a partial frontier-only refresh leaves the state stale and
+    // would let the celebration baseline before a known payment is even counted.
+    await wallet.scan({ silent: hadCache || hadNostr });
     // Persisted acknowledgement: first time, baseline to the current index so we
     // don't celebrate historical payments. After that, any advance beyond the
     // acknowledged index shows the celebration (and survives refreshes).
@@ -675,12 +677,56 @@ function settingsTab() {
         : h('button', { disabled: wallet.scanning, onClick: () => wallet.scan() },
             wallet.scanning ? t('scanning') : t('rescanWallet'))
     ),
+    syncCard(),
     h(
       'div',
       { class: 'card col' },
       h('h3', {}, t('language')),
       languagePicker()
     )
+  );
+}
+
+// Cross-device sync settings: toggle + editable relay list (default coinos).
+function syncCard() {
+  const cfg = getSyncConfig();
+  const setEnabled = (enabled) => {
+    if (enabled === cfg.enabled) return;
+    setSyncConfig({ enabled, relays: cfg.relays });
+    render();
+    // On enable, pull anything newer from the relays, then push our copy up.
+    if (enabled && !wallet.offline) {
+      wallet.syncFromNostr().catch(() => {}).finally(() => wallet.saveCache());
+    }
+  };
+  return h(
+    'div',
+    { class: 'card col' },
+    h('h3', {}, t('deviceSync')),
+    h('p', { class: 'small muted', style: 'margin:0' }, t('deviceSyncDesc')),
+    h('div', { class: 'row between' },
+      h('span', { class: 'lab', style: 'margin:0' }, t('syncAcross')),
+      h('div', { class: 'seg' },
+        h('button', { type: 'button', class: cfg.enabled ? 'active' : '', onClick: () => setEnabled(true) }, t('syncOn')),
+        h('button', { type: 'button', class: !cfg.enabled ? 'active' : '', onClick: () => setEnabled(false) }, t('syncOff'))
+      )
+    ),
+    cfg.enabled
+      ? h('label', { class: 'field' },
+          h('span', { class: 'lab' }, t('relaysLabel')),
+          h('textarea', {
+            placeholder: 'wss://relay.example.com',
+            autocapitalize: 'none', autocomplete: 'off', spellcheck: 'false',
+            style: 'min-height:64px',
+            value: cfg.relays.join('\n'),
+            onInput: (e) => {
+              const relays = e.target.value.split('\n').map((s) => s.trim()).filter(Boolean);
+              setSyncConfig({ enabled: true, relays });
+            },
+          }),
+          h('div', { class: 'small faint' }, t('relaysHint'))
+        )
+      : null
   );
 }
 
