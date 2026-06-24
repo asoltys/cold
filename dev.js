@@ -9,10 +9,18 @@ Bun.serve({
   port,
   async fetch(req) {
     try {
-      if (new URL(req.url).pathname === '/jsqr.js') {
+      const path = new URL(req.url).pathname;
+      if (path === '/jsqr.js') {
         return new Response(await buildJsQr({ minify: false }), {
           headers: { 'content-type': 'text/javascript; charset=utf-8' },
         });
+      }
+      const loc = path.match(/^\/locales\/([a-z]{2})\.json$/);
+      if (loc) {
+        const f = Bun.file('src/locales/' + loc[1] + '.json');
+        return (await f.exists())
+          ? new Response(f, { headers: { 'content-type': 'application/json; charset=utf-8' } })
+          : new Response('{}', { status: 404, headers: { 'content-type': 'application/json' } });
       }
       const html = await buildHtml({ minify: false });
       return new Response(html, {

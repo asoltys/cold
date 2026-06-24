@@ -9,7 +9,7 @@
 // installed. index.html stays self-contained; these are optional extras that
 // simply 404 (harmlessly) when the file is opened on its own from file://.
 
-import { mkdir } from 'node:fs/promises';
+import { mkdir, readdir } from 'node:fs/promises';
 
 const FAVICON =
   'data:image/svg+xml,' +
@@ -77,7 +77,21 @@ self.addEventListener('fetch', (e) => {
     );
     return;
   }
-  e.respondWith(caches.match(req).then((hit) => hit || fetch(req)));
+  // Cache-first, but cache same-origin assets (e.g. the chosen locale, icons)
+  // on first fetch so they're available offline without precaching them all.
+  e.respondWith(
+    caches.match(req).then(
+      (hit) =>
+        hit ||
+        fetch(req).then((res) => {
+          if (res.ok) {
+            const copy = res.clone();
+            caches.open(CACHE).then((c) => c.put(req, copy));
+          }
+          return res;
+        })
+    )
+  );
 });
 `;
 
@@ -148,6 +162,11 @@ if (import.meta.main) {
   // browser without BarcodeDetector opens the scanner.
   await Bun.write('dist/jsqr.js', await buildJsQr());
 
+  // Per-language strings — fetched on demand so visitors only download theirs.
+  await mkdir('dist/locales', { recursive: true });
+  const locales = await readdir('src/locales');
+  for (const f of locales) await Bun.write('dist/locales/' + f, Bun.file('src/locales/' + f));
+
   // PWA sidecars.
   await Bun.write('dist/manifest.webmanifest', JSON.stringify(MANIFEST, null, 2));
   const version = Bun.hash(html).toString(36);
@@ -156,5 +175,5 @@ if (import.meta.main) {
 
   const kb = (Buffer.byteLength(html) / 1024).toFixed(0);
   console.log(`✓ dist/index.html written (${kb} KB) — open it offline, no server needed`);
-  console.log(`✓ PWA: manifest.webmanifest, sw.js (cold-${version}), ${STATIC.length} icons, jsqr.js`);
+  console.log(`✓ PWA: manifest.webmanifest, sw.js (cold-${version}), ${STATIC.length} icons, jsqr.js, ${locales.length} locales`);
 }

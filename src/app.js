@@ -9,7 +9,7 @@ import { qrSvg } from './qr.js';
 import { scanQr } from './scan.js';
 import { getSyncConfig, setSyncConfig } from './nostr.js';
 import { getExplorerConfig, setExplorerConfig, EXPLORER_PRESETS } from './api.js';
-import { t, LANGS, getLang, setLang, isRTL } from './i18n.js';
+import { t, LANGS, getLang, setLang, isRTL, loadLocale } from './i18n.js';
 import {
   fmtBtc,
   fmtSats,
@@ -773,8 +773,10 @@ function languagePicker() {
     'select',
     {
       value: getLang(),
-      onChange: (e) => {
-        setLang(e.target.value);
+      onChange: async (e) => {
+        const code = e.target.value;
+        setLang(code);
+        await loadLocale(code); // fetch the locale's strings before re-rendering
         applyDir();
         render();
       },
@@ -1524,10 +1526,13 @@ async function importSnapshotFile(e) {
 }
 
 // ================================================================ start
-// Apply the detected/saved language direction, then restore a wallet left open
-// in this tab; otherwise show the unlock screen.
+// Load the active language's strings (English is inline; others are fetched),
+// apply text direction, then restore a wallet left open in this tab — otherwise
+// show the unlock screen.
 applyDir();
-if (!restoreSession()) render();
+loadLocale(getLang()).finally(() => {
+  if (!restoreSession()) render();
+});
 
 
 
