@@ -151,9 +151,19 @@
   "giftBackup": "Diese Wallet sichern",
   "giftSkip": "Vorerst überspringen",
   "giftBackedUp": "Ich habe sie aufgeschrieben",
-  "giftLink": "Diese Wallet verschenken",
-  "giftLinkDesc": "Erstelle einen Link, der diese Wallet samt Guthaben öffnet, um jemanden schnell einzurichten.",
-  "giftLinkWarn": "⚠ Wer diesen Link öffnet, kontrolliert das gesamte Guthaben dieser Wallet. Teile ihn nur, um die Wallet zu verschenken, und halte den Betrag klein.",
+  "giftLink": "Bitcoin verschenken",
+  "giftLinkDesc": "Signiere einen Betrag im Voraus als Link. Wer ihn öffnet, beansprucht das Bitcoin in einer brandneuen Wallet, die nur er selbst kontrolliert.",
+  "giftLinkWarn": "⚠ Wer diesen Link öffnet, kann den Betrag beanspruchen. Teile ihn daher nur mit der Person, die du beschenkst. Halte die Beträge klein.",
   "giftLinkReveal": "Geschenk-Link erstellen",
-  "copyLink": "Link kopieren"
+  "copyLink": "Link kopieren",
+  "giftAmountLabel": "Zu verschenkender Betrag",
+  "giftAmountInvalid": "Gib einen gültigen Betrag ein.",
+  "giftAnother": "Weiteres erstellen",
+  "giftReserved": "{n} Coin für unbeanspruchte Geschenke zurückgelegt",
+  "giftReclaim": "Zurückfordern",
+  "claimBody": "Beanspruche es in einer brandneuen Wallet, die nur du selbst kontrollierst.",
+  "claimBtn": "Beanspruchen",
+  "claimFailed": "Dieses Geschenk wurde bereits beansprucht oder ist nicht mehr verfügbar.",
+  "claimedTitle": "Beansprucht!",
+  "claimedBody": "Dein Bitcoin ist unterwegs. Sichere deine Wiederherstellungsphrase, um es zu schützen."
 }

@@ -151,9 +151,19 @@
   "giftBackup": "Hacer copia de seguridad de esta billetera",
   "giftSkip": "Omitir por ahora",
   "giftBackedUp": "Ya la anoté",
-  "giftLink": "Regalar esta billetera",
-  "giftLinkDesc": "Crea un enlace que abre esta billetera, con sus fondos, para incorporar a alguien rápidamente.",
-  "giftLinkWarn": "⚠ Cualquiera que abra este enlace controla todos los fondos de esta billetera. Compártelo solo para regalar la billetera, y mantén el monto pequeño.",
+  "giftLink": "Regala algo de Bitcoin",
+  "giftLinkDesc": "Prefirma un importe como enlace. Quien lo abra reclama el Bitcoin en una billetera totalmente nueva que solo esa persona controla.",
+  "giftLinkWarn": "⚠ Cualquiera que abra este enlace puede reclamar el importe, así que compártelo solo con la persona a quien se lo regalas. Mantén los importes pequeños.",
   "giftLinkReveal": "Crear enlace de regalo",
-  "copyLink": "Copiar enlace"
+  "copyLink": "Copiar enlace",
+  "giftAmountLabel": "Importe a regalar",
+  "giftAmountInvalid": "Introduce un importe válido.",
+  "giftAnother": "Crear otro",
+  "giftReserved": "{n} de monedas reservadas para regalos sin reclamar",
+  "giftReclaim": "Recuperar",
+  "claimBody": "Reclámalo en una billetera totalmente nueva que solo tú controlas.",
+  "claimBtn": "Reclamarlo",
+  "claimFailed": "Este regalo ya ha sido reclamado o ya no está disponible.",
+  "claimedTitle": "¡Reclamado!",
+  "claimedBody": "Tu Bitcoin está en camino. Haz una copia de seguridad de tu frase de recuperación para mantenerlo a salvo."
 }

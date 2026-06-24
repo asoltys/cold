@@ -151,9 +151,19 @@
   "giftBackup": "Fazer backup desta carteira",
   "giftSkip": "Pular por enquanto",
   "giftBackedUp": "Já anotei",
-  "giftLink": "Presentear esta carteira",
-  "giftLinkDesc": "Crie um link que abre esta carteira, com seus fundos, para integrar alguém rapidamente.",
-  "giftLinkWarn": "⚠ Qualquer pessoa que abrir este link controla todos os fundos desta carteira. Compartilhe-o apenas para doar a carteira e mantenha o valor baixo.",
+  "giftLink": "Presentear Bitcoin",
+  "giftLinkDesc": "Pré-assine um valor como um link. Quem o abrir resgata os Bitcoin para uma carteira novinha que só essa pessoa controla.",
+  "giftLinkWarn": "⚠ Qualquer pessoa que abrir este link pode resgatar o valor, então compartilhe-o apenas com a pessoa que você está presenteando. Mantenha os valores baixos.",
   "giftLinkReveal": "Criar link de presente",
-  "copyLink": "Copiar link"
+  "copyLink": "Copiar link",
+  "giftAmountLabel": "Valor a presentear",
+  "giftAmountInvalid": "Digite um valor válido.",
+  "giftAnother": "Criar outro",
+  "giftReserved": "{n} de moeda reservada para presentes não resgatados",
+  "giftReclaim": "Recuperar",
+  "claimBody": "Resgate para uma carteira novinha que só você controla.",
+  "claimBtn": "Resgatar",
+  "claimFailed": "Este presente já foi resgatado ou não está mais disponível.",
+  "claimedTitle": "Resgatado!",
+  "claimedBody": "Seus Bitcoin estão a caminho. Faça backup da sua frase de recuperação para mantê-los seguros."
 }

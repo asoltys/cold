@@ -4,7 +4,7 @@
 // which rebuilds the active screen. Text inputs write back into `ui` on `input`
 // (without re-rendering) so their values survive structural re-renders.
 
-import { Wallet, newMnemonic, isValidMnemonic, utxoId, encodeGift, decodeGift } from './wallet.js';
+import { Wallet, newMnemonic, isValidMnemonic, utxoId, previewGift, buildClaimTx } from './wallet.js';
 import { qrSvg } from './qr.js';
 import { scanQr } from './scan.js';
 import { getSyncConfig, setSyncConfig } from './nostr.js';
@@ -35,7 +35,12 @@ const ui = {
   passphrase: '',
   showPass: false,
   revealShown: false, // recovery phrase unmasked on the Backup tab (after the warning)
-  giftShown: false, // gift link revealed in Settings
+  giftAmount: '', // gift-create amount input (Settings)
+  giftCode: null, // last-created gift PSBT code
+  giftError: '',
+  claimCode: null, // gift code being claimed (opened from a #gift= link)
+  claimedAmount: 0,
+  claimError: '',
   offlineFallback: false, // auto-entered offline because the network was unreachable
   unlockError: '',
 
@@ -500,9 +505,11 @@ async function enterWallet(mnemonic, passphrase, opts = {}) {
   wallet.load({ mnemonic, passphrase, netName: 'mainnet', offline: false });
   persistSession(mnemonic, passphrase);
   const hadCache = wallet.restoreCache(); // show last-known balance/history instantly
-  // A claimed gift link starts on a welcome/back-up screen instead of the wallet.
-  ui.screen = opts.claim ? 'claim' : 'wallet';
+  // An opened gift link starts on a claim/back-up screen instead of the wallet.
+  ui.screen = opts.gift ? 'claim' : 'wallet';
   ui.claimStep = 'welcome';
+  ui.claimCode = opts.gift || null;
+  ui.claimError = '';
   ui.tab = 'receive';
   // Not baselined yet — stays null until the scan + ack logic below sets it,
   // so the celebration never fires for payments that were already there at
@@ -604,7 +611,9 @@ function lock() {
   ui.passphrase = '';
   ui.confirm = [];
   ui.revealShown = false;
-  ui.giftShown = false;
+  ui.giftAmount = '';
+  ui.giftCode = null;
+  ui.giftError = '';
   ui.receiveSeenIndex = null;
   ui.txDetail = null;
   ui.broadcastTx = null;
@@ -693,29 +702,61 @@ function settingsTab() {
   );
 }
 
-// Gift link: turn this whole wallet into a #claim= link (seed in the URL
-// fragment) for quick onboarding. Gated behind a reveal + warning, since the
-// link is bearer — whoever opens it controls the funds.
+// Gift link: presign a chosen amount as a #gift= PSBT that whoever opens claims
+// into a fresh wallet only they control. The coin is reserved until claimed.
 function giftUrl() {
-  return `${location.origin}/#claim=${encodeGift(wallet.mnemonic, wallet.passphrase)}`;
+  return `${location.origin}/#gift=${ui.giftCode}`;
+}
+function createGiftLink() {
+  const amt = Math.round(Number(ui.giftAmount));
+  if (!amt || amt < 546) { ui.giftError = t('giftAmountInvalid'); render(); return; }
+  const rate = (wallet.feeRates && wallet.feeRates.halfHourFee) || 5;
+  try {
+    ui.giftCode = wallet.createGift(amt, rate).code;
+    ui.giftError = '';
+  } catch (e) {
+    ui.giftError = e.message;
+  }
+  render();
 }
 function giftCard() {
+  const active = wallet.activeGifts();
   return h(
     'div',
     { class: 'card col' },
     h('h3', {}, t('giftLink')),
     h('p', { class: 'small muted', style: 'margin:0' }, t('giftLinkDesc')),
     h('div', { class: 'warn-box' }, t('giftLinkWarn')),
-    ui.giftShown
+    ui.giftCode
       ? h('div', { class: 'col', style: 'align-items:center;gap:10px' },
           h('div', { html: qrSvg(giftUrl()) }),
           h('div', { class: 'addr-box break', style: 'width:100%;font-size:12px' }, giftUrl()),
           h('div', { class: 'row gap6 wrap' },
             copyBtn(giftUrl(), t('copyLink')),
-            h('button', { class: 'btn-sm grow', onClick: () => { ui.giftShown = false; render(); } }, t('hide'))
+            h('button', { class: 'btn-sm grow', onClick: () => { ui.giftCode = null; ui.giftAmount = ''; render(); } }, t('giftAnother'))
           )
         )
-      : h('button', { class: 'btn-block', onClick: () => { ui.giftShown = true; render(); } }, t('giftLinkReveal'))
+      : h('div', { class: 'col gap6' },
+          h('div', { class: 'input-group' },
+            h('input', { type: 'number', min: '546', inputmode: 'numeric', placeholder: t('giftAmountLabel'),
+              value: ui.giftAmount, onInput: (e) => (ui.giftAmount = e.target.value) }),
+            h('span', { class: 'small muted', style: 'align-self:center' }, unitLabel())
+          ),
+          ui.giftError && h('div', { class: 'notice err' }, ui.giftError),
+          h('button', { class: 'btn-block', onClick: createGiftLink }, t('giftLinkReveal'))
+        ),
+    active.length
+      ? h('div', { class: 'col gap6', style: 'margin-top:4px' },
+          h('span', { class: 'small muted' }, t('giftReserved', { n: active.length })),
+          ...active.map((id) => {
+            const u = wallet.utxos.find((x) => utxoId(x) === id);
+            return h('div', { class: 'row between' },
+              h('span', { class: 'small mono' }, u ? fmtAmount(u.value) + ' ' + unitLabel() : id.slice(0, 12) + '…'),
+              h('button', { class: 'btn-sm', onClick: () => { wallet.unreserve(id); render(); } }, t('giftReclaim'))
+            );
+          })
+        )
+      : null
   );
 }
 
@@ -850,21 +891,44 @@ function goHome() {
 }
 
 // ================================================================ GIFT / CLAIM
-// Read a #claim=<code> gift link, returning the seed (and scrubbing it from the
-// URL so it doesn't linger in the address bar or history).
-function readClaimHash() {
+// Read a #gift=<psbt> link, returning the code (and scrubbing it from the URL so
+// the bearer instrument doesn't linger in the address bar / history). Validates
+// that it decodes to a real gift.
+function readGiftHash() {
   try {
-    const m = location.hash.match(/^#claim=([A-Za-z0-9_~-]+)$/);
+    const m = location.hash.match(/^#gift=([A-Za-z0-9_-]+)$/);
     if (!m) return null;
     history.replaceState(null, '', location.pathname + location.search);
-    return decodeGift(m[1]);
+    return previewGift(m[1]) ? m[1] : null;
   } catch {
     return null;
   }
 }
 
-// Onboarding flow shown when a gift link is opened: celebrate + balance, then a
-// firm nudge to back up the recovery phrase (the recipient now owns this wallet).
+// Broadcast the presigned gift to this fresh wallet's first receive address.
+async function doClaim() {
+  if (wallet.offline) { ui.claimError = t('scanOffline'); render(); return; }
+  ui.busy = true;
+  ui.claimError = '';
+  render();
+  try {
+    const rate = (wallet.feeRates && wallet.feeRates.halfHourFee) || 5;
+    const to = wallet.receive[0] ? wallet.receive[0].address : wallet.derive(0, 0).address;
+    const claim = buildClaimTx(ui.claimCode, to, rate, wallet.netCfg.net);
+    await wallet.broadcast(claim.hex);
+    ui.claimedAmount = claim.amount;
+    ui.claimStep = 'backup';
+    wallet.scan().catch(() => {});
+  } catch (e) {
+    ui.claimError = t('claimFailed');
+  }
+  ui.busy = false;
+  render();
+}
+
+// Gift-claim flow: a fresh wallet only the claimer controls. Step 'welcome'
+// shows the amount + a Claim button; 'backup' (after a successful claim) shows
+// the fresh recovery phrase to write down.
 function claimScreen() {
   if (ui.claimStep === 'backup') {
     const words = wallet.mnemonic.split(' ');
@@ -872,6 +936,11 @@ function claimScreen() {
       'div',
       { class: 'col', style: 'gap:16px' },
       brandHeader(false),
+      h('div', { class: 'card col', style: 'align-items:center;text-align:center;gap:8px' },
+        h('div', { class: 'check-badge', style: 'background:var(--accent)' }, '✓'),
+        h('h2', { style: 'margin:0' }, t('claimedTitle')),
+        h('p', { class: 'muted', style: 'margin:0' }, t('claimedBody'))
+      ),
       h('div', { class: 'card col' },
         h('h3', {}, t('recoveryPhrase')),
         h('div', { class: 'warn-box' }, t('writeDownWarn')),
@@ -883,6 +952,9 @@ function claimScreen() {
       )
     );
   }
+  const pv = previewGift(ui.claimCode);
+  const estFee = Math.ceil((11 + 68 + 31 * 2) * ((wallet.feeRates && wallet.feeRates.halfHourFee) || 5));
+  const approx = pv ? Math.max(0, pv.room - estFee) : 0;
   return h(
     'div',
     { class: 'col', style: 'gap:16px' },
@@ -890,11 +962,15 @@ function claimScreen() {
     h('div', { class: 'card col', style: 'align-items:center;text-align:center;gap:12px' },
       h('div', { class: 'check-badge', style: 'background:var(--accent)' }, '🎁'),
       h('h2', { style: 'margin:0' }, t('giftWelcome')),
-      h('p', { class: 'muted', style: 'margin:0' }, t('giftWelcomeBody'))
+      h('div', { class: 'amt', style: 'font-size:30px' },
+        h('span', { class: 'amount-pos' }, '~' + fmtAmount(approx)), ' ', unitTag('unit')
+      ),
+      h('p', { class: 'muted', style: 'margin:0' }, t('claimBody'))
     ),
-    balanceCard(),
-    h('button', { class: 'btn-primary btn-block', onClick: () => { ui.claimStep = 'backup'; render(); } }, t('giftBackup')),
-    h('button', { class: 'btn-block', onClick: () => { ui.screen = 'wallet'; ui.claimStep = null; render(); } }, t('giftSkip'))
+    ui.claimError && h('div', { class: 'notice err' }, ui.claimError),
+    ui.busy
+      ? h('button', { class: 'btn-primary btn-block', disabled: true }, h('span', { class: 'spinner' }))
+      : h('button', { class: 'btn-primary btn-block', onClick: doClaim }, t('claimBtn'))
   );
 }
 
@@ -1723,8 +1799,8 @@ async function importSnapshotFile(e) {
 // show the unlock screen.
 applyDir();
 loadLocale(getLang()).finally(() => {
-  const gift = readClaimHash();
-  if (gift) { enterWallet(gift.mnemonic, gift.passphrase, { claim: true }); return; }
+  const code = readGiftHash();
+  if (code) { enterWallet(newMnemonic(), '', { gift: code }); return; }
   if (!restoreSession()) render();
 });
 

@@ -9,7 +9,7 @@
 // transactions, only the (txid, vout, value, address) of each UTXO.
 
 import { HDKey } from '@scure/bip32';
-import { generateMnemonic, mnemonicToSeedSync, validateMnemonic, mnemonicToEntropy, entropyToMnemonic } from '@scure/bip39';
+import { generateMnemonic, mnemonicToSeedSync, validateMnemonic } from '@scure/bip39';
 import { wordlist } from '@scure/bip39/wordlists/english';
 import { hex, base64urlnopad } from '@scure/base';
 import { sha256 } from '@noble/hashes/sha256';
@@ -120,6 +120,7 @@ export class Wallet {
     this.api.offline = offline;
     this._account = null;
     this._addrCache.clear();
+    this._reserved = null; // gift-reserved outpoints, lazy-loaded per wallet
     this._savedAt = 0;
     try {
       if (this.mnemonic) this.nostr.load(this.mnemonic, this.passphrase);
@@ -577,7 +578,7 @@ export class Wallet {
   buildTx({ recipients, feeRate, coinIds = null, sendMax = false }) {
     const pool_ = coinIds
       ? this.utxos.filter((u) => coinIds.includes(utxoId(u)))
-      : this.utxos.slice();
+      : this.utxos.filter((u) => !this.isReserved(utxoId(u))); // skip coins set aside for gifts
     if (!pool_.length) throw new Error('No spendable coins selected.');
 
     const inputs = pool_.map((u) => {
@@ -756,6 +757,72 @@ export class Wallet {
     const outputs = prep.recipients.map((r) => ({ address: r.address, value: r.value }));
     if (pl.change > 0) outputs.push({ address: changeAddr, value: pl.change, change: true });
     return { hex: t.hex, txid: t.id, fee: pl.fee, oldFee: prep.oldFee, feeRate: pl.rate, outputs, replaces: prep.txid };
+  }
+
+  // --- gift links (coins set aside as claimable presigned transactions) ----
+  // Outpoints reserved for unclaimed gifts are persisted per-wallet and skipped
+  // by normal coin selection so a send can't spend a gift out from under it.
+  _giftKey() {
+    return this._cacheKey() + ':gift';
+  }
+  reservedSet() {
+    if (!this._reserved) {
+      try {
+        this._reserved = new Set(JSON.parse(localStorage.getItem(this._giftKey()) || '[]'));
+      } catch {
+        this._reserved = new Set();
+      }
+    }
+    return this._reserved;
+  }
+  isReserved(id) {
+    return this.reservedSet().has(id);
+  }
+  _saveReserved() {
+    try {
+      localStorage.setItem(this._giftKey(), JSON.stringify([...this.reservedSet()]));
+    } catch {}
+  }
+  unreserve(id) {
+    this.reservedSet().delete(id);
+    this._saveReserved();
+  }
+  // Active gifts whose coin is still unspent (drops claimed/spent ones).
+  activeGifts() {
+    const live = new Set(this.utxos.map((u) => utxoId(u)));
+    let changed = false;
+    for (const id of [...this.reservedSet()]) if (!live.has(id)) { this.reservedSet().delete(id); changed = true; }
+    if (changed) this._saveReserved();
+    return [...this.reservedSet()];
+  }
+
+  // Build a SIGHASH_SINGLE-signed gift: input = a single coin, output0 = change
+  // back to us (cryptographically fixed), leaving the rest for the claimer to
+  // direct to their own fresh address. Reserves the coin. Returns { code, ... }.
+  createGift(amountSats, feeRate) {
+    const gift = BigInt(Math.round(amountSats));
+    if (gift < 546n) throw new Error('Gift amount is too small.');
+    const rate = Math.max(1, Math.round(feeRate));
+    const claimFee = BigInt(Math.ceil((11 + 68 + 31 * 2) * rate)); // claimer's 1-in 2-out tx
+    const DUST = 294n;
+    const need = gift + claimFee + DUST;
+    const coin = this.utxos
+      .filter((u) => u.confirmed && !this.isReserved(utxoId(u)))
+      .sort((a, b) => a.value - b.value)
+      .find((u) => BigInt(u.value) >= need);
+    if (!coin) throw new Error('No single confirmed coin is large enough for that amount.');
+
+    const V = BigInt(coin.value);
+    const change = V - gift - claimFee; // back to us, >= DUST by construction
+    const pay = p2wpkh(this.derive(coin.chain, coin.index).pubkey, this.netCfg.net);
+    const t = new btc.Transaction({ allowUnknownOutputs: true });
+    t.addInput({ ...pay, txid: coin.txid, index: coin.vout, sighashType: btc.SigHash.SINGLE, witnessUtxo: { script: pay.script, amount: V } });
+    t.addOutputAddress(this.freshChange().address, change, this.netCfg.net);
+    t.signIdx(this.node(coin.chain, coin.index).privateKey, 0, [btc.SigHash.SINGLE]);
+
+    this.reservedSet().add(utxoId(coin));
+    this._saveReserved();
+    return { code: base64urlnopad.encode(t.toPSBT()), amount: Number(gift), reserved: utxoId(coin) };
   }
 
   // --- realtime (mempool.space WebSocket) ---------------------------------
@@ -1185,25 +1252,32 @@ export function utxoId(u) {
   return `${u.txid}:${u.vout}`;
 }
 
-// Gift links: encode a wallet (12-word seed as BIP39 entropy, plus the optional
-// passphrase) compactly for the #claim= fragment as base64url, and decode it
-// back to { mnemonic, passphrase }. Returns null if the code isn't valid.
-export function encodeGift(mnemonic, passphrase = '') {
-  let code = base64urlnopad.encode(mnemonicToEntropy(mnemonic.trim().replace(/\s+/g, ' '), wordlist));
-  if (passphrase) code += '~' + base64urlnopad.encode(new TextEncoder().encode(passphrase));
-  return code;
-}
-
-export function decodeGift(code) {
+// Gift-link claiming (sender side is Wallet.createGift). A gift code is a
+// base64url PSBT: one SIGHASH_SINGLE-signed input + the sender's change output.
+// previewGift reports the room available to the claimer (before their fee);
+// buildClaimTx adds the claimer's output and finalizes a broadcastable tx.
+export function previewGift(code) {
   try {
-    const [seedPart, passPart] = code.split('~');
-    const mnemonic = entropyToMnemonic(base64urlnopad.decode(seedPart), wordlist);
-    if (!validateMnemonic(mnemonic, wordlist)) return null;
-    const passphrase = passPart ? new TextDecoder().decode(base64urlnopad.decode(passPart)) : '';
-    return { mnemonic, passphrase };
+    const tx = btc.Transaction.fromPSBT(base64urlnopad.decode(code));
+    const inAmt = Number(tx.getInput(0).witnessUtxo.amount);
+    const change = Number(tx.getOutput(0).amount);
+    return { room: inAmt - change }; // claimer gets room − their chosen fee
   } catch {
     return null;
   }
+}
+
+export function buildClaimTx(code, toAddress, feeRate, net) {
+  const tx = btc.Transaction.fromPSBT(base64urlnopad.decode(code));
+  const inAmt = tx.getInput(0).witnessUtxo.amount;
+  const change = tx.getOutput(0).amount;
+  const room = inAmt - change;
+  const fee = BigInt(Math.max(1, Math.ceil((11 + 68 + 31 * 2) * Math.max(1, Math.round(feeRate)))));
+  const out = room - fee;
+  if (out < 294n) throw new Error('Gift is too small to claim at this fee rate.');
+  tx.addOutputAddress(toAddress, out, net);
+  tx.finalize();
+  return { hex: tx.hex, txid: tx.id, amount: Number(out), fee: Number(fee) };
 }
 
 function firstUnused(chain) {
