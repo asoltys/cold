@@ -964,18 +964,42 @@ async function broadcastScanned() {
   render();
 }
 
+// Full address as wrapping nodes, first/last 6 chars emphasized — readable
+// without horizontally scrolling the input. Returns DOM nodes for in-place
+// updates (the address input doesn't re-render on every keystroke).
+function addrVerifyNodes(a) {
+  const n = 6;
+  if (!a) return [];
+  if (a.length <= n * 2) return [document.createTextNode(a)];
+  return [
+    h('span', { class: 'hl' }, a.slice(0, n)),
+    document.createTextNode(a.slice(n, -n)),
+    h('span', { class: 'hl' }, a.slice(-n)),
+  ];
+}
+
 // One recipient: address + amount. Max is only offered for a single recipient.
 function recipientRow(s, r, i) {
   const single = s.recipients.length === 1;
   const maxOn = single && s.max;
-  return h(
+
+  // Updated imperatively on input (and on render) so paste, typing, and scan
+  // all reflect immediately without disrupting the input's focus/cursor.
+  const check = h('div', { class: 'addr-check' });
+  const syncCheck = () => {
+    const a = r.address.trim();
+    check.replaceChildren(...addrVerifyNodes(a));
+    check.style.display = a ? '' : 'none';
+  };
+
+  const row = h(
     'div',
     { class: 'col gap6' },
     h('div', { class: 'input-group' },
       h('input', {
         type: 'text', class: 'mono-input grow', placeholder: 'bc1q…',
         autocapitalize: 'none', autocomplete: 'off', spellcheck: 'false', value: r.address,
-        onInput: (e) => (r.address = e.target.value),
+        onInput: (e) => { r.address = e.target.value; syncCheck(); },
       }),
       i === 0 && canScan() && h('button', {
         type: 'button', class: 'btn-sm', title: t('scanQr'), onClick: scanIntoSend,
@@ -983,6 +1007,7 @@ function recipientRow(s, r, i) {
       }),
       !single && h('button', { type: 'button', class: 'btn-sm', title: t('remove'), onClick: () => { s.recipients.splice(i, 1); render(); } }, '✕')
     ),
+    check,
     h('div', { class: 'input-group' },
       h('input', {
         type: 'number', step: unit === 'sats' ? '1' : '0.00000001', min: '0',
@@ -1008,6 +1033,8 @@ function recipientRow(s, r, i) {
       single && h('button', { type: 'button', class: s.max ? 'btn-primary' : '', onClick: () => { s.max = !s.max; render(); } }, t('max'))
     )
   );
+  syncCheck();
+  return row;
 }
 
 function sendForm() {
