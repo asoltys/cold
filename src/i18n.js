@@ -33,7 +33,7 @@ export const isRTL = (l) => RTL.has(l || lang);
 
 const STR = {
   en: {
-    appTitle: 'Bitcoin Wallet',
+    appTitle: 'Hal Wallet',
     home: 'Home',
     logout: 'Logout',
     createNew: 'Create new',
@@ -182,7 +182,7 @@ function def(code, map) {
 }
 
 def('es', {
-  appTitle: 'Monedero Bitcoin', home: 'Inicio', logout: 'Cerrar sesión',
+  home: 'Inicio', logout: 'Cerrar sesión',
   createNew: 'Crear nuevo', importExisting: 'Importar existente',
   genIntro: 'Genera una nueva frase semilla de 12 palabras. Anótala. Es la única forma de recuperar este monedero.',
   generateSeed: 'Generar frase semilla',
@@ -228,7 +228,7 @@ def('es', {
 });
 
 def('fr', {
-  appTitle: 'Portefeuille Bitcoin', home: 'Accueil', logout: 'Déconnexion',
+  home: 'Accueil', logout: 'Déconnexion',
   createNew: 'Créer', importExisting: 'Importer',
   genIntro: 'Générez une nouvelle phrase de 12 mots. Notez-la. C’est le seul moyen de récupérer ce portefeuille.',
   generateSeed: 'Générer la phrase', writeDownWarn: '⚠ Notez ces 12 mots sur papier, dans l’ordre. Quiconque les a peut dépenser vos fonds.',
@@ -273,7 +273,7 @@ def('fr', {
 });
 
 def('de', {
-  appTitle: 'Bitcoin-Wallet', home: 'Start', logout: 'Abmelden',
+  home: 'Start', logout: 'Abmelden',
   createNew: 'Neu erstellen', importExisting: 'Importieren',
   genIntro: 'Erzeuge eine neue Seed-Phrase aus 12 Wörtern. Schreibe sie auf. Sie ist die einzige Möglichkeit, dieses Wallet wiederherzustellen.',
   generateSeed: 'Seed-Phrase erzeugen', writeDownWarn: '⚠ Schreibe diese 12 Wörter in der richtigen Reihenfolge auf Papier. Wer sie hat, kann deine Coins ausgeben.',
@@ -318,7 +318,7 @@ def('de', {
 });
 
 def('pt', {
-  appTitle: 'Carteira Bitcoin', home: 'Início', logout: 'Sair',
+  home: 'Início', logout: 'Sair',
   createNew: 'Criar nova', importExisting: 'Importar existente',
   genIntro: 'Gere uma nova frase semente de 12 palavras. Anote-a. É a única forma de recuperar esta carteira.',
   generateSeed: 'Gerar frase semente', writeDownWarn: '⚠ Anote estas 12 palavras no papel, em ordem. Quem as tiver pode gastar suas moedas.',
@@ -363,7 +363,7 @@ def('pt', {
 });
 
 def('ru', {
-  appTitle: 'Биткойн-кошелёк', home: 'Главная', logout: 'Выйти',
+  home: 'Главная', logout: 'Выйти',
   createNew: 'Создать', importExisting: 'Импортировать',
   genIntro: 'Сгенерируйте новую сид-фразу из 12 слов. Запишите её. Это единственный способ восстановить кошелёк.',
   generateSeed: 'Сгенерировать фразу', writeDownWarn: '⚠ Запишите эти 12 слов на бумаге, по порядку. Любой, у кого они есть, сможет потратить ваши монеты.',
@@ -408,7 +408,7 @@ def('ru', {
 });
 
 def('zh', {
-  appTitle: '比特币钱包', home: '首页', logout: '退出',
+  home: '首页', logout: '退出',
   createNew: '新建', importExisting: '导入已有',
   genIntro: '生成一组新的 12 词助记词。请抄写下来。这是恢复钱包的唯一方式。',
   generateSeed: '生成助记词', writeDownWarn: '⚠ 请按顺序将这 12 个词抄在纸上。任何拿到它们的人都能花掉你的币。',
@@ -453,7 +453,7 @@ def('zh', {
 });
 
 def('ja', {
-  appTitle: 'ビットコインウォレット', home: 'ホーム', logout: 'ログアウト',
+  home: 'ホーム', logout: 'ログアウト',
   createNew: '新規作成', importExisting: 'インポート',
   genIntro: '新しい12単語のシードフレーズを生成します。書き留めてください。これがこのウォレットを復元する唯一の方法です。',
   generateSeed: 'シードフレーズを生成', writeDownWarn: '⚠ この12単語を順番どおり紙に書き留めてください。これを持つ人は誰でもあなたのコインを使えます。',
@@ -498,7 +498,7 @@ def('ja', {
 });
 
 def('ko', {
-  appTitle: '비트코인 지갑', home: '홈', logout: '로그아웃',
+  home: '홈', logout: '로그아웃',
   createNew: '새로 만들기', importExisting: '가져오기',
   genIntro: '새 12단어 시드 문구를 생성합니다. 적어 두세요. 이 지갑을 복구하는 유일한 방법입니다.',
   generateSeed: '시드 문구 생성', writeDownWarn: '⚠ 이 12단어를 순서대로 종이에 적으세요. 이를 가진 사람은 누구나 코인을 쓸 수 있습니다.',
@@ -543,7 +543,7 @@ def('ko', {
 });
 
 def('ar', {
-  appTitle: 'محفظة بيتكوين', home: 'الرئيسية', logout: 'تسجيل الخروج',
+  home: 'الرئيسية', logout: 'تسجيل الخروج',
   createNew: 'إنشاء جديدة', importExisting: 'استيراد موجودة',
   genIntro: 'أنشئ عبارة استرداد جديدة من 12 كلمة. اكتبها. فهي الطريقة الوحيدة لاستعادة هذه المحفظة.',
   generateSeed: 'إنشاء العبارة', writeDownWarn: '⚠ اكتب هذه الكلمات الـ12 على ورق بالترتيب. أي شخص يملكها يستطيع إنفاق عملاتك.',
@@ -588,7 +588,7 @@ def('ar', {
 });
 
 def('ur', {
-  appTitle: 'بٹ کوائن والیٹ', home: 'ہوم', logout: 'لاگ آؤٹ',
+  home: 'ہوم', logout: 'لاگ آؤٹ',
   createNew: 'نیا بنائیں', importExisting: 'موجودہ درآمد کریں',
   genIntro: 'نیا 12 الفاظ کا سیڈ فقرہ بنائیں۔ اسے لکھ لیں۔ یہی اس والیٹ کو بحال کرنے کا واحد طریقہ ہے۔',
   generateSeed: 'سیڈ فقرہ بنائیں', writeDownWarn: '⚠ ان 12 الفاظ کو ترتیب سے کاغذ پر لکھیں۔ جس کے پاس یہ ہوں وہ آپ کے سکے خرچ کر سکتا ہے۔',
@@ -633,7 +633,7 @@ def('ur', {
 });
 
 def('hi', {
-  appTitle: 'बिटकॉइन वॉलेट', home: 'होम', logout: 'लॉग आउट',
+  home: 'होम', logout: 'लॉग आउट',
   createNew: 'नया बनाएँ', importExisting: 'मौजूदा आयात करें',
   genIntro: 'नया 12-शब्द वाला सीड वाक्यांश बनाएँ। इसे लिख लें। यही इस वॉलेट को पुनः प्राप्त करने का एकमात्र तरीका है।',
   generateSeed: 'सीड वाक्यांश बनाएँ', writeDownWarn: '⚠ इन 12 शब्दों को क्रम से कागज़ पर लिखें। जिसके पास ये होंगे वह आपके सिक्के खर्च कर सकता है।',
@@ -678,7 +678,7 @@ def('hi', {
 });
 
 def('bn', {
-  appTitle: 'বিটকয়েন ওয়ালেট', home: 'হোম', logout: 'লগ আউট',
+  home: 'হোম', logout: 'লগ আউট',
   createNew: 'নতুন তৈরি', importExisting: 'বিদ্যমান ইম্পোর্ট',
   genIntro: 'নতুন ১২-শব্দের সিড ফ্রেজ তৈরি করুন। লিখে রাখুন। এটিই এই ওয়ালেট পুনরুদ্ধারের একমাত্র উপায়।',
   generateSeed: 'সিড ফ্রেজ তৈরি করুন', writeDownWarn: '⚠ এই ১২টি শব্দ ক্রম অনুযায়ী কাগজে লিখুন। যার কাছে এগুলো থাকবে সে আপনার কয়েন খরচ করতে পারবে।',
@@ -723,7 +723,7 @@ def('bn', {
 });
 
 def('id', {
-  appTitle: 'Dompet Bitcoin', home: 'Beranda', logout: 'Keluar',
+  home: 'Beranda', logout: 'Keluar',
   createNew: 'Buat baru', importExisting: 'Impor yang ada',
   genIntro: 'Buat frasa benih baru 12 kata. Catatlah. Ini satu-satunya cara memulihkan dompet ini.',
   generateSeed: 'Buat frasa benih', writeDownWarn: '⚠ Tulis 12 kata ini di kertas, secara berurutan. Siapa pun yang memilikinya dapat menghabiskan koin Anda.',
@@ -768,7 +768,7 @@ def('id', {
 });
 
 def('tr', {
-  appTitle: 'Bitcoin Cüzdanı', home: 'Ana sayfa', logout: 'Çıkış',
+  home: 'Ana sayfa', logout: 'Çıkış',
   createNew: 'Yeni oluştur', importExisting: 'Mevcudu içe aktar',
   genIntro: 'Yeni 12 kelimelik tohum ifadesi oluşturun. Yazın. Bu cüzdanı kurtarmanın tek yolu budur.',
   generateSeed: 'Tohum ifadesi oluştur', writeDownWarn: '⚠ Bu 12 kelimeyi sırayla kâğıda yazın. Bunlara sahip olan herkes paranızı harcayabilir.',
@@ -813,7 +813,7 @@ def('tr', {
 });
 
 def('vi', {
-  appTitle: 'Ví Bitcoin', home: 'Trang chủ', logout: 'Đăng xuất',
+  home: 'Trang chủ', logout: 'Đăng xuất',
   createNew: 'Tạo mới', importExisting: 'Nhập ví có sẵn',
   genIntro: 'Tạo cụm từ hạt giống 12 từ mới. Hãy ghi lại. Đây là cách duy nhất để khôi phục ví này.',
   generateSeed: 'Tạo cụm từ hạt giống', writeDownWarn: '⚠ Ghi 12 từ này ra giấy, theo đúng thứ tự. Bất kỳ ai có chúng đều có thể tiêu coin của bạn.',
@@ -858,7 +858,7 @@ def('vi', {
 });
 
 def('sw', {
-  appTitle: 'Pochi ya Bitcoin', home: 'Mwanzo', logout: 'Toka',
+  home: 'Mwanzo', logout: 'Toka',
   createNew: 'Tengeneza mpya', importExisting: 'Leta iliyopo',
   genIntro: 'Tengeneza kifungu kipya cha mbegu chenye maneno 12. Kiandike. Ndiyo njia pekee ya kurejesha pochi hii.',
   generateSeed: 'Tengeneza kifungu cha mbegu', writeDownWarn: '⚠ Andika maneno haya 12 kwenye karatasi, kwa mpangilio. Yeyote mwenye nayo anaweza kutumia sarafu zako.',
@@ -903,7 +903,7 @@ def('sw', {
 });
 
 def('mr', {
-  appTitle: 'बिटकॉइन वॉलेट', home: 'मुख्यपृष्ठ', logout: 'बाहेर पडा',
+  home: 'मुख्यपृष्ठ', logout: 'बाहेर पडा',
   createNew: 'नवीन तयार करा', importExisting: 'अस्तित्वातील आयात करा',
   genIntro: 'नवीन १२-शब्दांचा सीड वाक्यांश तयार करा. तो लिहून ठेवा. हे वॉलेट परत मिळवण्याचा हाच एकमेव मार्ग आहे.',
   generateSeed: 'सीड वाक्यांश तयार करा', writeDownWarn: '⚠ हे १२ शब्द क्रमाने कागदावर लिहा. ज्याच्याकडे हे असतील तो तुमची नाणी खर्च करू शकतो.',
@@ -948,7 +948,7 @@ def('mr', {
 });
 
 def('te', {
-  appTitle: 'బిట్‌కాయిన్ వాలెట్', home: 'హోమ్', logout: 'లాగౌట్',
+  home: 'హోమ్', logout: 'లాగౌట్',
   createNew: 'కొత్తది సృష్టించు', importExisting: 'ఉన్నదాన్ని దిగుమతి',
   genIntro: 'కొత్త 12-పదాల సీడ్ ఫ్రేజ్ సృష్టించండి. దాన్ని రాసుకోండి. ఈ వాలెట్‌ను తిరిగి పొందడానికి ఇదే ఏకైక మార్గం.',
   generateSeed: 'సీడ్ ఫ్రేజ్ సృష్టించు', writeDownWarn: '⚠ ఈ 12 పదాలను వరుసగా కాగితంపై రాయండి. ఇవి ఉన్నవారు మీ నాణేలను ఖర్చు చేయగలరు.',
@@ -993,7 +993,7 @@ def('te', {
 });
 
 def('ta', {
-  appTitle: 'பிட்காயின் வாலட்', home: 'முகப்பு', logout: 'வெளியேறு',
+  home: 'முகப்பு', logout: 'வெளியேறு',
   createNew: 'புதிது உருவாக்கு', importExisting: 'உள்ளதை இறக்கு',
   genIntro: 'புதிய 12-சொல் சீட் சொற்றொடரை உருவாக்கவும். எழுதி வைக்கவும். இந்த வாலட்டை மீட்க இதுவே ஒரே வழி.',
   generateSeed: 'சீட் சொற்றொடரை உருவாக்கு', writeDownWarn: '⚠ இந்த 12 சொற்களை வரிசையாக காகிதத்தில் எழுதவும். இவை உள்ளவர் உங்கள் நாணயங்களைச் செலவழிக்கலாம்.',

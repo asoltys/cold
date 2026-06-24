@@ -134,6 +134,12 @@ input[type=text], input[type=password], input[type=number], textarea, select {
   border: 1px solid var(--line-strong); border-radius: 11px; padding: 11px 13px;
 }
 input:focus, textarea:focus, select:focus { outline: 2px solid var(--accent); outline-offset: -1px; border-color: var(--accent); }
+/* Custom caret so it isn't crammed against the right border (native is fixed). */
+select {
+  -webkit-appearance: none; appearance: none; padding-right: 38px;
+  background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="%236b7280" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>');
+  background-repeat: no-repeat; background-position: right 14px center;
+}
 textarea { resize: vertical; min-height: 84px; font-family: var(--mono); font-size: 15px; }
 .mono-input { font-family: var(--mono); }
 .input-group { display: flex; gap: 8px; }
