@@ -126,7 +126,7 @@ const TX_OPTS = { allowUnknownOutputs: true, allowUnknownInputs: true, disableSc
 // confirmed flag, so the client can credit the payment WITHOUT a REST round-trip
 // — keeping the rate-limited explorer off the critical path. `confirmed` is true
 // when the tx came from a block (rawblock), false from the mempool (rawtx).
-const notifyForTx = (raw, confirmed) => {
+const notifyForTx = (raw, confirmed, blockTime) => {
   let tx;
   try { tx = Transaction.fromRaw(raw, TX_OPTS); } catch { return; }
   const txid = tx.id;
@@ -147,7 +147,7 @@ const notifyForTx = (raw, confirmed) => {
       jsonrpc: '2.0',
       method: 'blockchain.scripthash.subscribe',
       params: [sh, txid],
-      data: { txid, confirmed: !!confirmed, outputs },
+      data: { txid, confirmed: !!confirmed, blockTime: blockTime || 0, outputs },
     }) + '\n';
     let sent = 0;
     for (const ws of set) { try { ws.send(note); sent++; } catch {} }
@@ -184,7 +184,9 @@ const rawTxSize = (buf, start) => {
   return o - start;
 };
 const handleRawBlock = (raw) => {
-  // A new block confirms watched txs: walk its txs and notify matching scripthashes.
+  // A new block confirms watched txs: walk its txs and notify matching
+  // scripthashes with confirmed=true + the block time (header bytes 68..71, LE).
+  const blockTime = new DataView(raw.buffer, raw.byteOffset, raw.byteLength).getUint32(68, true);
   let offset = 80; // skip header
   const txCount = readVarInt(raw, offset);
   offset += txCount.size;
@@ -192,7 +194,7 @@ const handleRawBlock = (raw) => {
     const size = rawTxSize(raw, offset);
     const txRaw = raw.subarray(offset, offset + size);
     offset += size;
-    try { notifyForTx(txRaw, true); } catch {}
+    try { notifyForTx(txRaw, true, blockTime); } catch {}
   }
 };
 

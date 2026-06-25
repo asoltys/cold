@@ -1203,52 +1203,62 @@ export class Wallet {
     return shes;
   }
 
-  // Credit a payment straight from a watcher push (no REST). The notification
-  // carries the matched outputs (vout + value) and confirmed flag; we add the
-  // coin, advance the frontier, and — for an incoming receive (chain 0) — record
-  // a pending history entry so the balance and "payment received" fire instantly.
-  // Returns false if we can't map the scripthash (caller falls back to a scan).
+  // Apply a watcher push directly (no REST). The push carries the matched
+  // outputs (vout + value), the confirmed flag, and — when confirmed — the block
+  // time. Returns false only if we can't map the scripthash (caller then scans).
   _applyTxNotification(sh, data) {
     const tgt = this._shToTarget && this._shToTarget.get(sh);
     if (!tgt || !data || !Array.isArray(data.outputs)) return false;
-    // Only credit incoming receives optimistically. A change output (chain 1) is
-    // our own send, where the spent input isn't in the push — crediting it alone
-    // would transiently overcount, so let the background reconcile handle it.
-    if (tgt.chain !== 0) return false;
-    const arr = this.receive;
-    let entry = arr.find((e) => e.index === tgt.index);
-    if (!entry) {
-      entry = { chain: tgt.chain, index: tgt.index, address: tgt.address, used: false, confirmed: 0, pending: 0 };
-      arr.push(entry);
-      this.addrMap.set(tgt.address, { chain: tgt.chain, index: tgt.index });
-    }
     let changed = false;
-    let credited = 0;
-    for (const o of data.outputs) {
-      const id = `${data.txid}:${o.vout}`;
-      const have = this.utxos.find((u) => utxoId(u) === id);
-      if (!have) {
-        this.utxos.push({ txid: data.txid, vout: o.vout, value: o.value, address: tgt.address, chain: tgt.chain, index: tgt.index, confirmed: !!data.confirmed });
+
+    // (1) Confirmation of a tx we already track: flip its history row and coins
+    // to confirmed. Works for incoming AND outgoing — it only flips flags (no new
+    // coin), so there's no overcount risk regardless of chain.
+    if (data.confirmed) {
+      const tx = this.txs.find((t) => t.txid === data.txid);
+      if (tx && !tx.confirmed) {
+        tx.confirmed = true;
+        if (data.blockTime) tx.blockTime = data.blockTime;
+        changed = true;
+      }
+      for (const o of data.outputs) {
+        const u = this.utxos.find((x) => utxoId(x) === `${data.txid}:${o.vout}`);
+        if (u && !u.confirmed) {
+          u.confirmed = true;
+          const e = (u.chain === 0 ? this.receive : this.change).find((a) => a.index === u.index);
+          if (e) { e.pending = Math.max(0, (e.pending || 0) - o.value); e.confirmed = (e.confirmed || 0) + o.value; }
+          changed = true;
+        }
+      }
+    }
+
+    // (2) New incoming receive (chain 0 only): credit the coin + a pending
+    // history row so the balance and "payment received" fire instantly. Change
+    // (chain 1) is our own send — its spent input isn't in the push, so crediting
+    // it alone would transiently overcount; the backstop poll reconciles it.
+    if (tgt.chain === 0) {
+      let entry = this.receive.find((e) => e.index === tgt.index);
+      if (!entry) {
+        entry = { chain: 0, index: tgt.index, address: tgt.address, used: false, confirmed: 0, pending: 0 };
+        this.receive.push(entry);
+        this.addrMap.set(tgt.address, { chain: 0, index: tgt.index });
+      }
+      let credited = 0;
+      for (const o of data.outputs) {
+        if (this.utxos.find((u) => utxoId(u) === `${data.txid}:${o.vout}`)) continue;
+        this.utxos.push({ txid: data.txid, vout: o.vout, value: o.value, address: tgt.address, chain: 0, index: tgt.index, confirmed: !!data.confirmed });
         entry.used = true;
         if (data.confirmed) entry.confirmed = (entry.confirmed || 0) + o.value;
         else entry.pending = (entry.pending || 0) + o.value;
         credited += o.value;
         changed = true;
-      } else if (!have.confirmed && data.confirmed) {
-        have.confirmed = true;
-        entry.pending = Math.max(0, (entry.pending || 0) - o.value);
-        entry.confirmed = (entry.confirmed || 0) + o.value;
-        changed = true;
+      }
+      if (credited > 0 && !this.txs.find((t) => t.txid === data.txid)) {
+        this.txs.push({ txid: data.txid, net: credited, fee: 0, vsize: 0, confirmed: !!data.confirmed, blockTime: data.blockTime || 0, blockHeight: 0, firstSeen: data.confirmed ? 0 : Date.now() });
       }
     }
-    if (!changed) return true; // already knew about it (duplicate push)
 
-    // For an incoming receive, add a pending history row so History + the
-    // celebration update immediately. (Skip for change — that's our own send,
-    // whose net the send flow already recorded correctly.)
-    if (tgt.chain === 0 && credited > 0 && !this.txs.find((t) => t.txid === data.txid)) {
-      this.txs.push({ txid: data.txid, net: credited, fee: 0, vsize: 0, confirmed: !!data.confirmed, blockTime: 0, blockHeight: 0, firstSeen: data.confirmed ? 0 : Date.now() });
-    }
+    if (!changed) return true; // nothing new (duplicate push) — handled, no scan
     this.nextReceiveIndex = firstUnused(this.receive);
     this.nextChangeIndex = firstUnused(this.change);
     this.utxos.sort((a, b) => b.value - a.value);
@@ -1256,9 +1266,8 @@ export class Wallet {
     this._recomputeBalanceFromUtxos();
     this.loaded = true;
     this.saveCache();
-    this.retrack();      // a new frontier address may need subscribing
-    this.emit();         // balance updates NOW
-    this._scheduleRefresh(); // background reconcile for full accuracy (off critical path)
+    this.retrack(); // a new frontier address may need subscribing
+    this.emit();    // UI updates NOW; the 30s backstop poll fills blockHeight/fee
     return true;
   }
 
