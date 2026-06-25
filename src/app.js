@@ -617,15 +617,6 @@ async function activateAccount(acc, opts = {}) {
     return;
   }
   try {
-    // Cross-device state: pull the latest from Nostr (may supply state on a
-    // device with no local cache, or a newer copy from another device). Skipped
-    // for watch-only accounts, which have no seed-derived sync key.
-    const hadNostr = wallet.watchOnly ? false : await wallet.syncFromNostr();
-    // Always do a full scan to fully reconcile (balance, history confirmations,
-    // spends, stale cache/relay state). Cache/Nostr just gave us something to
-    // show instantly; a partial frontier-only refresh leaves the state stale and
-    // would let the celebration baseline before a known payment is even counted.
-    await wallet.scan({ silent: hadCache || hadNostr });
     // Celebration baseline. Opening/importing/switching a wallet (opts.fresh)
     // baselines to the current frontier, so payments already received before
     // opening never trigger the "payment received" screen. A same-session
@@ -643,7 +634,24 @@ async function activateAccount(acc, opts = {}) {
       }
     }
     ui.receiveSeenIndex = ack;
+
+    // Go Live immediately: the socket must not wait on Nostr (up to 6s) or any
+    // discovery scan. The cache/Nostr state is already on screen.
     wallet.startRealtime();
+
+    // Cross-device state in the background. State comes from the local cache or
+    // Nostr — both restore the full balance, coins, and history — so a full API
+    // scan runs ONLY when we have neither (e.g. a seed imported on a fresh device
+    // with no synced state); that's what discovers the used addresses. Otherwise
+    // the socket + frontier poll keep us current with no refresh-time burst.
+    const hadNostr = wallet.watchOnly ? false : await wallet.syncFromNostr();
+    if (!hadCache && !hadNostr) {
+      await wallet.scan({ silent: false });
+    }
+    // Re-baseline a fresh open against the final frontier (Nostr or the discovery
+    // scan may have advanced it) so payments that predate the open don't celebrate.
+    if (opts.fresh) { ack = wallet.nextReceiveIndex; wallet.setReceiveAck(ack); ui.receiveSeenIndex = ack; }
+    wallet.retrack(); // re-subscribe to the latest frontier (Nostr/scan may have moved it)
   } catch {
     enterOfflineFallback();
   }
