@@ -2571,7 +2571,7 @@ function txDetailView(tx) {
       line(t('status'), tx.confirmed ? t('confirmed') : t('pendingInMempool')),
       tx.confirmed ? line(t('block'), String(tx.blockHeight || '—')) : null,
       tx.confirmed && tx.blockTime ? line(t('date'), new Date(tx.blockTime * 1000).toLocaleString()) : null,
-      !incoming && tx.fee ? line(t('networkFee'), fmtAmount(tx.fee) + ' ' + unitLabel()) : null
+      tx.fee ? line(t('networkFee'), fmtAmount(tx.fee) + ' ' + unitLabel()) : null
     ),
     !tx.confirmed && wallet.isStuck(tx)
       ? h('div', { class: 'warn-box' }, incoming ? t('stuckIncomingNote') : t('stuckOutgoingNote'))
