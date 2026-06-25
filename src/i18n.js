@@ -206,6 +206,7 @@ const STR = {
     copyLink: 'Copy link',
     claimBody: 'Claim it into a brand-new wallet that only you control.',
     claimBtn: 'Claim it',
+    claimFeeNote: '~{n} fee',
     claimFailed: 'This gift has already been claimed or is no longer available.',
     claimedTitle: 'Claimed!',
     claimedBody: 'Your Bitcoin is on its way. Back up your recovery phrase to keep it safe.',

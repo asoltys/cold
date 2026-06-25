@@ -1288,8 +1288,12 @@ function claimScreen() {
     );
   }
   const pv = previewGift(ui.claimCode);
-  const estFee = Math.ceil((11 + 68 + 31 * 2) * ((wallet.feeRates && wallet.feeRates.halfHourFee) || 5));
-  const approx = pv ? Math.max(0, pv.room - estFee) : 0;
+  // The headline is the full amount received (inputs minus the sender's change).
+  // The network fee is determined now, at claim time, and comes out of that
+  // amount — we surface the estimate on the Claim button so it isn't a surprise.
+  const rate = Math.max(1, Math.round((wallet.feeRates && wallet.feeRates.halfHourFee) || 5));
+  const estFee = pv ? Math.ceil((11 + 68 * pv.inputs + 31 * 2) * rate) : 0;
+  const total = pv ? pv.room : 0;
   return h(
     'div',
     { class: 'col', style: 'gap:16px' },
@@ -1298,14 +1302,15 @@ function claimScreen() {
       h('div', { class: 'check-badge', style: 'background:var(--accent)' }, '🎁'),
       h('h2', { style: 'margin:0' }, t('giftWelcome')),
       h('div', { class: 'amt', style: 'font-size:30px' },
-        h('span', { class: 'amount-pos' }, '~' + fmtAmount(approx)), ' ', unitTag('unit')
+        h('span', { class: 'amount-pos' }, fmtAmount(total)), ' ', unitTag('unit')
       ),
       h('p', { class: 'muted', style: 'margin:0' }, t('claimBody'))
     ),
     ui.claimError && h('div', { class: 'notice err' }, ui.claimError),
     ui.busy
       ? h('button', { class: 'btn-primary btn-block', disabled: true }, h('span', { class: 'spinner' }))
-      : h('button', { class: 'btn-primary btn-block', onClick: doClaim }, t('claimBtn'))
+      : h('button', { class: 'btn-primary btn-block', onClick: doClaim },
+          t('claimBtn') + ' · ' + t('claimFeeNote', { n: fmtAmount(estFee) + ' ' + unitLabel() }))
   );
 }
 
