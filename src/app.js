@@ -1907,7 +1907,7 @@ function sendForm() {
     coinControl(),
     ui.sendError && h('div', { class: 'notice err' }, ui.sendError),
     h('button', { class: 'btn-primary btn-block', onClick: reviewSend }, t('reviewTx')),
-    h('button', { class: 'linklike small', style: 'align-self:center;margin-top:2px', onClick: () => { ui.giftMode = true; ui.sendError = ''; render(); } }, t('giftLink'))
+    h('button', { class: 'linklike small', style: 'align-self:center;margin-top:2px', onClick: () => { ui.giftMode = true; ui.sendError = ''; render(); } }, '🎁 ' + t('giftLink'))
   );
 }
 
