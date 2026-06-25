@@ -1455,14 +1455,22 @@ function tabContent() {
   }
 }
 
+// A payment is "recent" enough to celebrate if it's still pending or confirmed
+// within the last couple hours. This is a hard guard so an old payment can never
+// trigger the celebration on import, regardless of receive-index bookkeeping.
+function hasRecentIncoming() {
+  const now = Date.now() / 1000;
+  return wallet.txs.some((tx) => tx.net > 0 && (!tx.confirmed || (tx.blockTime && now - tx.blockTime < 2 * 3600)));
+}
+
 // ---------------------------------------------------------------- Receive
 function receiveTab() {
   // A payment landed on the shown address (the fresh index advanced past what
   // the user last saw) — celebrate, and wait for a tap before showing the next.
   // Until receiveSeenIndex has been baselined (post-scan, in enterWallet) it
-  // stays null and we never celebrate, so importing a wallet with existing
-  // history doesn't flash "payment received" for old payments.
-  if (ui.receiveSeenIndex != null && wallet.nextReceiveIndex > ui.receiveSeenIndex) {
+  // stays null and we never celebrate. The recency guard additionally ensures an
+  // already-old payment never celebrates when a wallet is opened.
+  if (ui.receiveSeenIndex != null && wallet.nextReceiveIndex > ui.receiveSeenIndex && hasRecentIncoming()) {
     let amt = 0;
     for (let i = ui.receiveSeenIndex; i < wallet.nextReceiveIndex; i++) {
       const e = wallet._addrInfo(0, i);
