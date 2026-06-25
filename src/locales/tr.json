@@ -213,5 +213,7 @@
   "importedKeyNote": "Bu cüzdan genişletilmiş bir özel anahtardan içe aktarıldı, bu yüzden kurtarma ifadesi yok. Cüzdanı korumak için o anahtarın kendisini yedekleyin.",
   "clearAll": "Tümünü temizle",
   "clearAllWarn": "⚠ Bu, bu cihazdaki tüm cüzdanları kaldırır. Kurtarma ifadesini veya anahtarını yedeklemediğiniz her cüzdan kalıcı olarak kaybolur.",
-  "rename": "Yeniden adlandır"
+  "rename": "Yeniden adlandır",
+  "darkMode": "Karanlık mod",
+  "lightMode": "Aydınlık mod"
 }

@@ -233,6 +233,8 @@ const STR = {
     relaysLabel: 'Relays',
     relaysHint: 'One wss:// URL per line.',
     language: 'Language',
+    darkMode: 'Dark mode',
+    lightMode: 'Light mode',
     offlineBanner: "Can't reach the network — working offline. Import a snapshot on the Settings tab to load coins.",
     retry: 'Retry',
     copied: 'Copied to clipboard',

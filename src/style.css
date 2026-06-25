@@ -16,9 +16,38 @@
   --red: #c43b3b;
   --red-soft: #fbeaea;
   --shadow: 0 1px 2px rgba(16, 24, 40, 0.04), 0 10px 30px rgba(16, 24, 40, 0.07);
+  --surface2: #f7f8fa; /* subtle raised surface (hover, mnemonic cells) */
+  --tab-bg: #e9ebef; /* tab strip background */
+  --info: #3949ab;
+  --info-soft: #eef2ff;
+  --info-line: #d4ddfb;
   --radius: 16px;
   --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
   --sans: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+
+/* Dark theme — applied via data-theme="dark" on <html>. */
+:root[data-theme="dark"] {
+  --bg: #0f1216;
+  --paper: #181b21;
+  --ink: #e7e9ee;
+  --muted: #9aa1ac;
+  --faint: #6f7782;
+  --line: #2a2f37;
+  --line-strong: #3a414b;
+  --accent: #f7931a;
+  --accent-ink: #f7a942;
+  --accent-soft: #2e2412;
+  --green: #2dbd80;
+  --green-soft: #14271d;
+  --red: #e66a6a;
+  --red-soft: #2c1a1a;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 30px rgba(0, 0, 0, 0.5);
+  --surface2: #20242b;
+  --tab-bg: #20242b;
+  --info: #9db4ff;
+  --info-soft: #1a2030;
+  --info-line: #2c3a5e;
 }
 
 * { box-sizing: border-box; }
@@ -102,7 +131,7 @@ summary { cursor: pointer; }
 .balance .split .v.pending { color: var(--accent-ink); }
 
 /* ---- tabs ---- */
-.tabs { display: flex; gap: 4px; background: #e9ebef; border-radius: 12px; padding: 4px; margin: 16px 0; }
+.tabs { display: flex; gap: 4px; background: var(--tab-bg); border-radius: 12px; padding: 4px; margin: 16px 0; }
 .tabs button {
   flex: 1; border: 0; background: transparent; padding: 9px 4px; border-radius: 9px;
   font: inherit; font-weight: 600; font-size: 14px; color: var(--muted); cursor: pointer;
@@ -115,7 +144,7 @@ button, .btn {
   border: 1px solid var(--line-strong); background: var(--paper); color: var(--ink);
   padding: 11px 16px; transition: filter .12s, background .12s, border-color .12s;
 }
-button:hover { background: #f7f8fa; }
+button:hover { background: var(--surface2); }
 button:active { transform: translateY(1px); }
 button:disabled { opacity: .5; cursor: not-allowed; }
 .btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
@@ -164,7 +193,7 @@ textarea { resize: vertical; min-height: 84px; font-family: var(--mono); font-si
 /* ---- mnemonic grid ---- */
 .words { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
 .words .w {
-  display: flex; align-items: baseline; gap: 7px; background: #f7f8fa;
+  display: flex; align-items: baseline; gap: 7px; background: var(--surface2);
   border: 1px solid var(--line); border-radius: 10px; padding: 9px 11px; font-family: var(--mono);
 }
 .words .w .n { color: var(--faint); font-size: 12px; width: 18px; text-align: right; }
@@ -203,7 +232,7 @@ textarea { resize: vertical; min-height: 84px; font-family: var(--mono); font-si
 .notice { border-radius: 11px; padding: 11px 13px; font-size: 14px; }
 .notice.err { background: var(--red-soft); color: var(--red); border: 1px solid #f1c9c9; }
 .notice.ok { background: var(--green-soft); color: var(--green); border: 1px solid #c4e7d4; }
-.notice.info { background: #eef2ff; color: #3949ab; border: 1px solid #d4ddfb; }
+.notice.info { background: var(--info-soft); color: var(--info); border: 1px solid var(--info-line); }
 .spinner {
   width: 18px; height: 18px; border: 2px solid var(--line-strong); border-top-color: var(--accent);
   border-radius: 50%; animation: spin .7s linear infinite; display: inline-block; vertical-align: middle;

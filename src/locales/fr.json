@@ -213,5 +213,7 @@
   "importedKeyNote": "Ce portefeuille a été importé depuis une clé privée étendue, il n’a donc pas de phrase de récupération. Sauvegardez cette clé pour conserver le portefeuille.",
   "clearAll": "Tout effacer",
   "clearAllWarn": "⚠ Ceci supprime tous les portefeuilles de cet appareil. Tout portefeuille dont vous n’avez pas sauvegardé la phrase de récupération ou la clé sera perdu définitivement.",
-  "rename": "Renommer"
+  "rename": "Renommer",
+  "darkMode": "Mode sombre",
+  "lightMode": "Mode clair"
 }

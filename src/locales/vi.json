@@ -213,5 +213,7 @@
   "importedKeyNote": "Ví này được nhập từ một khóa riêng tư mở rộng, nên không có cụm từ khôi phục. Hãy sao lưu chính khóa đó để giữ ví.",
   "clearAll": "Xóa tất cả",
   "clearAllWarn": "⚠ Thao tác này xóa mọi ví khỏi thiết bị này. Bất kỳ ví nào mà bạn chưa sao lưu cụm từ khôi phục hoặc khóa sẽ mất vĩnh viễn.",
-  "rename": "Đổi tên"
+  "rename": "Đổi tên",
+  "darkMode": "Chế độ tối",
+  "lightMode": "Chế độ sáng"
 }

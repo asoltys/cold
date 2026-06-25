@@ -213,5 +213,7 @@
   "importedKeyNote": "Esta carteira foi importada de uma chave privada estendida, então não há frase de recuperação. Faça backup dessa chave para manter a carteira.",
   "clearAll": "Apagar tudo",
   "clearAllWarn": "⚠ Isto remove todas as carteiras deste dispositivo. Qualquer carteira cuja frase de recuperação ou chave você não tenha feito backup será perdida para sempre.",
-  "rename": "Renomear"
+  "rename": "Renomear",
+  "darkMode": "Modo escuro",
+  "lightMode": "Modo claro"
 }

@@ -123,10 +123,30 @@ function footer() {
       installPrompt
         ? h('span', {}, h('span', { class: 'faint' }, ' · '),
             h('button', { class: 'linklike', style: 'font-weight:400', onClick: triggerInstall }, t('installApp')))
-        : null
+        : null,
+      h('span', { class: 'faint' }, ' · '),
+      h('button', { class: 'linklike', style: 'font-weight:400', onClick: toggleTheme }, resolvedTheme() === 'dark' ? t('lightMode') : t('darkMode'))
     ),
     h('div', { style: 'margin-top:8px' }, languagePicker())
   );
+}
+
+const THEME_KEY = 'btc-wallet-theme';
+function resolvedTheme() {
+  try {
+    const s = localStorage.getItem(THEME_KEY);
+    if (s === 'dark' || s === 'light') return s;
+  } catch {}
+  try { return matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'; } catch {}
+  return 'light';
+}
+function applyTheme() {
+  try { document.documentElement.dataset.theme = resolvedTheme(); } catch {}
+}
+function toggleTheme() {
+  try { localStorage.setItem(THEME_KEY, resolvedTheme() === 'dark' ? 'light' : 'dark'); } catch {}
+  applyTheme();
+  render();
 }
 
 // PWA install. Chrome fires beforeinstallprompt when the app qualifies; we stash
@@ -958,7 +978,7 @@ function giftRate() {
 function createGiftLink() {
   const rate = giftRate();
   const min = giftMinimum(rate);
-  const amt = Math.round(Number(ui.giftAmount));
+  const amt = parseAmount(ui.giftAmount, unit); // entered in the current display unit
   if (!amt || amt < min) { ui.giftError = t('giftAmountInvalid', { n: fmtAmount(min) + ' ' + unitLabel() }); render(); return; }
   try {
     ui.giftCode = wallet.createGift(amt, rate).code;
@@ -987,9 +1007,9 @@ function giftCard() {
         )
       : h('div', { class: 'col gap6' },
           h('div', { class: 'input-group' },
-            h('input', { type: 'number', min: String(giftMinimum(giftRate())), inputmode: 'numeric', placeholder: t('giftAmountLabel'),
+            h('input', { type: 'number', step: unit === 'sats' ? '1' : '0.00000001', min: '0', inputmode: 'decimal', placeholder: t('giftAmountLabel'),
               value: ui.giftAmount, onInput: (e) => (ui.giftAmount = e.target.value) }),
-            h('span', { class: 'small muted', style: 'align-self:center' }, unitLabel())
+            h('div', { style: 'display:flex;align-items:center' }, unitTag())
           ),
           h('div', { class: 'small faint' }, t('giftMinNote', { n: fmtAmount(giftMinimum(giftRate())) + ' ' + unitLabel() })),
           ui.giftError && h('div', { class: 'notice err' }, ui.giftError),

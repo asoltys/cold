@@ -874,29 +874,42 @@ export class Wallet {
   createGift(amountSats, feeRate) {
     const gift = BigInt(Math.round(amountSats));
     const rate = Math.max(1, Math.round(feeRate));
-    const claimFee = BigInt(Math.ceil((11 + 68 + 31 * 2) * rate)); // claimer's 1-in 2-out tx
     const DUST = 294n;
-    // Require dust + one claim fee of headroom so the recipient stays well above
-    // dust even if fees rise before they claim.
     if (gift < BigInt(giftMinimum(rate))) throw new Error('Gift amount is too small.');
-    const need = gift + claimFee + DUST;
-    const coin = this.utxos
+
+    // Select confirmed coins (largest first, to minimize inputs) until they
+    // cover the gift + the claimer's fee (which grows with input count) + a dust
+    // change. The change output goes back to us and is protected; the rest is
+    // the claimer's to direct.
+    const claimFeeFor = (n) => BigInt(Math.ceil((11 + 68 * n + 31 * 2) * rate));
+    const pool = this.utxos
       .filter((u) => u.confirmed && !this.isReserved(utxoId(u)))
-      .sort((a, b) => a.value - b.value)
-      .find((u) => BigInt(u.value) >= need);
-    if (!coin) throw new Error('No single confirmed coin is large enough for that amount.');
+      .sort((a, b) => b.value - a.value);
+    const sel = [];
+    let sum = 0n;
+    for (const u of pool) {
+      sel.push(u);
+      sum += BigInt(u.value);
+      if (sum >= gift + claimFeeFor(sel.length) + DUST) break;
+    }
+    const claimFee = claimFeeFor(sel.length);
+    if (sum < gift + claimFee + DUST) throw new Error('Not enough confirmed funds for that gift amount.');
 
-    const V = BigInt(coin.value);
-    const change = V - gift - claimFee; // back to us, >= DUST by construction
-    const pay = p2wpkh(this.derive(coin.chain, coin.index).pubkey, this.netCfg.net);
+    const change = sum - gift - claimFee; // back to us, >= DUST by construction
     const t = new btc.Transaction({ allowUnknownOutputs: true });
-    t.addInput({ ...pay, txid: coin.txid, index: coin.vout, sighashType: btc.SigHash.SINGLE, witnessUtxo: { script: pay.script, amount: V } });
+    // First input commits the change output (SIGHASH_SINGLE on output 0); the
+    // rest commit only the inputs (SIGHASH_NONE). Together: inputs and our
+    // change are locked, while the claimer is free to add their own output.
+    sel.forEach((u, i) => {
+      const pay = p2wpkh(this.derive(u.chain, u.index).pubkey, this.netCfg.net);
+      t.addInput({ ...pay, txid: u.txid, index: u.vout, sighashType: i === 0 ? btc.SigHash.SINGLE : btc.SigHash.NONE, witnessUtxo: { script: pay.script, amount: BigInt(u.value) } });
+    });
     t.addOutputAddress(this.freshChange().address, change, this.netCfg.net);
-    t.signIdx(this.node(coin.chain, coin.index).privateKey, 0, [btc.SigHash.SINGLE]);
+    sel.forEach((u, i) => t.signIdx(this.node(u.chain, u.index).privateKey, i, [i === 0 ? btc.SigHash.SINGLE : btc.SigHash.NONE]));
 
-    this.reservedSet().add(utxoId(coin));
+    for (const u of sel) this.reservedSet().add(utxoId(u));
     this._saveReserved();
-    return { code: base64urlnopad.encode(t.toPSBT()), amount: Number(gift), reserved: utxoId(coin) };
+    return { code: base64urlnopad.encode(t.toPSBT()), amount: Number(gift), reserved: sel.map(utxoId) };
   }
 
   // --- realtime (mempool.space WebSocket) ---------------------------------
@@ -1402,12 +1415,15 @@ export function giftMinimum(feeRate) {
   return Math.max(546, 294 + claimFee);
 }
 
+function _sumInputs(tx) {
+  let inAmt = 0n;
+  for (let i = 0; i < tx.inputsLength; i++) inAmt += tx.getInput(i).witnessUtxo.amount;
+  return inAmt;
+}
 export function previewGift(code) {
   try {
     const tx = btc.Transaction.fromPSBT(base64urlnopad.decode(code));
-    const inAmt = Number(tx.getInput(0).witnessUtxo.amount);
-    const change = Number(tx.getOutput(0).amount);
-    return { room: inAmt - change }; // claimer gets room − their chosen fee
+    return { room: Number(_sumInputs(tx) - tx.getOutput(0).amount) }; // room minus the claimer fee
   } catch {
     return null;
   }
@@ -1415,10 +1431,8 @@ export function previewGift(code) {
 
 export function buildClaimTx(code, toAddress, feeRate, net) {
   const tx = btc.Transaction.fromPSBT(base64urlnopad.decode(code));
-  const inAmt = tx.getInput(0).witnessUtxo.amount;
-  const change = tx.getOutput(0).amount;
-  const room = inAmt - change;
-  const fee = BigInt(Math.max(1, Math.ceil((11 + 68 + 31 * 2) * Math.max(1, Math.round(feeRate)))));
+  const room = _sumInputs(tx) - tx.getOutput(0).amount;
+  const fee = BigInt(Math.max(1, Math.ceil((11 + 68 * tx.inputsLength + 31 * 2) * Math.max(1, Math.round(feeRate)))));
   const out = room - fee;
   if (out < 294n) throw new Error('Gift is too small to claim at this fee rate.');
   tx.addOutputAddress(toAddress, out, net);

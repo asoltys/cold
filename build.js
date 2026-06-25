@@ -141,9 +141,10 @@ export async function buildHtml({ minify = true, pwa = minify } = {}) {
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-<meta name="color-scheme" content="light">
+<meta name="color-scheme" content="light dark">
 <title>Hal Wallet</title>
 <link rel="icon" href="${FAVICON}">
+<script>try{var t=localStorage.getItem('btc-wallet-theme');if(t!=='dark'&&t!=='light')t=matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light';document.documentElement.dataset.theme=t;}catch(e){}</script>
 ${pwa ? PWA_HEAD : ''}<style>${css}</style>
 </head>
 <body>

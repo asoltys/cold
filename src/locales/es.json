@@ -213,5 +213,7 @@
   "importedKeyNote": "Esta cartera se importó desde una clave privada extendida, así que no tiene frase de recuperación. Guarda esa clave para conservar la cartera.",
   "clearAll": "Borrar todo",
   "clearAllWarn": "⚠ Esto elimina todas las carteras de este dispositivo. Cualquier cartera cuya frase de recuperación o clave no hayas respaldado se perderá para siempre.",
-  "rename": "Renombrar"
+  "rename": "Renombrar",
+  "darkMode": "Modo oscuro",
+  "lightMode": "Modo claro"
 }
