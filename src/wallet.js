@@ -881,31 +881,49 @@ export class Wallet {
     }));
   }
 
+  // Best-fit coin selection for a gift of `gift` sats (needs gift + a dust
+  // change): the smallest single confirmed coin that covers it — one input and
+  // the least value locked until claim — else the fewest large coins. Returns
+  // the selected UTXOs, or null if confirmed funds are insufficient.
+  _selectGiftCoins(gift) {
+    const DUST = 294n;
+    const need = gift + DUST;
+    const avail = this.utxos.filter((u) => u.confirmed && !this.isReserved(utxoId(u)));
+    const single = avail.filter((u) => BigInt(u.value) >= need).sort((a, b) => a.value - b.value)[0];
+    if (single) return [single];
+    const sel = [];
+    let sum = 0n;
+    for (const u of [...avail].sort((a, b) => b.value - a.value)) {
+      sel.push(u);
+      sum += BigInt(u.value);
+      if (sum >= need) return sel;
+    }
+    return null; // insufficient confirmed funds
+  }
+
+  // Sats that creating this gift right now would lock (the selected coins'
+  // total), or null if confirmed funds are insufficient. Lets the UI warn when
+  // the lock would dwarf the gift and offer to split a coin first.
+  giftLockPreview(amountSats) {
+    const sel = this._selectGiftCoins(BigInt(Math.round(amountSats)));
+    return sel ? sel.reduce((s, u) => s + u.value, 0) : null;
+  }
+
   // Build a SIGHASH_SINGLE-signed gift: input = a single coin, output0 = change
   // back to us (cryptographically fixed), leaving the rest for the claimer to
   // direct to their own fresh address. Reserves the coin. Returns { code, ... }.
   createGift(amountSats, feeRate) {
     const gift = BigInt(Math.round(amountSats));
     const rate = Math.max(1, Math.round(feeRate));
-    const DUST = 294n;
     if (gift < BigInt(giftMinimum(rate))) throw new Error('Gift amount is too small.');
 
-    // Select confirmed coins (largest first, to minimize inputs) until they
-    // cover the gift plus a dust change. The change output goes back to us and
-    // is protected; the rest — the full gift amount — is the claimer's to
-    // direct. No fee is reserved here: the claimer's wallet looks up the fee
-    // rate at claim time and subtracts it from this amount.
-    const pool = this.utxos
-      .filter((u) => u.confirmed && !this.isReserved(utxoId(u)))
-      .sort((a, b) => b.value - a.value);
-    const sel = [];
-    let sum = 0n;
-    for (const u of pool) {
-      sel.push(u);
-      sum += BigInt(u.value);
-      if (sum >= gift + DUST) break;
-    }
-    if (sum < gift + DUST) throw new Error('Not enough confirmed funds for that gift amount.');
+    // Best-fit selection locks the least value; the change output goes back to
+    // us and is protected, while the rest — the full gift amount — is the
+    // claimer's to direct. No fee is reserved here: the claimer's wallet looks
+    // up the fee rate at claim time and subtracts it from this amount.
+    const sel = this._selectGiftCoins(gift);
+    if (!sel) throw new Error('Not enough confirmed funds for that gift amount.');
+    const sum = sel.reduce((s, u) => s + BigInt(u.value), 0n);
 
     const change = sum - gift; // back to us, >= DUST by construction
     const t = new btc.Transaction({ allowUnknownOutputs: true });
@@ -922,6 +940,18 @@ export class Wallet {
     for (const u of sel) this.reservedSet().add(utxoId(u));
     this._saveReserved();
     return { code: base64urlnopad.encode(t.toPSBT()), amount: Number(gift), reserved: sel.map(utxoId) };
+  }
+
+  // Pre-split for a gift: broadcast a normal self-send that carves out a coin of
+  // exactly gift + dust to one of our own addresses, with the rest returned as
+  // change. Once it confirms, createGift's best-fit picks that coin and locks
+  // only ~the gift amount instead of a large coin. Costs an on-chain fee now.
+  async splitForGift(amountSats, feeRate) {
+    const DUST = 294;
+    const target = Math.round(amountSats) + DUST;
+    const draft = this.buildTx({ recipients: [{ address: this.freshReceive().address, amount: target }], feeRate });
+    const hexTx = this.sign(draft.tx);
+    return await this.broadcast(hexTx);
   }
 
   // --- realtime (mempool.space WebSocket) ---------------------------------
