@@ -3,8 +3,11 @@
 
 import qrcode from 'qrcode-generator';
 
-export function qrSvg(text, { margin = 2 } = {}) {
-  const qr = qrcode(0, 'M'); // type 0 = auto-size, error correction M
+// ec: error-correction level. 'M' by default; pass 'L' for long payloads (e.g.
+// gift links) where a smaller, chunkier grid scans more easily — on-screen QRs
+// are scanned immediately and don't need the damage tolerance of higher levels.
+export function qrSvg(text, { margin = 2, ec = 'M' } = {}) {
+  const qr = qrcode(0, ec); // type 0 = auto-size
   qr.addData(text);
   qr.make();
 

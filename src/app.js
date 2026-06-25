@@ -1170,7 +1170,7 @@ function giftCard() {
     h('div', { class: 'warn-box' }, t('giftLinkWarn')),
     ui.giftCode
       ? h('div', { class: 'col', style: 'align-items:center;gap:10px' },
-          h('div', { html: qrSvg(giftUrl()) }),
+          h('div', { html: qrSvg(giftUrl(), { ec: 'L' }) }),
           h('div', { class: 'addr-box break', style: 'width:100%;font-size:12px' }, giftUrl()),
           h('div', { class: 'row gap6 wrap' },
             copyBtn(giftUrl(), t('copyLink')),
