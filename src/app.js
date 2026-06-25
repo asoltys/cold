@@ -1450,18 +1450,25 @@ function offlineBanner() {
 function balanceCard() {
   // Only dim on the very first load; background updates happen silently.
   const firstLoad = wallet.scanning && !wallet.loaded;
+  const locked = wallet.lockedValue;
   return h(
     'div',
     { class: 'card balance' },
     h('div', { class: 'small faint', style: 'text-transform:uppercase;letter-spacing:.05em' }, t('balance')),
-    // Headline is the projected balance (confirmed + mempool), so a pending
-    // spend is debited immediately rather than waiting for confirmation.
-    h('div', { class: 'amt', style: firstLoad ? 'opacity:.3' : '' }, fmtAmount(wallet.total), ' ', unitTag('unit')),
-    wallet.pending > 0
+    // Headline is the spendable, projected balance (confirmed + mempool, minus
+    // coins locked in unclaimed gifts), so both a pending spend and a reserved
+    // gift are debited immediately rather than waiting to confirm/claim.
+    h('div', { class: 'amt', style: firstLoad ? 'opacity:.3' : '' }, fmtAmount(wallet.spendable), ' ', unitTag('unit')),
+    wallet.pending > 0 || locked > 0
       ? h(
           'div',
           { class: 'split' },
-          h('div', {}, h('div', { class: 'k' }, t('pending')), h('div', { class: 'v pending' }, fmtAmount(wallet.pending), ' ', unitTag()))
+          wallet.pending > 0
+            ? h('div', {}, h('div', { class: 'k' }, t('pending')), h('div', { class: 'v pending' }, fmtAmount(wallet.pending), ' ', unitTag()))
+            : null,
+          locked > 0
+            ? h('div', {}, h('div', { class: 'k' }, t('lockedInGifts')), h('div', { class: 'v' }, fmtAmount(locked), ' ', unitTag()))
+            : null
         )
       : null
   );

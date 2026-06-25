@@ -195,6 +195,7 @@ const STR = {
     giftAmountInvalid: 'Enter at least {n}.',
     giftMinNote: 'Minimum {n} at current fees, so it clears dust when claimed.',
     giftAnother: 'Create another',
+    lockedInGifts: 'Locked in gifts',
     giftReserved: 'Unclaimed gift links ({n})',
     giftReclaim: 'Reclaim',
     giftReclaimPrompt: 'Reclaim frees this coin for your next payment, but the link stays claimable until you spend it. Pay a network fee to revoke it right now instead?',

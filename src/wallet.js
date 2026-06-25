@@ -583,6 +583,19 @@ export class Wallet {
     return this.confirmed + this.pending;
   }
 
+  // Confirmed coins locked behind unclaimed gift links. The whole source coin is
+  // committed until the gift is claimed (our change only comes back in the
+  // claimer's tx), so it's already excluded from spending — and from the
+  // spendable balance below.
+  get lockedValue() {
+    const res = this.reservedSet();
+    return this.utxos.reduce((s, u) => s + (res.has(utxoId(u)) ? u.value : 0), 0);
+  }
+  // What the user can actually spend right now: everything minus gift locks.
+  get spendable() {
+    return this.total - this.lockedValue;
+  }
+
   _recomputeBalanceFromChains() {
     let c = 0;
     let p = 0;
