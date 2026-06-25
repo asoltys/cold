@@ -584,14 +584,36 @@ export class Wallet {
     for (const vout of tx.vout || []) {
       if (vout.scriptpubkey_address && mine.has(vout.scriptpubkey_address)) received += vout.value;
     }
+    const confirmed = !!(tx.status && tx.status.confirmed);
+    // Preserve when we first saw it pending, so we can later judge a stuck tx.
+    const prior = this.txs.find((t) => t.txid === tx.txid);
     return {
       txid: tx.txid,
       net: received - sent, // >0 incoming, <0 outgoing
       fee: tx.fee || 0,
-      confirmed: !!(tx.status && tx.status.confirmed),
+      vsize: tx.weight ? Math.ceil(tx.weight / 4) : (prior && prior.vsize) || 0,
+      confirmed,
       blockTime: (tx.status && tx.status.block_time) || 0,
       blockHeight: (tx.status && tx.status.block_height) || 0,
+      firstSeen: confirmed ? 0 : (prior && prior.firstSeen) || Date.now(),
     };
+  }
+
+  // A pending tx is "stuck" once it's waited ~10 blocks (≈100 min) and its fee
+  // rate is below the mempool's current floor (minimumFee) — i.e. it's been
+  // purged and won't confirm without a bump (RBF/CPFP). We stop actively
+  // monitoring these (no socket slot, no fast poll); the slow reconcile still
+  // picks it up if the floor later drops and it confirms after all.
+  isStuck(tx) {
+    if (!tx || tx.confirmed || !tx.firstSeen || !tx.vsize) return false;
+    if (Date.now() - tx.firstSeen < 100 * 60000) return false; // give it ~10 blocks
+    const floor = (this.feeRates && this.feeRates.minimumFee) || 1;
+    return tx.fee / tx.vsize < floor;
+  }
+  _stuckTxids() {
+    const s = new Set();
+    for (const tx of this.txs) if (this.isStuck(tx)) s.add(tx.txid);
+    return s;
   }
 
   _sortTxs() {
@@ -1116,9 +1138,10 @@ export class Wallet {
       this.derive(0, this.nextReceiveIndex).address,
       this.derive(1, this.nextChangeIndex).address,
     ]);
+    const stuck = this._stuckTxids();
     for (const u of this.utxos) {
       if (set.size >= 10) break;
-      if (!u.confirmed) set.add(u.address);
+      if (!u.confirmed && !stuck.has(u.txid)) set.add(u.address);
     }
     return [...set];
   }
@@ -1133,7 +1156,10 @@ export class Wallet {
     // 3s tick is a cheap time check — it issues no request unless one is due.
     this._pollTimer = setInterval(() => {
       if (this.offline) return;
-      const pending = this.utxos.some((u) => !u.confirmed);
+      // Active pending = an unconfirmed coin we still expect to confirm; stuck
+      // (purged, too-low-fee) txs don't keep us in the fast lane.
+      const stuck = this._stuckTxids();
+      const pending = this.utxos.some((u) => !u.confirmed && !stuck.has(u.txid));
       const due = this.live && !pending ? 25000 : 6000;
       if (Date.now() - (this._lastPoll || 0) < due) return;
       this._lastPoll = Date.now();

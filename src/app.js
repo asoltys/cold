@@ -2372,6 +2372,7 @@ function giftHistoryItem(g) {
 
 function txHistoryItem(tx) {
   const incoming = tx.net >= 0;
+  const stuck = !tx.confirmed && wallet.isStuck(tx);
   return h(
     'div',
     { class: 'item', style: 'cursor:pointer', onClick: () => { ui.txDetail = tx.txid; render(); } },
@@ -2379,9 +2380,11 @@ function txHistoryItem(tx) {
     h('div', { class: 'grow' },
       h('div', { class: 'row gap6' },
         incoming ? t('received') : t('sent'),
-        tx.confirmed ? null : h('span', { class: 'tag pending' }, t('pendingTag'))
+        tx.confirmed ? null
+          : stuck ? h('span', { class: 'tag', style: 'background:var(--red-soft);color:var(--red)' }, t('stuckTag'))
+          : h('span', { class: 'tag pending' }, t('pendingTag'))
       ),
-      h('div', { class: 'small faint' }, tx.confirmed ? timeAgo(tx.blockTime) : t('awaitingConfirmation'))
+      h('div', { class: 'small faint' }, tx.confirmed ? timeAgo(tx.blockTime) : stuck ? t('stuckNote') : t('awaitingConfirmation'))
     ),
     h('div', { style: 'text-align:right' },
       h('div', { class: incoming ? 'amount-pos' : 'amount-neg' }, (incoming ? '+' : '') + fmtAmount(tx.net)),
@@ -2491,6 +2494,9 @@ function txDetailView(tx) {
       tx.confirmed && tx.blockTime ? line(t('date'), new Date(tx.blockTime * 1000).toLocaleString()) : null,
       !incoming && tx.fee ? line(t('networkFee'), fmtAmount(tx.fee) + ' ' + unitLabel()) : null
     ),
+    !tx.confirmed && wallet.isStuck(tx)
+      ? h('div', { class: 'warn-box' }, incoming ? t('stuckIncomingNote') : t('stuckOutgoingNote'))
+      : null,
     h('div', { class: 'col gap6' },
       h('span', { class: 'lab' }, t('transactionId')),
       h('div', { class: 'addr-box', style: 'font-size:13px' }, tx.txid)
