@@ -198,7 +198,7 @@ const STR = {
     giftLinkReveal: 'Create gift link',
     giftAmountLabel: 'Amount to gift',
     giftAmountInvalid: 'Enter at least {n}.',
-    giftMinNote: 'Minimum {n} at current fees, so it clears dust when claimed.',
+    giftMinNote: 'Minimum {n}.',
     giftAllNote: 'Gifts your whole balance; the recipient pays the claim fee.',
     giftExceedsBalance: 'That’s more than your balance.',
     giftNeedsHeadroom: 'Gift up to {n}, or tap Max to gift your whole balance.',
