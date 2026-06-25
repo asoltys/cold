@@ -124,7 +124,8 @@ function footer() {
         ? h('span', {}, h('span', { class: 'faint' }, ' · '),
             h('button', { class: 'linklike', style: 'font-weight:400', onClick: triggerInstall }, t('installApp')))
         : null
-    )
+    ),
+    h('div', { style: 'margin-top:8px' }, languagePicker())
   );
 }
 
@@ -920,13 +921,7 @@ function settingsTab() {
             wallet.scanning ? t('scanning') : t('rescanWallet'))
     ),
     explorerCard(),
-    wallet.watchOnly || !wallet.mnemonic ? null : syncCard(),
-    h(
-      'div',
-      { class: 'card col' },
-      h('h3', {}, t('language')),
-      languagePicker()
-    )
+    wallet.watchOnly || !wallet.mnemonic ? null : syncCard()
   );
 }
 
