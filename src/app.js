@@ -119,8 +119,10 @@ function footer() {
       { style: 'margin-top:4px' },
       h('button', { class: 'linklike', style: 'font-weight:400', onClick: openHowItWorks }, t('howItWorks')),
       // Chrome no longer prompts to install on its own — surface our own link
-      // once it reports the app is installable (beforeinstallprompt fired).
-      installPrompt
+      // once it reports the app is installable. We render from a persisted flag
+      // (not the live event) so the link is present on the first paint after a
+      // refresh, avoiding a layout shift when beforeinstallprompt fires late.
+      installable()
         ? h('span', {}, h('span', { class: 'faint' }, ' · '),
             h('button', { class: 'linklike', style: 'font-weight:400', onClick: triggerInstall }, t('installApp')))
         : null,
@@ -151,25 +153,48 @@ function toggleTheme() {
 
 // PWA install. Chrome fires beforeinstallprompt when the app qualifies; we stash
 // the event and reveal an "Install app" link, then replay it on a user tap (the
-// browser requires a gesture). beforeinstallprompt only fires when not already
-// installed, so the link naturally hides once installed.
+// browser requires a gesture). The link's visibility is driven by a persisted
+// flag rather than the live event so it's present on the first paint after a
+// refresh (no layout shift); the event only supplies the prompt to replay.
+const INSTALLABLE_KEY = 'btc-wallet-installable';
 let installPrompt = null;
+function isStandalone() {
+  try {
+    return matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+  } catch { return false; }
+}
+function installable() {
+  if (isStandalone()) return false;
+  try { return localStorage.getItem(INSTALLABLE_KEY) === '1'; } catch { return false; }
+}
+function setInstallable(v) {
+  try {
+    if (v) localStorage.setItem(INSTALLABLE_KEY, '1');
+    else localStorage.removeItem(INSTALLABLE_KEY);
+  } catch {}
+}
 if (typeof window !== 'undefined') {
   window.addEventListener('beforeinstallprompt', (e) => {
     e.preventDefault();
     installPrompt = e;
-    render();
+    // Only re-render if this changes what's on screen; on a refresh the link is
+    // already shown from the persisted flag, so nothing moves.
+    const wasShown = installable();
+    setInstallable(true);
+    if (!wasShown) render();
   });
   window.addEventListener('appinstalled', () => {
     installPrompt = null;
+    setInstallable(false);
     render();
   });
 }
 async function triggerInstall() {
   const e = installPrompt;
+  // The prompt event may not have fired yet this load even though the link is
+  // shown from the persisted flag; bail quietly if so.
   if (!e) return;
   installPrompt = null;
-  render();
   e.prompt();
   try {
     await e.userChoice;

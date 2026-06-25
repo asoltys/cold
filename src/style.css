@@ -13,10 +13,13 @@
   --accent-soft: #fff3e2;
   --green: #14935a;
   --green-soft: #e7f6ee;
+  --green-line: #c4e7d4;
   --red: #c43b3b;
   --red-soft: #fbeaea;
   --shadow: 0 1px 2px rgba(16, 24, 40, 0.04), 0 10px 30px rgba(16, 24, 40, 0.07);
   --surface2: #f7f8fa; /* subtle raised surface (hover, mnemonic cells) */
+  --toast-bg: #15171a; /* dark toast on light page */
+  --toast-fg: #ffffff;
   --tab-bg: #e9ebef; /* tab strip background */
   --info: #3949ab;
   --info-soft: #eef2ff;
@@ -40,10 +43,13 @@
   --accent-soft: #2e2412;
   --green: #2dbd80;
   --green-soft: #14271d;
+  --green-line: #235340;
   --red: #e66a6a;
   --red-soft: #2c1a1a;
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 30px rgba(0, 0, 0, 0.5);
   --surface2: #20242b;
+  --toast-bg: #2c323b; /* raised toast that reads against the dark page */
+  --toast-fg: #f3f5f8;
   --tab-bg: #20242b;
   --info: #9db4ff;
   --info-soft: #1a2030;
@@ -109,7 +115,7 @@ summary { cursor: pointer; }
   background: var(--green); margin-right: 6px; vertical-align: middle;
 }
 .badge.off.dot::before { background: var(--faint); }
-.badge.live { color: var(--green); border-color: #c4e7d4; background: var(--green-soft); }
+.badge.live { color: var(--green); border-color: var(--green-line); background: var(--green-soft); }
 .badge.live.dot::before { animation: pulse 1.5s ease-in-out infinite; }
 @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .3; } }
 .badge.testnet { color: var(--accent-ink); border-color: var(--accent); background: var(--accent-soft); }
@@ -182,7 +188,7 @@ textarea { resize: vertical; min-height: 84px; font-family: var(--mono); font-si
 /* ---- address / qr ---- */
 .qr { width: 220px; height: 220px; display: block; border-radius: 12px; border: 1px solid var(--line); }
 .addr-box {
-  font-family: var(--mono); font-size: 15px; background: #f7f8fa; border: 1px dashed var(--line-strong);
+  font-family: var(--mono); font-size: 15px; color: var(--ink); background: var(--surface2); border: 1px dashed var(--line-strong);
   border-radius: 11px; padding: 12px 14px; word-break: break-all; text-align: center;
 }
 .path { font-family: var(--mono); font-size: 12px; color: var(--faint); }
@@ -199,7 +205,7 @@ textarea { resize: vertical; min-height: 84px; font-family: var(--mono); font-si
 .words .w .n { color: var(--faint); font-size: 12px; width: 18px; text-align: right; }
 .words .w .t { font-weight: 600; }
 .warn-box {
-  background: var(--accent-soft); border: 1px solid #f6d8a8; color: #7a4d05;
+  background: var(--accent-soft); border: 1px solid var(--accent); color: var(--accent-ink);
   border-radius: 11px; padding: 12px 14px; font-size: 14px;
 }
 
@@ -223,7 +229,7 @@ textarea { resize: vertical; min-height: 84px; font-family: var(--mono); font-si
 .coin input[type=checkbox] { width: 18px; height: 18px; accent-color: var(--accent); }
 
 /* ---- review / summary ---- */
-.summary { background: #f7f8fa; border: 1px solid var(--line); border-radius: 12px; padding: 14px; }
+.summary { background: var(--surface2); border: 1px solid var(--line); border-radius: 12px; padding: 14px; }
 .summary .line { display: flex; justify-content: space-between; gap: 12px; padding: 5px 0; font-size: 14px; align-items: baseline; }
 .summary .line .k { color: var(--muted); flex: none; }
 .summary .line .v { font-family: var(--mono); text-align: right; min-width: 0; word-break: break-word; }
@@ -231,7 +237,7 @@ textarea { resize: vertical; min-height: 84px; font-family: var(--mono); font-si
 /* ---- misc ---- */
 .notice { border-radius: 11px; padding: 11px 13px; font-size: 14px; }
 .notice.err { background: var(--red-soft); color: var(--red); border: 1px solid #f1c9c9; }
-.notice.ok { background: var(--green-soft); color: var(--green); border: 1px solid #c4e7d4; }
+.notice.ok { background: var(--green-soft); color: var(--green); border: 1px solid var(--green-line); }
 .notice.info { background: var(--info-soft); color: var(--info); border: 1px solid var(--info-line); }
 .spinner {
   width: 18px; height: 18px; border: 2px solid var(--line-strong); border-top-color: var(--accent);
@@ -248,7 +254,7 @@ textarea { resize: vertical; min-height: 84px; font-family: var(--mono); font-si
 @keyframes spin { to { transform: rotate(360deg); } }
 .toast {
   position: fixed; left: 50%; bottom: 26px; transform: translateX(-50%);
-  background: var(--ink); color: #fff; padding: 10px 16px; border-radius: 10px;
+  background: var(--toast-bg); color: var(--toast-fg); padding: 10px 16px; border-radius: 10px;
   font-size: 14px; box-shadow: var(--shadow); z-index: 50; opacity: 0; pointer-events: none;
   transition: opacity .2s, transform .2s;
 }
