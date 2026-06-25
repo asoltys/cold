@@ -591,9 +591,23 @@ export class Wallet {
     const res = this.reservedSet();
     return this.utxos.reduce((s, u) => s + (res.has(utxoId(u)) ? u.value : 0), 0);
   }
-  // What the user can actually spend right now: everything minus gift locks.
+  // The spendable headline: confirmed coins plus our own unconfirmed change (the
+  // remainder of a spend we just made, so the spend debits immediately), minus
+  // anything locked in gifts. Unconfirmed *incoming* receives are NOT counted
+  // here — they show as pending until they confirm.
   get spendable() {
-    return this.total - this.lockedValue;
+    const res = this.reservedSet();
+    return this.utxos.reduce((s, u) => {
+      if (res.has(utxoId(u))) return s;
+      if (u.confirmed || u.chain === 1) return s + u.value;
+      return s;
+    }, 0);
+  }
+  // Unconfirmed incoming receives (not our change, not gift-locked) — shown as a
+  // separate pending line, kept out of the spendable headline.
+  get pendingIncoming() {
+    const res = this.reservedSet();
+    return this.utxos.reduce((s, u) => s + ((!u.confirmed && u.chain === 0 && !res.has(utxoId(u))) ? u.value : 0), 0);
   }
 
   _recomputeBalanceFromChains() {

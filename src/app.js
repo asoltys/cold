@@ -1342,7 +1342,45 @@ function claimScreen() {
           words.map((w, i) => h('div', { class: 'w' }, h('span', { class: 'n' }, i + 1), h('span', { class: 't' }, w)))
         ),
         h('div', { class: 'row gap6' }, copyBtn(wallet.mnemonic, t('copyPhrase'))),
-        h('button', { class: 'btn-primary btn-block', onClick: () => { ui.screen = 'wallet'; ui.claimStep = null; render(); } }, t('giftBackedUp'))
+        h('button', { class: 'btn-primary btn-block', onClick: () => { ui.confirm = pickConfirm(words); ui.claimError = ''; ui.claimStep = 'verify'; render(); } }, t('verifyBackup')),
+        h('button', { class: 'btn-block', onClick: () => { ui.screen = 'wallet'; ui.claimStep = null; render(); } }, t('skipVerification'))
+      )
+    );
+  }
+  if (ui.claimStep === 'verify') {
+    // Same word-confirmation as new-wallet creation: prove the recipient wrote
+    // the phrase down before sending them off into their freshly funded wallet.
+    const words = wallet.mnemonic.split(' ');
+    return h(
+      'div',
+      { class: 'col', style: 'gap:16px' },
+      brandHeader(false),
+      h('div', { class: 'card col' },
+        h('h3', { style: 'margin-top:0' }, t('recoveryPhrase')),
+        h('p', { class: 'muted', style: 'margin:0' }, t('confirmBackupIntro')),
+        ...ui.confirm.map((c, i) =>
+          h('label', { class: 'field' },
+            h('span', { class: 'lab' }, t('wordN', { n: c.index + 1 })),
+            h('input', {
+              type: 'text', class: 'mono-input', autocapitalize: 'none', autocomplete: 'off', spellcheck: 'false',
+              value: c.value, onInput: (e) => (ui.confirm[i].value = e.target.value.trim()),
+            })
+          )
+        ),
+        ui.claimError && h('div', { class: 'notice err' }, ui.claimError),
+        h('div', { class: 'row gap6' },
+          h('button', { class: 'btn-ghost', onClick: () => { ui.claimStep = 'backup'; ui.claimError = ''; render(); } }, t('back')),
+          h('button', {
+            class: 'btn-primary grow',
+            onClick: () => {
+              const ok = ui.confirm.every((c) => c.value.toLowerCase() === words[c.index]);
+              if (!ok) { ui.claimError = t('wordsMismatch'); render(); return; }
+              ui.screen = 'wallet'; ui.claimStep = null; ui.claimError = '';
+              render();
+            },
+          }, t('openWallet'))
+        ),
+        h('button', { class: 'btn-block', onClick: () => { ui.screen = 'wallet'; ui.claimStep = null; render(); } }, t('skipVerification'))
       )
     );
   }
@@ -1369,7 +1407,8 @@ function claimScreen() {
     ui.busy
       ? h('button', { class: 'btn-primary btn-block', disabled: true }, h('span', { class: 'spinner' }))
       : h('button', { class: 'btn-primary btn-block', onClick: doClaim },
-          t('claimBtn') + ' · ' + t('claimFeeNote', { n: fmtAmount(estFee) + ' ' + unitLabel() }))
+          t('claimBtn'), ' ',
+          h('span', { style: 'font-size:0.85em;opacity:0.9' }, '(' + t('claimFeeNote', { n: fmtAmount(estFee) + ' ' + unitLabel() }) + ')'))
   );
 }
 
@@ -1510,20 +1549,21 @@ function balanceCard() {
   // Only dim on the very first load; background updates happen silently.
   const firstLoad = wallet.scanning && !wallet.loaded;
   const locked = wallet.lockedValue;
+  const pending = wallet.pendingIncoming;
   return h(
     'div',
     { class: 'card balance' },
     h('div', { class: 'small faint', style: 'text-transform:uppercase;letter-spacing:.05em' }, t('balance')),
-    // Headline is the spendable, projected balance (confirmed + mempool, minus
-    // coins locked in unclaimed gifts), so both a pending spend and a reserved
-    // gift are debited immediately rather than waiting to confirm/claim.
+    // Headline is the spendable balance: confirmed coins plus our own pending
+    // change, minus gift locks — so a pending spend debits immediately, while a
+    // pending incoming receive stays out of it until it confirms.
     h('div', { class: 'amt', style: firstLoad ? 'opacity:.3' : '' }, fmtAmount(wallet.spendable), ' ', unitTag('unit')),
-    wallet.pending > 0 || locked > 0
+    pending > 0 || locked > 0
       ? h(
           'div',
           { class: 'split' },
-          wallet.pending > 0
-            ? h('div', {}, h('div', { class: 'k' }, t('pending')), h('div', { class: 'v pending' }, fmtAmount(wallet.pending), ' ', unitTag()))
+          pending > 0
+            ? h('div', {}, h('div', { class: 'k' }, t('pending')), h('div', { class: 'v pending' }, fmtAmount(pending), ' ', unitTag()))
             : null,
           locked > 0
             ? h('div', {}, h('div', { class: 'k' }, t('lockedInGifts')), h('div', { class: 'v' }, fmtAmount(locked), ' ', unitTag()))
