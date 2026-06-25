@@ -161,6 +161,9 @@ function toggleTheme() {
 // browser requires a gesture). The link's visibility is driven by a persisted
 // flag rather than the live event so it's present on the first paint after a
 // refresh (no layout shift); the event only supplies the prompt to replay.
+// We deliberately do NOT call e.preventDefault(): modern Chrome shows no banner
+// of its own to suppress, and preventDefault-without-prompt() logs a console
+// warning. The event stays usable for our own e.prompt() on tap.
 const INSTALLABLE_KEY = 'btc-wallet-installable';
 let installPrompt = null;
 function isStandalone() {
@@ -180,7 +183,6 @@ function setInstallable(v) {
 }
 if (typeof window !== 'undefined') {
   window.addEventListener('beforeinstallprompt', (e) => {
-    e.preventDefault();
     installPrompt = e;
     // Only re-render if this changes what's on screen; on a refresh the link is
     // already shown from the persisted flag, so nothing moves.
