@@ -11,7 +11,7 @@
 import { HDKey } from '@scure/bip32';
 import { generateMnemonic, mnemonicToSeedSync, validateMnemonic } from '@scure/bip39';
 import { wordlist } from '@scure/bip39/wordlists/english';
-import { hex, base64urlnopad, base58check } from '@scure/base';
+import { hex, base64urlnopad, base32nopad, base58check } from '@scure/base';
 import { sha256 } from '@noble/hashes/sha256';
 import { scrypt } from '@noble/hashes/scrypt';
 import { randomBytes } from '@noble/hashes/utils';
@@ -19,6 +19,7 @@ import { xchacha20poly1305 } from '@noble/ciphers/chacha.js';
 import { utf8ToBytes, bytesToUtf8 } from '@noble/ciphers/utils.js';
 import * as btc from '@scure/btc-signer';
 import { p2wpkh } from '@scure/btc-signer/payment';
+import { concatBytes } from '@scure/btc-signer/utils.js';
 
 import { Api, pool, wsUrl } from './api.js';
 import { NostrSync, getSyncConfig } from './nostr.js';
@@ -1067,7 +1068,7 @@ export class Wallet {
 
     for (const u of sel) this.reservedSet().add(utxoId(u));
     this._saveReserved();
-    return { code: base64urlnopad.encode(t.toPSBT()), amount: Number(keepChange ? gift : sum), reserved: sel.map(utxoId) };
+    return { code: base32nopad.encode(_encodeCompactGift(t)), amount: Number(keepChange ? gift : sum), reserved: sel.map(utxoId) };
   }
 
   // Gift the entire spendable balance: a no-change sweep of all unreserved
@@ -1738,6 +1739,65 @@ export function giftMinimum(feeRate) {
   return Math.max(546, 294 + claimFee);
 }
 
+// ---- compact gift codec ----------------------------------------------------
+// A gift link used to carry a full PSBT (verbose). The claimer only needs the
+// presigned inputs (outpoint, amount, pubkey, signature) and the sender's
+// committed change output, so we serialize just those — ~25% smaller, and (via
+// base32 + an uppercase /g/ URL) it scans in the QR's denser alphanumeric mode.
+// Legacy base64url-PSBT links still claim; _giftTx auto-detects the format.
+const GIFT_MAGIC = 0x01;
+const _u8 = (n) => Uint8Array.of(n & 0xff);
+const _le32 = (n) => { const b = new Uint8Array(4); new DataView(b.buffer).setUint32(0, n >>> 0, true); return b; };
+const _le64 = (n) => { const b = new Uint8Array(8); new DataView(b.buffer).setBigUint64(0, BigInt(n), true); return b; };
+
+function _encodeCompactGift(tx) {
+  const hasChange = tx.outputsLength > 0;
+  const parts = [_u8(GIFT_MAGIC), _u8(hasChange ? 1 : 0), _u8(tx.inputsLength)];
+  for (let i = 0; i < tx.inputsLength; i++) {
+    const inp = tx.getInput(i);
+    const [pubkey, sig] = inp.partialSig[0]; // pubkey(33), sig = DER + sighash byte
+    parts.push(inp.txid, _le32(inp.index), _le64(inp.witnessUtxo.amount), pubkey, _u8(sig.length), sig);
+  }
+  if (hasChange) {
+    const o = tx.getOutput(0); // p2wpkh change: script = [00 14 <20-byte hash>]
+    parts.push(_le64(o.amount), o.script.slice(2));
+  }
+  return concatBytes(...parts);
+}
+
+function _decodeCompactGift(bytes) {
+  let p = 0;
+  const rd = (n) => bytes.slice(p, (p += n));
+  const r32 = () => { const v = new DataView(bytes.buffer, bytes.byteOffset + p, 4).getUint32(0, true); p += 4; return v; };
+  const r64 = () => { const v = new DataView(bytes.buffer, bytes.byteOffset + p, 8).getBigUint64(0, true); p += 8; return v; };
+  p++; // magic
+  const hasChange = !!(bytes[p++] & 1);
+  const n = bytes[p++];
+  const t = new btc.Transaction({ allowUnknownOutputs: true });
+  for (let i = 0; i < n; i++) {
+    const txid = rd(32), vout = r32(), amount = r64(), pubkey = rd(33), sigLen = bytes[p++], sig = rd(sigLen);
+    const pay = p2wpkh(pubkey, btc.NETWORK); // witness-program .script is network-independent
+    // second arg true: re-add an already-signed input without tripping the sign-status guard
+    t.addInput({ txid, index: vout, witnessUtxo: { script: pay.script, amount }, sighashType: sig[sig.length - 1], partialSig: [[pubkey, sig]] }, true);
+  }
+  if (hasChange) {
+    const amount = r64();
+    const hash = rd(20);
+    t.addOutput({ script: concatBytes(_u8(0x00), _u8(0x14), hash), amount }, true);
+  }
+  return t;
+}
+
+// Parse a gift code to a Transaction. New format: base32(compact). Legacy:
+// base64url(PSBT). Auto-detected via the compact magic byte.
+function _giftTx(code) {
+  try {
+    const b = base32nopad.decode(code.toUpperCase());
+    if (b[0] === GIFT_MAGIC) return _decodeCompactGift(b);
+  } catch {}
+  return btc.Transaction.fromPSBT(base64urlnopad.decode(code));
+}
+
 function _sumInputs(tx) {
   let inAmt = 0n;
   for (let i = 0; i < tx.inputsLength; i++) inAmt += tx.getInput(i).witnessUtxo.amount;
@@ -1753,7 +1813,7 @@ function _giftChange(tx) {
 // re-claiming would be a doomed double-spend. Used to gate the claim screen.
 export function giftOutpoints(code) {
   try {
-    const tx = btc.Transaction.fromPSBT(base64urlnopad.decode(code));
+    const tx = _giftTx(code);
     const out = [];
     for (let i = 0; i < tx.inputsLength; i++) {
       const inp = tx.getInput(i);
@@ -1766,7 +1826,7 @@ export function giftOutpoints(code) {
 }
 export function previewGift(code) {
   try {
-    const tx = btc.Transaction.fromPSBT(base64urlnopad.decode(code));
+    const tx = _giftTx(code);
     // room is the full amount the claimer receives (inputs minus our change);
     // the claim fee is subtracted from it at claim time, so report inputs too
     // so the caller can size that fee for this PSBT.
@@ -1777,7 +1837,7 @@ export function previewGift(code) {
 }
 
 export function buildClaimTx(code, toAddress, feeRate, net) {
-  const tx = btc.Transaction.fromPSBT(base64urlnopad.decode(code));
+  const tx = _giftTx(code);
   const room = _sumInputs(tx) - _giftChange(tx);
   const fee = BigInt(Math.max(1, Math.ceil((11 + 68 * tx.inputsLength + 31 * 2) * Math.max(1, Math.round(feeRate)))));
   const out = room - fee;

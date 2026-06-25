@@ -1081,7 +1081,7 @@ function pubkeyCard() {
 // Gift link: presign a chosen amount as a #gift= PSBT that whoever opens claims
 // into a fresh wallet only they control. The coin is reserved until claimed.
 function giftUrl() {
-  return `${location.origin}/#gift=${ui.giftCode}`;
+  return `${location.origin}/g/${ui.giftCode}`;
 }
 function giftRate() {
   return (wallet.feeRates && wallet.feeRates.halfHourFee) || 5;
@@ -1170,7 +1170,10 @@ function giftCard() {
     h('div', { class: 'warn-box' }, t('giftLinkWarn')),
     ui.giftCode
       ? h('div', { class: 'col', style: 'align-items:center;gap:10px' },
-          h('div', { html: qrSvg(giftUrl(), { ec: 'L' }) }),
+          // Uppercase the whole URL + alphanumeric mode → much smaller QR. The
+          // domain is case-insensitive and the base32 code is already uppercase;
+          // the opener parses /g/ and the code case-insensitively.
+          h('div', { html: qrSvg(giftUrl().toUpperCase(), { ec: 'L', mode: 'Alphanumeric' }) }),
           h('div', { class: 'addr-box break', style: 'width:100%;font-size:12px' }, giftUrl()),
           h('div', { class: 'row gap6 wrap' },
             copyBtn(giftUrl(), t('copyLink')),
@@ -1393,15 +1396,22 @@ function goHome() {
 }
 
 // ================================================================ GIFT / CLAIM
-// Read a #gift=<psbt> link, returning the code (and scrubbing it from the URL so
-// the bearer instrument doesn't linger in the address bar / history). Validates
-// that it decodes to a real gift.
+// Read a gift link, returning the code (and scrubbing it from the URL so the
+// bearer instrument doesn't linger in the address bar / history). New links are
+// /g/<base32-compact>; legacy links are #gift=<base64url-psbt>. Both validate by
+// decoding to a real gift.
 function readGiftHash() {
   try {
-    const m = location.hash.match(/^#gift=([A-Za-z0-9_-]+)$/);
-    if (!m) return null;
-    history.replaceState(null, '', location.pathname + location.search);
-    return previewGift(m[1]) ? m[1] : null;
+    let code = null;
+    const pm = location.pathname.match(/^\/g\/([A-Za-z0-9]+)\/?$/i); // new path form
+    if (pm) code = pm[1];
+    else {
+      const hm = location.hash.match(/^#gift=([A-Za-z0-9_-]+)$/); // legacy hash form
+      if (hm) code = hm[1];
+    }
+    if (!code) return null;
+    history.replaceState(null, '', '/');
+    return previewGift(code) ? code : null;
   } catch {
     return null;
   }
