@@ -367,6 +367,7 @@ export class Wallet {
         this._recomputeBalanceFromChains();
         this.loaded = true;
         this.saveCache();
+        this.retrack(); // a new pending coin may have changed the watched set
         this.emit();
       }
     } catch {
@@ -477,6 +478,7 @@ export class Wallet {
     this._recomputeBalanceFromChains();
     this.loaded = true;
     this.saveCache();
+    this.retrack(); // watch this address over the socket if its coin is pending
     this.emit();
     return used;
   }
@@ -1105,29 +1107,34 @@ export class Wallet {
     return wsUrl(this.netName);
   }
 
-  // Only the fresh frontier needs realtime watching: the next receive address
-  // (incoming deposits) and the next change address (our change landing). Coin
-  // spends are handled by the post-send refresh and cross-device Nostr sync, so
-  // we don't track coin addresses — which also stays under the relay's 10-addr
-  // per-connection limit.
+  // What realtime watches: the fresh frontier (next receive + next change), plus
+  // any address holding an unconfirmed coin — so a pending deposit's confirmation
+  // pushes instantly instead of waiting for a poll. Capped at the socket's 10-
+  // address-per-connection limit (frontier first, then pending coins).
   watchedAddresses() {
-    return [
+    const set = new Set([
       this.derive(0, this.nextReceiveIndex).address,
       this.derive(1, this.nextChangeIndex).address,
-    ];
+    ]);
+    for (const u of this.utxos) {
+      if (set.size >= 10) break;
+      if (!u.confirmed) set.add(u.address);
+    }
+    return [...set];
   }
 
   startRealtime() {
     if (this.offline) return;
     this.stopRealtime();
-    // Frontier poll (next receive/change address only). While the socket is live
-    // it pushes deposits instantly, so we poll just as a slow half-open-socket
-    // safety net (~25s). When the socket is down, poll fast (~6s) so receives
-    // still show quickly. The 3s tick is a cheap time check — it issues no
-    // request unless one is due, which keeps REST volume (and 429s) low.
+    // Frontier poll (next receive/change + any pending-coin address). While the
+    // socket is live and nothing is pending it's just a slow half-open-socket
+    // safety net (~25s). When the socket is down, OR a coin is waiting to
+    // confirm, poll fast (~6s) so receives and confirmations show quickly. The
+    // 3s tick is a cheap time check — it issues no request unless one is due.
     this._pollTimer = setInterval(() => {
       if (this.offline) return;
-      const due = this.live ? 25000 : 6000;
+      const pending = this.utxos.some((u) => !u.confirmed);
+      const due = this.live && !pending ? 25000 : 6000;
       if (Date.now() - (this._lastPoll || 0) < due) return;
       this._lastPoll = Date.now();
       this.refreshLive();

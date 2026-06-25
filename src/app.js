@@ -66,7 +66,7 @@ const ui = {
   giftsPage: 0, // History: current page within the all-gifts list
   addrScan: false, // Settings: showing the per-address rescan list
   addrScanPage: 0, // Settings: current page within the address list
-  rescanningAddr: null, // 'chain/index' of the address currently rescanning
+  rescanning: new Set(), // 'chain/index' ids queued/in-flight for rescan
   send: blankSend(),
   draft: null, // built tx summary awaiting review
   broadcastTx: null, // scanned signed tx awaiting broadcast confirmation
@@ -915,18 +915,21 @@ function brandHeader(withLock) {
 // The phrase is gated: the real words are never put in the DOM until "Reveal",
 // so the warning is read first.
 // Rescan a single address on demand — recovers a deposit to a reused old
-// address without a full wallet rescan.
+// address without a full wallet rescan. Multiple can be queued at once; the
+// API layer's global scheduler serializes and spaces the underlying requests
+// (and backs off on 429), so a flurry of clicks stays within the rate limit.
 async function doRescanAddress(chain, index) {
   if (wallet.offline) { toast(t('scanOffline')); return; }
-  ui.rescanningAddr = chain + '/' + index;
+  const id = chain + '/' + index;
+  if (ui.rescanning.has(id)) return; // already queued
+  ui.rescanning.add(id);
   render();
   try {
     await wallet.rescanAddress(chain, index);
-    toast(t('rescanDone'));
   } catch (e) {
     toast(e.message || t('rescanFailed'));
   }
-  ui.rescanningAddr = null;
+  ui.rescanning.delete(id);
   render();
 }
 
@@ -948,7 +951,7 @@ function addressScanView() {
       h('div', { class: 'list' },
         ...slice.map((a) => {
           const id = a.chain + '/' + a.index;
-          const busy = ui.rescanningAddr === id;
+          const busy = ui.rescanning.has(id);
           return h('div', { class: 'item' },
             h('div', { class: 'grow' },
               h('div', { class: 'mono small break' }, shortAddr(a.address, 16, 10),
@@ -957,7 +960,7 @@ function addressScanView() {
             ),
             busy
               ? h('button', { class: 'btn-sm', disabled: true }, h('span', { class: 'spinner sm' }))
-              : h('button', { class: 'btn-sm', disabled: !!ui.rescanningAddr, onClick: () => doRescanAddress(a.chain, a.index) }, t('rescanOne'))
+              : h('button', { class: 'btn-sm', onClick: () => doRescanAddress(a.chain, a.index) }, t('rescanOne'))
           );
         })
       ),
