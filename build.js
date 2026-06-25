@@ -22,7 +22,7 @@ const STATIC = ['icon-192.png', 'icon-512.png', 'icon-maskable-512.png', 'icon.s
 
 const MANIFEST = {
   id: '/',
-  name: 'Hal Wallet',
+  name: 'Hal',
   short_name: 'Hal',
   description: 'Self-custody Bitcoin wallet that runs entirely in your browser.',
   start_url: './',
@@ -100,7 +100,7 @@ const PWA_HEAD = `<link rel="manifest" href="manifest.webmanifest">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
-<meta name="apple-mobile-web-app-title" content="Hal Wallet">
+<meta name="apple-mobile-web-app-title" content="Hal">
 <link rel="apple-touch-icon" href="icon-192.png">
 `;
 
@@ -142,7 +142,7 @@ export async function buildHtml({ minify = true, pwa = minify } = {}) {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
 <meta name="color-scheme" content="light dark">
-<title>Hal Wallet</title>
+<title>Hal</title>
 <link rel="icon" href="${FAVICON}">
 <script>try{var t=localStorage.getItem('btc-wallet-theme');if(t!=='dark'&&t!=='light')t=matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light';document.documentElement.dataset.theme=t;}catch(e){}</script>
 ${pwa ? PWA_HEAD : ''}<style>${css}</style>
