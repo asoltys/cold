@@ -49,6 +49,7 @@ const ui = {
   giftAmount: '', // gift-create amount input
   giftCode: null, // last-created gift PSBT code
   giftError: '',
+  giftMax: false, // gift the whole spendable balance (no-change sweep)
   giftSplitOffer: null, // { amt, lock, freed, fee } when offering to split a coin first
   revokeId: null, // outpoint of a gift being revoked (confirm state)
   claimCode: null, // gift code being claimed (opened from a #gift= link)
@@ -876,6 +877,7 @@ function lock() {
   ui.giftAmount = '';
   ui.giftCode = null;
   ui.giftError = '';
+  ui.giftMax = false;
   ui.giftSplitOffer = null;
   ui.revokeId = null;
   ui.receiveSeenIndex = null;
@@ -1007,17 +1009,28 @@ function giftRate() {
 }
 function createGiftLink() {
   const rate = giftRate();
+  if (ui.giftMax) { doCreateGiftAll(rate); return; }
   const min = giftMinimum(rate);
   const amt = parseAmount(ui.giftAmount, unit); // entered in the current display unit
   if (!amt || amt < min) { ui.giftError = t('giftAmountInvalid', { n: fmtAmount(min) + ' ' + unitLabel() }); render(); return; }
+  const spendable = wallet.spendable;
+  if (amt > spendable) { ui.giftError = t('giftExceedsBalance'); render(); return; }
+  // A specific-amount gift must leave us a dust change output (the gift PSBT
+  // commits one). If the amount is so close to the balance that no dust change
+  // is possible, point the user at Max to gift the whole balance instead.
+  const lock = wallet.giftLockPreview(amt);
+  if (lock == null) {
+    ui.giftError = t('giftNeedsHeadroom', { n: fmtAmount(Math.max(0, spendable - 294)) + ' ' + unitLabel() });
+    render();
+    return;
+  }
   // Creating the gift now locks the whole source coin until it's claimed. If
   // best-fit can't find a near-exact coin, a pre-split would shrink the locked
   // change down to a dust pad (294) — worth offering only when the liquidity it
   // frees exceeds the split's own fee (otherwise you'd pay more than you regain).
-  const lock = wallet.giftLockPreview(amt);
   const splitFee = Math.ceil((11 + 68 + 31 * 2) * Math.max(1, Math.round(rate)));
-  const freed = lock != null ? lock - amt - 294 : 0;
-  if (lock != null && freed > splitFee && !wallet.offline) {
+  const freed = lock - amt - 294;
+  if (freed > splitFee && !wallet.offline) {
     ui.giftSplitOffer = { amt, lock, freed, fee: splitFee };
     ui.giftError = '';
     render();
@@ -1033,6 +1046,19 @@ function doCreateGift(amt, rate) {
   } catch (e) {
     ui.giftError = e.message;
     ui.giftSplitOffer = null;
+  }
+  render();
+}
+// Gift the whole spendable balance as a no-change sweep (the recipient receives
+// everything minus their claim fee).
+function doCreateGiftAll(rate) {
+  try {
+    ui.giftCode = wallet.createGiftAll(rate).code;
+    ui.giftError = '';
+    ui.giftMax = false;
+    ui.giftSplitOffer = null;
+  } catch (e) {
+    ui.giftError = e.message;
   }
   render();
 }
@@ -1069,7 +1095,7 @@ function giftCard() {
           h('div', { class: 'addr-box break', style: 'width:100%;font-size:12px' }, giftUrl()),
           h('div', { class: 'row gap6 wrap' },
             copyBtn(giftUrl(), t('copyLink')),
-            h('button', { class: 'btn-sm grow', onClick: () => { ui.giftCode = null; ui.giftAmount = ''; render(); } }, t('giftAnother'))
+            h('button', { class: 'btn-sm grow', onClick: () => { ui.giftCode = null; ui.giftAmount = ''; ui.giftMax = false; render(); } }, t('giftAnother'))
           )
         )
       : ui.giftSplitOffer
@@ -1092,10 +1118,13 @@ function giftCard() {
       : h('div', { class: 'col gap6' },
           h('div', { class: 'input-group' },
             h('input', { type: 'number', step: unit === 'sats' ? '1' : '0.00000001', min: '0', inputmode: 'decimal', placeholder: t('giftAmountLabel'),
-              value: ui.giftAmount, onInput: (e) => (ui.giftAmount = e.target.value) }),
+              disabled: ui.giftMax,
+              value: ui.giftMax ? (unit === 'sats' ? String(wallet.spendable) : fmtBtc(wallet.spendable)) : ui.giftAmount,
+              onInput: (e) => (ui.giftAmount = e.target.value) }),
+            h('button', { type: 'button', class: ui.giftMax ? 'btn-primary' : '', onClick: () => { ui.giftMax = !ui.giftMax; ui.giftError = ''; render(); } }, t('max')),
             h('div', { style: 'display:flex;align-items:center' }, unitTag())
           ),
-          h('div', { class: 'small faint' }, t('giftMinNote', { n: fmtAmount(giftMinimum(giftRate())) + ' ' + unitLabel() })),
+          h('div', { class: 'small faint' }, ui.giftMax ? t('giftAllNote') : t('giftMinNote', { n: fmtAmount(giftMinimum(giftRate())) + ' ' + unitLabel() })),
           ui.giftError && h('div', { class: 'notice err' }, ui.giftError),
           h('button', { class: 'btn-block', onClick: createGiftLink }, t('giftLinkReveal'))
         ),
@@ -1667,7 +1696,7 @@ function giftView() {
     'div',
     { class: 'col', style: 'gap:12px' },
     giftCard(),
-    h('button', { class: 'btn-ghost btn-block', onClick: () => { ui.giftMode = false; ui.giftCode = null; ui.giftError = ''; ui.giftSplitOffer = null; ui.revokeId = null; render(); } }, t('back'))
+    h('button', { class: 'btn-ghost btn-block', onClick: () => { ui.giftMode = false; ui.giftCode = null; ui.giftError = ''; ui.giftMax = false; ui.giftSplitOffer = null; ui.revokeId = null; render(); } }, t('back'))
   );
 }
 

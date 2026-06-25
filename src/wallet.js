@@ -914,7 +914,7 @@ export class Wallet {
   _selectGiftCoins(gift) {
     const DUST = 294n;
     const need = gift + DUST;
-    const avail = this.utxos.filter((u) => u.confirmed && !this.isReserved(utxoId(u)));
+    const avail = this.utxos.filter((u) => !this.isReserved(utxoId(u)) && (u.confirmed || u.chain === 1));
     const single = avail.filter((u) => BigInt(u.value) >= need).sort((a, b) => a.value - b.value)[0];
     if (single) return [single];
     const sel = [];
@@ -935,27 +935,43 @@ export class Wallet {
     return sel ? sel.reduce((s, u) => s + u.value, 0) : null;
   }
 
-  // Build a SIGHASH_SINGLE-signed gift from already-chosen coins: output0 =
-  // change back to us (cryptographically fixed), leaving the rest for the
-  // claimer to direct to their own fresh address. Reserves the coins, returns
-  // { code, amount, reserved }. Callers ensure sum(sel) >= gift + dust.
+  // Build a signed gift from already-chosen coins. If the gift leaves a viable
+  // (>= dust) change, output0 is that change back to us, cryptographically fixed
+  // by signing input0 SIGHASH_SINGLE (the rest SIGHASH_NONE) — so our change is
+  // locked while the claimer is free to add their own output. If there's no
+  // viable change (a whole-balance gift), there's no output at all and every
+  // input is SIGHASH_NONE, so the claimer sweeps the entire amount. Reserves the
+  // coins; returns { code, amount, reserved } where amount is what the claimer
+  // receives before their fee (the gift, or the whole swept sum).
   _buildGiftPsbt(sel, gift) {
+    const DUST = 294n;
     const sum = sel.reduce((s, u) => s + BigInt(u.value), 0n);
-    const change = sum - gift; // back to us, >= DUST by construction
+    const change = sum - gift;
+    const keepChange = change >= DUST;
+    const sigOf = (i) => (keepChange && i === 0 ? btc.SigHash.SINGLE : btc.SigHash.NONE);
     const t = new btc.Transaction({ allowUnknownOutputs: true });
-    // First input commits the change output (SIGHASH_SINGLE on output 0); the
-    // rest commit only the inputs (SIGHASH_NONE). Together: inputs and our
-    // change are locked, while the claimer is free to add their own output.
     sel.forEach((u, i) => {
       const pay = p2wpkh(this.derive(u.chain, u.index).pubkey, this.netCfg.net);
-      t.addInput({ ...pay, txid: u.txid, index: u.vout, sighashType: i === 0 ? btc.SigHash.SINGLE : btc.SigHash.NONE, witnessUtxo: { script: pay.script, amount: BigInt(u.value) } });
+      t.addInput({ ...pay, txid: u.txid, index: u.vout, sighashType: sigOf(i), witnessUtxo: { script: pay.script, amount: BigInt(u.value) } });
     });
-    t.addOutputAddress(this.freshChange().address, change, this.netCfg.net);
-    sel.forEach((u, i) => t.signIdx(this.node(u.chain, u.index).privateKey, i, [i === 0 ? btc.SigHash.SINGLE : btc.SigHash.NONE]));
+    if (keepChange) t.addOutputAddress(this.freshChange().address, change, this.netCfg.net);
+    sel.forEach((u, i) => t.signIdx(this.node(u.chain, u.index).privateKey, i, [sigOf(i)]));
 
     for (const u of sel) this.reservedSet().add(utxoId(u));
     this._saveReserved();
-    return { code: base64urlnopad.encode(t.toPSBT()), amount: Number(gift), reserved: sel.map(utxoId) };
+    return { code: base64urlnopad.encode(t.toPSBT()), amount: Number(keepChange ? gift : sum), reserved: sel.map(utxoId) };
+  }
+
+  // Gift the entire spendable balance: a no-change sweep of all unreserved
+  // spendable coins (confirmed, plus our own unconfirmed change). The claimer
+  // receives the whole amount minus their claim fee.
+  createGiftAll(feeRate) {
+    const rate = Math.max(1, Math.round(feeRate));
+    const sel = this.utxos.filter((u) => !this.isReserved(utxoId(u)) && (u.confirmed || u.chain === 1));
+    if (!sel.length) throw new Error('No coins available to gift.');
+    const sum = sel.reduce((s, u) => s + BigInt(u.value), 0n);
+    if (sum < BigInt(giftMinimum(rate))) throw new Error('Gift amount is too small.');
+    return this._buildGiftPsbt(sel, sum); // change = 0 → no-change sweep
   }
 
   // Build a gift link from a best-fit coin, locking the least value. No fee is
@@ -1536,13 +1552,18 @@ function _sumInputs(tx) {
   for (let i = 0; i < tx.inputsLength; i++) inAmt += tx.getInput(i).witnessUtxo.amount;
   return inAmt;
 }
+// The sender's change committed in a gift PSBT, or 0 for a no-change (whole-
+// balance) gift that has no outputs at all.
+function _giftChange(tx) {
+  return tx.outputsLength > 0 ? tx.getOutput(0).amount : 0n;
+}
 export function previewGift(code) {
   try {
     const tx = btc.Transaction.fromPSBT(base64urlnopad.decode(code));
     // room is the full amount the claimer receives (inputs minus our change);
     // the claim fee is subtracted from it at claim time, so report inputs too
     // so the caller can size that fee for this PSBT.
-    return { room: Number(_sumInputs(tx) - tx.getOutput(0).amount), inputs: tx.inputsLength };
+    return { room: Number(_sumInputs(tx) - _giftChange(tx)), inputs: tx.inputsLength };
   } catch {
     return null;
   }
@@ -1550,7 +1571,7 @@ export function previewGift(code) {
 
 export function buildClaimTx(code, toAddress, feeRate, net) {
   const tx = btc.Transaction.fromPSBT(base64urlnopad.decode(code));
-  const room = _sumInputs(tx) - tx.getOutput(0).amount;
+  const room = _sumInputs(tx) - _giftChange(tx);
   const fee = BigInt(Math.max(1, Math.ceil((11 + 68 * tx.inputsLength + 31 * 2) * Math.max(1, Math.round(feeRate)))));
   const out = room - fee;
   if (out < 294n) throw new Error('Gift is too small to claim at this fee rate.');
