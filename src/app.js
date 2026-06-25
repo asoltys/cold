@@ -1167,7 +1167,6 @@ function giftCard() {
     { class: 'card col' },
     h('h3', {}, t('giftLink')),
     h('p', { class: 'small muted', style: 'margin:0' }, t('giftLinkDesc')),
-    h('div', { class: 'warn-box' }, t('giftLinkWarn')),
     ui.giftCode
       ? h('div', { class: 'col', style: 'align-items:center;gap:10px' },
           // Uppercase the whole URL + alphanumeric mode → much smaller QR. The
