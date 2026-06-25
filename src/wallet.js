@@ -291,6 +291,8 @@ export class Wallet {
   async refreshLive() {
     if (this.offline || this._refreshing || this._polling) return;
     this._polling = true;
+    this._lastPoll = Date.now(); // any refresh (poll OR socket-open) resets the
+    // poll clock, so the two don't both fire back-to-back on load.
     let changed = false;
     try {
       const fresh = []; // frontier addresses found to be active this pass
@@ -1229,6 +1231,7 @@ export class Wallet {
     this._ws = ws;
     ws.onopen = () => {
       this.live = true;
+      this._wsBackoff = 0; // healthy again — reset the reconnect backoff
       this._lastMsg = Date.now();
       this.retrack();
       this.emit();
@@ -1353,7 +1356,12 @@ export class Wallet {
   _scheduleReconnect() {
     if (!this._wsWant) return;
     clearTimeout(this._wsRetry);
-    this._wsRetry = setTimeout(() => this._connectWs(), 4000);
+    // Exponential backoff starting small, so a first attempt that's transiently
+    // rejected (e.g. a stale rate-limit) retries in ~0.6s instead of a flat 4s —
+    // the wallet reaches Live quickly. Reset to 0 on a successful open.
+    this._wsBackoff = Math.min((this._wsBackoff || 0) + 1, 6);
+    const delay = Math.min(600 * 2 ** (this._wsBackoff - 1), 15000);
+    this._wsRetry = setTimeout(() => this._connectWs(), delay);
   }
 
   // Debounced: a payment may touch several of our addresses in one go.
