@@ -60,6 +60,9 @@ const ui = {
   tab: 'receive', // receive | send | history | settings
   receiveSeenIndex: null, // fresh receive index the user has acknowledged
   txDetail: null, // txid being viewed in the history detail view
+  txPage: 0, // History: current page of transactions (10 per page)
+  giftsAll: false, // History: showing the full paginated list of sent gifts
+  giftsPage: 0, // History: current page within the all-gifts list
   send: blankSend(),
   draft: null, // built tx summary awaiting review
   broadcastTx: null, // scanned signed tx awaiting broadcast confirmation
@@ -1546,6 +1549,7 @@ function tabsBar() {
         ui.tab = id;
         ui.revealShown = false; // re-mask the recovery phrase whenever tabs change
         ui.txDetail = null; // back to the history list when leaving/returning
+        ui.giftsAll = false; // and back to the paged history, not the all-gifts view
         ui.bump = null;
         ui.giftMode = false;
         render();
@@ -2230,6 +2234,56 @@ function giftHistoryItem(g) {
   );
 }
 
+function txHistoryItem(tx) {
+  const incoming = tx.net >= 0;
+  return h(
+    'div',
+    { class: 'item', style: 'cursor:pointer', onClick: () => { ui.txDetail = tx.txid; render(); } },
+    h('div', { class: `ico ${incoming ? 'in' : 'out'}` }, incoming ? '↓' : '↑'),
+    h('div', { class: 'grow' },
+      h('div', { class: 'row gap6' },
+        incoming ? t('received') : t('sent'),
+        tx.confirmed ? null : h('span', { class: 'tag pending' }, t('pendingTag'))
+      ),
+      h('div', { class: 'small faint' }, tx.confirmed ? timeAgo(tx.blockTime) : t('awaitingConfirmation'))
+    ),
+    h('div', { style: 'text-align:right' },
+      h('div', { class: incoming ? 'amount-pos' : 'amount-neg' }, (incoming ? '+' : '') + fmtAmount(tx.net)),
+      !incoming && tx.fee ? h('div', { class: 'small faint' }, t('feeShort', { x: fmtAmount(tx.fee) })) : null
+    )
+  );
+}
+
+// Prev / page-of / next controls. Returns null when there's only one page.
+const PAGE_SIZE = 10;
+function pager(page, total, onPage) {
+  const pages = Math.ceil(total / PAGE_SIZE);
+  if (pages <= 1) return null;
+  return h('div', { class: 'row between', style: 'align-items:center;padding-top:10px' },
+    h('button', { class: 'btn-sm', disabled: page <= 0, onClick: () => onPage(page - 1) }, t('prevPage')),
+    h('span', { class: 'small muted' }, t('pageXofY', { x: page + 1, y: pages })),
+    h('button', { class: 'btn-sm', disabled: page >= pages - 1, onClick: () => onPage(page + 1) }, t('nextPage'))
+  );
+}
+
+// Full paginated list of outstanding sent gifts, reached via "View all" when
+// there are more than fit inline on the History page.
+function giftsAllView(gifts) {
+  const pages = Math.ceil(gifts.length / PAGE_SIZE);
+  const page = Math.min(ui.giftsPage, Math.max(0, pages - 1));
+  const slice = gifts.slice(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE);
+  return h(
+    'div',
+    { class: 'card col', style: 'gap:12px' },
+    h('div', { class: 'row between' },
+      h('h3', { style: 'margin:0' }, t('giftReserved', { n: gifts.length })),
+      h('button', { class: 'btn-sm', onClick: () => { ui.giftsAll = false; ui.revokeId = null; render(); } }, t('back'))
+    ),
+    h('div', { class: 'list' }, ...slice.map(giftHistoryItem)),
+    pager(page, gifts.length, (p) => { ui.giftsPage = p; render(); })
+  );
+}
+
 function historyTab() {
   if (ui.bump) return bumpView();
   if (ui.txDetail) {
@@ -2249,35 +2303,27 @@ function historyTab() {
   // Outstanding sent gifts (reserved/reclaimed but unclaimed) sit above the
   // on-chain history; they aren't transactions until claimed or revoked.
   const gifts = wallet.loaded ? wallet.outstandingGifts() : [];
+  if (ui.giftsAll && gifts.length) return giftsAllView(gifts);
   if (!wallet.txs.length && !gifts.length)
     return h('div', { class: 'card' }, h('p', { class: 'muted center', style: 'margin:0' }, t('noTxYet')));
+
+  // Show at most 3 gifts inline; the rest live behind "View all". Transactions
+  // paginate 10 at a time.
+  const giftsHead = gifts.slice(0, 3);
+  const txPages = Math.ceil(wallet.txs.length / PAGE_SIZE);
+  const txPage = Math.min(ui.txPage, Math.max(0, txPages - 1));
+  const txSlice = wallet.txs.slice(txPage * PAGE_SIZE, txPage * PAGE_SIZE + PAGE_SIZE);
   return h(
     'div',
     { class: 'card' },
-    h(
-      'div',
-      { class: 'list' },
-      ...gifts.map(giftHistoryItem),
-      ...wallet.txs.map((tx) => {
-        const incoming = tx.net >= 0;
-        return h(
-          'div',
-          { class: 'item', style: 'cursor:pointer', onClick: () => { ui.txDetail = tx.txid; render(); } },
-          h('div', { class: `ico ${incoming ? 'in' : 'out'}` }, incoming ? '↓' : '↑'),
-          h('div', { class: 'grow' },
-            h('div', { class: 'row gap6' },
-              incoming ? t('received') : t('sent'),
-              tx.confirmed ? null : h('span', { class: 'tag pending' }, t('pendingTag'))
-            ),
-            h('div', { class: 'small faint' }, tx.confirmed ? timeAgo(tx.blockTime) : t('awaitingConfirmation'))
-          ),
-          h('div', { style: 'text-align:right' },
-            h('div', { class: incoming ? 'amount-pos' : 'amount-neg' }, (incoming ? '+' : '') + fmtAmount(tx.net)),
-            !incoming && tx.fee ? h('div', { class: 'small faint' }, t('feeShort', { x: fmtAmount(tx.fee) })) : null
-          )
-        );
-      })
+    h('div', { class: 'list' },
+      ...giftsHead.map(giftHistoryItem),
+      ...txSlice.map(txHistoryItem)
     ),
+    gifts.length > 3
+      ? h('button', { class: 'btn-sm btn-block', style: 'margin-top:8px', onClick: () => { ui.giftsAll = true; ui.giftsPage = 0; ui.revokeId = null; render(); } }, t('viewAllGifts', { n: gifts.length }))
+      : null,
+    pager(txPage, wallet.txs.length, (p) => { ui.txPage = p; render(); }),
     wallet.historyLoading
       ? h(
           'div',
