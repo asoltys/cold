@@ -2200,6 +2200,36 @@ function sendResultView() {
 }
 
 // ---------------------------------------------------------------- History
+// An outstanding sent gift shown in History: tappable to cancel (reclaim the
+// coin for a future payment, or revoke the link on-chain) without going through
+// the Send → gift card. Reuses the same confirm state and handlers.
+function giftHistoryItem(g) {
+  if (ui.revokeId === g.id) {
+    return h('div', { class: 'item col', style: 'align-items:stretch;gap:8px' },
+      h('span', { class: 'small muted' }, g.reserved ? t('giftReclaimPrompt') : t('giftRevokeConfirm')),
+      ui.busy
+        ? h('button', { class: 'btn-primary btn-block', disabled: true }, h('span', { class: 'spinner' }))
+        : h('div', { class: 'row gap6' },
+            g.reserved ? h('button', { class: 'btn-ghost grow', onClick: () => doReclaim(g.id) }, t('giftReclaim')) : null,
+            h('button', { class: 'btn-primary grow', onClick: () => doRevoke(g.id) }, t('giftRevoke'))
+          ),
+      ui.busy ? null : h('button', { class: 'btn-ghost btn-block', onClick: () => { ui.revokeId = null; render(); } }, t('back'))
+    );
+  }
+  return h('div', { class: 'item' },
+    h('div', { class: 'ico out' }, '🎁'),
+    h('div', { class: 'grow' },
+      h('div', { class: 'row gap6' }, t('giftHistoryTitle'),
+        h('span', { class: 'tag pending' }, g.reserved ? t('giftUnclaimedTag') : t('giftReclaimedTag'))),
+      g.reserved ? h('div', { class: 'small faint' }, t('lockedInGifts')) : null
+    ),
+    h('div', { style: 'text-align:right' },
+      g.value != null ? h('div', { class: 'amount' }, fmtAmount(g.value)) : null,
+      h('button', { class: 'btn-sm', style: 'margin-top:4px', onClick: () => { ui.revokeId = g.id; render(); } }, t('giftCancel'))
+    )
+  );
+}
+
 function historyTab() {
   if (ui.bump) return bumpView();
   if (ui.txDetail) {
@@ -2216,7 +2246,10 @@ function historyTab() {
       h('span', { class: 'spinner' }),
       wallet.historyLoading ? h('p', { class: 'small muted', style: 'margin:0' }, t('loadingHistory')) : null
     );
-  if (!wallet.txs.length)
+  // Outstanding sent gifts (reserved/reclaimed but unclaimed) sit above the
+  // on-chain history; they aren't transactions until claimed or revoked.
+  const gifts = wallet.loaded ? wallet.outstandingGifts() : [];
+  if (!wallet.txs.length && !gifts.length)
     return h('div', { class: 'card' }, h('p', { class: 'muted center', style: 'margin:0' }, t('noTxYet')));
   return h(
     'div',
@@ -2224,7 +2257,8 @@ function historyTab() {
     h(
       'div',
       { class: 'list' },
-      wallet.txs.map((tx) => {
+      ...gifts.map(giftHistoryItem),
+      ...wallet.txs.map((tx) => {
         const incoming = tx.net >= 0;
         return h(
           'div',
