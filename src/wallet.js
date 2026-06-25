@@ -1191,33 +1191,98 @@ export class Wallet {
     return hex.encode(h);
   }
   watchedScripthashes() {
-    return this._watchedTargets().map((t) => this._scripthash(t.chain, t.index));
+    // Also (re)build the scripthash -> derivation map so a data-carrying
+    // notification can be credited without re-deriving or hitting REST.
+    const map = new Map();
+    const shes = this._watchedTargets().map((t) => {
+      const sh = this._scripthash(t.chain, t.index);
+      map.set(sh, { chain: t.chain, index: t.index, address: this.derive(t.chain, t.index).address });
+      return sh;
+    });
+    this._shToTarget = map;
+    return shes;
+  }
+
+  // Credit a payment straight from a watcher push (no REST). The notification
+  // carries the matched outputs (vout + value) and confirmed flag; we add the
+  // coin, advance the frontier, and — for an incoming receive (chain 0) — record
+  // a pending history entry so the balance and "payment received" fire instantly.
+  // Returns false if we can't map the scripthash (caller falls back to a scan).
+  _applyTxNotification(sh, data) {
+    const tgt = this._shToTarget && this._shToTarget.get(sh);
+    if (!tgt || !data || !Array.isArray(data.outputs)) return false;
+    // Only credit incoming receives optimistically. A change output (chain 1) is
+    // our own send, where the spent input isn't in the push — crediting it alone
+    // would transiently overcount, so let the background reconcile handle it.
+    if (tgt.chain !== 0) return false;
+    const arr = this.receive;
+    let entry = arr.find((e) => e.index === tgt.index);
+    if (!entry) {
+      entry = { chain: tgt.chain, index: tgt.index, address: tgt.address, used: false, confirmed: 0, pending: 0 };
+      arr.push(entry);
+      this.addrMap.set(tgt.address, { chain: tgt.chain, index: tgt.index });
+    }
+    let changed = false;
+    let credited = 0;
+    for (const o of data.outputs) {
+      const id = `${data.txid}:${o.vout}`;
+      const have = this.utxos.find((u) => utxoId(u) === id);
+      if (!have) {
+        this.utxos.push({ txid: data.txid, vout: o.vout, value: o.value, address: tgt.address, chain: tgt.chain, index: tgt.index, confirmed: !!data.confirmed });
+        entry.used = true;
+        if (data.confirmed) entry.confirmed = (entry.confirmed || 0) + o.value;
+        else entry.pending = (entry.pending || 0) + o.value;
+        credited += o.value;
+        changed = true;
+      } else if (!have.confirmed && data.confirmed) {
+        have.confirmed = true;
+        entry.pending = Math.max(0, (entry.pending || 0) - o.value);
+        entry.confirmed = (entry.confirmed || 0) + o.value;
+        changed = true;
+      }
+    }
+    if (!changed) return true; // already knew about it (duplicate push)
+
+    // For an incoming receive, add a pending history row so History + the
+    // celebration update immediately. (Skip for change — that's our own send,
+    // whose net the send flow already recorded correctly.)
+    if (tgt.chain === 0 && credited > 0 && !this.txs.find((t) => t.txid === data.txid)) {
+      this.txs.push({ txid: data.txid, net: credited, fee: 0, vsize: 0, confirmed: !!data.confirmed, blockTime: 0, blockHeight: 0, firstSeen: data.confirmed ? 0 : Date.now() });
+    }
+    this.nextReceiveIndex = firstUnused(this.receive);
+    this.nextChangeIndex = firstUnused(this.change);
+    this.utxos.sort((a, b) => b.value - a.value);
+    this._sortTxs();
+    this._recomputeBalanceFromUtxos();
+    this.loaded = true;
+    this.saveCache();
+    this.retrack();      // a new frontier address may need subscribing
+    this.emit();         // balance updates NOW
+    this._scheduleRefresh(); // background reconcile for full accuracy (off critical path)
+    return true;
   }
 
   startRealtime() {
     if (this.offline) return;
     this.stopRealtime();
-    // Frontier poll (next receive/change + any pending-coin address). While the
-    // socket is live and nothing is pending it's just a slow half-open-socket
-    // safety net (~25s). When the socket is down, OR a coin is waiting to
-    // confirm, poll fast (~6s) so receives and confirmations show quickly. The
-    // 3s tick is a cheap time check — it issues no request unless one is due.
+    // Frontier poll — now purely a safety net. The watcher pushes incoming
+    // payments AND confirmations instantly with full data (credited via the WS
+    // with no REST), so when the socket is live we poll rarely (~30s) just in
+    // case a push was missed. When the socket is DOWN we poll faster: ~5s on the
+    // Receive tab (user is actively waiting) or while a coin is unconfirmed, else
+    // ~10s. This keeps mempool.space REST (and its 429s) to a trickle.
     this._pollTimer = setInterval(() => {
       if (this.offline) return;
-      // Active pending = an unconfirmed coin we still expect to confirm; stuck
-      // (purged, too-low-fee) txs don't keep us in the fast lane.
       const stuck = this._stuckTxids();
       const pending = this.utxos.some((u) => !u.confirmed && !stuck.has(u.txid));
-      // While the user sits on the Receive tab we poll the fresh receive address
-      // fast (~3s) regardless of Live — mempool's address push is unreliable, so
-      // this guarantees a near-instant arrival. One address, cheap.
-      if (this._watchReceive) {
-        if (Date.now() - (this._lastReceivePoll || 0) < 3000) return;
-        this._lastReceivePoll = Date.now();
-        this.pollReceiveFrontier();
-        return;
+      let due;
+      if (this.live) {
+        due = 30000; // WS handles the real work; this is a backstop only
+      } else if (this._watchReceive || pending) {
+        due = 5000;  // socket down + actively waiting → poll responsively
+      } else {
+        due = 10000;
       }
-      const due = this.live && !pending ? 25000 : 6000;
       if (Date.now() - (this._lastPoll || 0) < due) return;
       this._lastPoll = Date.now();
       this.refreshLive();
@@ -1338,15 +1403,16 @@ export class Wallet {
     return id;
   }
 
-  // A scripthash-status notification means a tx touched one of our addresses (a
-  // deposit, or a confirmation). We don't trust the pushed status payload — it's
-  // just the trigger; reconcile authoritative state over REST.
+  // A notification means a tx touched one of our addresses (a deposit, or a
+  // confirmation). If it carries the tx data (our watcher does), credit it
+  // instantly with no REST on the critical path; otherwise just trigger a scan.
   _handleRpc(line) {
     let msg;
     try { msg = JSON.parse(line); } catch { return; }
-    if (msg && msg.method === 'blockchain.scripthash.subscribe') {
-      this._scheduleRefresh();
-    }
+    if (!msg || msg.method !== 'blockchain.scripthash.subscribe') return;
+    const sh = msg.params && msg.params[0];
+    if (msg.data && sh && this._applyTxNotification(sh, msg.data)) return;
+    this._scheduleRefresh();
   }
 
   // Subscribe any watched scripthashes not yet subscribed on this connection.

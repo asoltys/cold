@@ -121,25 +121,37 @@ const startSub = (host, port, topic, onMessage) => new Promise((resolve) => {
 
 const TX_OPTS = { allowUnknownOutputs: true, allowUnknownInputs: true, disableScriptCheck: true };
 
-// Push a notification to every client watching a scripthash this tx pays to.
-const notifyForTx = (raw) => {
+// Push a data-carrying notification to every client watching a scripthash this
+// tx pays. The notification includes the matched outputs (vout + value) and the
+// confirmed flag, so the client can credit the payment WITHOUT a REST round-trip
+// — keeping the rate-limited explorer off the critical path. `confirmed` is true
+// when the tx came from a block (rawblock), false from the mempool (rawtx).
+const notifyForTx = (raw, confirmed) => {
   let tx;
   try { tx = Transaction.fromRaw(raw, TX_OPTS); } catch { return; }
   const txid = tx.id;
-  const hit = new Set();
+  const byScript = new Map(); // scripthash -> [{ vout, value }]
   for (let i = 0; i < tx.outputsLength; i++) {
-    let script;
-    try { script = tx.getOutput(i).script; } catch { continue; }
-    if (!script) continue;
-    const sh = scripthashOf(script);
-    if (subs.has(sh)) hit.add(sh);
+    let o;
+    try { o = tx.getOutput(i); } catch { continue; }
+    if (!o || !o.script) continue;
+    const sh = scripthashOf(o.script);
+    if (!subs.has(sh)) continue;
+    if (!byScript.has(sh)) byScript.set(sh, []);
+    byScript.get(sh).push({ vout: i, value: Number(o.amount) });
   }
-  for (const sh of hit) {
+  for (const [sh, outputs] of byScript) {
     const set = subs.get(sh);
     if (!set) continue;
-    // Status param is the txid — the client ignores its value and just refreshes.
-    const note = JSON.stringify({ jsonrpc: '2.0', method: 'blockchain.scripthash.subscribe', params: [sh, txid] }) + '\n';
-    for (const ws of set) { try { ws.send(note); } catch {} }
+    const note = JSON.stringify({
+      jsonrpc: '2.0',
+      method: 'blockchain.scripthash.subscribe',
+      params: [sh, txid],
+      data: { txid, confirmed: !!confirmed, outputs },
+    }) + '\n';
+    let sent = 0;
+    for (const ws of set) { try { ws.send(note); sent++; } catch {} }
+    console.log(new Date().toISOString(), 'notify', sh.slice(0, 12), 'tx', txid.slice(0, 12), confirmed ? '(conf)' : '(mempool)', '->', sent);
   }
 };
 
@@ -180,7 +192,7 @@ const handleRawBlock = (raw) => {
     const size = rawTxSize(raw, offset);
     const txRaw = raw.subarray(offset, offset + size);
     offset += size;
-    try { notifyForTx(txRaw); } catch {}
+    try { notifyForTx(txRaw, true); } catch {}
   }
 };
 
@@ -194,7 +206,7 @@ const retry = async (host, port, topic, handler) => {
   }
 };
 
-retry(BC_HOST, RAWTX_PORT, 'rawtx', notifyForTx);
+retry(BC_HOST, RAWTX_PORT, 'rawtx', (raw) => notifyForTx(raw, false));
 retry(BC_HOST, RAWBLOCK_PORT, 'rawblock', handleRawBlock);
 
 // ---- minimal Electrum WS server -------------------------------------------
