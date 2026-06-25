@@ -379,6 +379,34 @@ export class Wallet {
     }
   }
 
+  // Enable/disable fast polling of the fresh receive address — set while the
+  // Receive tab is open so a deposit shows near-instantly even if the WS doesn't
+  // push it. Toggling on triggers an immediate check.
+  setWatchReceive(on) {
+    on = !!on;
+    if (on === !!this._watchReceive) return; // no change — avoid re-triggering
+    this._watchReceive = on;
+    if (on) { this._lastReceivePoll = 0; this.pollReceiveFrontier(); }
+  }
+
+  // Cheap single-address check of the next receive address. If it has activity,
+  // hand off to the full refreshLive (which pulls the coin + history and advances
+  // the frontier); otherwise do nothing. One request per call.
+  async pollReceiveFrontier() {
+    if (this.offline || this._polling || this._refreshing) return;
+    const idx = this.nextReceiveIndex;
+    const { address } = this.derive(0, idx);
+    try {
+      const info = await this.api.addressInfo(address);
+      const cs = info.chain_stats || {};
+      const ms = info.mempool_stats || {};
+      const used = (cs.tx_count || 0) > 0 || (ms.tx_count || 0) > 0;
+      if (used) await this.refreshLive();
+    } catch {
+      /* transient; next tick retries */
+    }
+  }
+
   // Re-check every address that currently holds a UTXO: refresh its balance from
   // chain/mempool stats and rebuild its UTXOs. This is what reconciles spends
   // (a held coin that's now gone) — confirmed or still in the mempool, regardless
@@ -1162,11 +1190,20 @@ export class Wallet {
       // (purged, too-low-fee) txs don't keep us in the fast lane.
       const stuck = this._stuckTxids();
       const pending = this.utxos.some((u) => !u.confirmed && !stuck.has(u.txid));
+      // While the user sits on the Receive tab we poll the fresh receive address
+      // fast (~3s) regardless of Live — mempool's address push is unreliable, so
+      // this guarantees a near-instant arrival. One address, cheap.
+      if (this._watchReceive) {
+        if (Date.now() - (this._lastReceivePoll || 0) < 3000) return;
+        this._lastReceivePoll = Date.now();
+        this.pollReceiveFrontier();
+        return;
+      }
       const due = this.live && !pending ? 25000 : 6000;
       if (Date.now() - (this._lastPoll || 0) < due) return;
       this._lastPoll = Date.now();
       this.refreshLive();
-    }, 3000);
+    }, 1000);
     // No periodic full re-scan: the WS (and the frontier poll above) keep the
     // balance current, and refreshLive's _reconcileHeld catches spends of held
     // coins. The only thing neither covers is a deposit to a reused old address,

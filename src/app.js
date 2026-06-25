@@ -233,6 +233,9 @@ function render() {
             ? howItWorksScreen()
             : unlockScreen();
   root.replaceChildren(screen, footer());
+  // Fast-poll the receive address only while the user is actually watching for a
+  // payment (wallet screen, Receive tab, online). Idempotent — safe each render.
+  wallet.setWatchReceive(ui.screen === 'wallet' && ui.tab === 'receive' && !wallet.offline);
 }
 wallet.subscribe(render);
 
