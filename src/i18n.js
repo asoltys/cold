@@ -95,7 +95,7 @@ const STR = {
     hide: 'Hide',
     invalidSeed: 'Invalid seed phrase — check the spelling and word order.',
     importLabel: 'Recovery phrase or key',
-    importPlaceholder: 'Your 12 or 24 words, or an xpub / xprv',
+    importPlaceholder: 'Your seed words, or an xpub / xprv',
     invalidImport: 'That is not a valid recovery phrase, xpub, or xprv.',
     importedKey: 'Imported key',
     importedKeyNote: 'This wallet was imported from an extended private key, so there is no recovery phrase. Back up that key itself to keep the wallet.',
