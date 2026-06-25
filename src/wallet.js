@@ -678,6 +678,18 @@ export class Wallet {
     return summarize(sel, this.netCfg.net);
   }
 
+  // True if a built tx spends any of our still-unconfirmed coins — meaning it
+  // can't confirm until that parent (ancestor) transaction confirms first.
+  spendsUnconfirmed(tx) {
+    const pending = new Set(this.utxos.filter((u) => !u.confirmed).map((u) => utxoId(u)));
+    if (!pending.size) return false;
+    for (let i = 0; i < tx.inputsLength; i++) {
+      const inp = tx.getInput(i);
+      if (pending.has(`${hex.encode(inp.txid)}:${inp.index}`)) return true;
+    }
+    return false;
+  }
+
   // Sign every input of an already-built Transaction with the matching HD key.
   sign(tx) {
     if (this.watchOnly) throw new Error('Watch-only wallet — no keys to sign with.');
@@ -909,22 +921,12 @@ export class Wallet {
     return sel ? sel.reduce((s, u) => s + u.value, 0) : null;
   }
 
-  // Build a SIGHASH_SINGLE-signed gift: input = a single coin, output0 = change
-  // back to us (cryptographically fixed), leaving the rest for the claimer to
-  // direct to their own fresh address. Reserves the coin. Returns { code, ... }.
-  createGift(amountSats, feeRate) {
-    const gift = BigInt(Math.round(amountSats));
-    const rate = Math.max(1, Math.round(feeRate));
-    if (gift < BigInt(giftMinimum(rate))) throw new Error('Gift amount is too small.');
-
-    // Best-fit selection locks the least value; the change output goes back to
-    // us and is protected, while the rest — the full gift amount — is the
-    // claimer's to direct. No fee is reserved here: the claimer's wallet looks
-    // up the fee rate at claim time and subtracts it from this amount.
-    const sel = this._selectGiftCoins(gift);
-    if (!sel) throw new Error('Not enough confirmed funds for that gift amount.');
+  // Build a SIGHASH_SINGLE-signed gift from already-chosen coins: output0 =
+  // change back to us (cryptographically fixed), leaving the rest for the
+  // claimer to direct to their own fresh address. Reserves the coins, returns
+  // { code, amount, reserved }. Callers ensure sum(sel) >= gift + dust.
+  _buildGiftPsbt(sel, gift) {
     const sum = sel.reduce((s, u) => s + BigInt(u.value), 0n);
-
     const change = sum - gift; // back to us, >= DUST by construction
     const t = new btc.Transaction({ allowUnknownOutputs: true });
     // First input commits the change output (SIGHASH_SINGLE on output 0); the
@@ -942,16 +944,74 @@ export class Wallet {
     return { code: base64urlnopad.encode(t.toPSBT()), amount: Number(gift), reserved: sel.map(utxoId) };
   }
 
-  // Pre-split for a gift: broadcast a normal self-send that carves out a coin of
-  // exactly gift + dust to one of our own addresses, with the rest returned as
-  // change. Once it confirms, createGift's best-fit picks that coin and locks
-  // only ~the gift amount instead of a large coin. Costs an on-chain fee now.
-  async splitForGift(amountSats, feeRate) {
+  // Build a gift link from a best-fit coin, locking the least value. No fee is
+  // reserved here: the claimer's wallet looks up the fee rate at claim time and
+  // subtracts it from the amount.
+  createGift(amountSats, feeRate) {
+    const gift = BigInt(Math.round(amountSats));
+    const rate = Math.max(1, Math.round(feeRate));
+    if (gift < BigInt(giftMinimum(rate))) throw new Error('Gift amount is too small.');
+    const sel = this._selectGiftCoins(gift);
+    if (!sel) throw new Error('Not enough confirmed funds for that gift amount.');
+    return this._buildGiftPsbt(sel, gift);
+  }
+
+  // Split + gift in one shot, with no confirmation wait: broadcast a self-send
+  // that carves out a gift+dust coin, then build the gift spending that
+  // still-unconfirmed carve-out. The funding and the claim form a chain that
+  // confirms together; the recipient just sees a pending balance until the
+  // split confirms. Lets the sender lock only ~the gift amount (instead of a
+  // whole large coin) without waiting for the split to confirm first.
+  async createGiftFromSplit(amountSats, feeRate) {
+    const gift = Math.round(amountSats);
+    const rate = Math.max(1, Math.round(feeRate));
+    if (BigInt(gift) < BigInt(giftMinimum(rate))) throw new Error('Gift amount is too small.');
     const DUST = 294;
-    const target = Math.round(amountSats) + DUST;
-    const draft = this.buildTx({ recipients: [{ address: this.freshReceive().address, amount: target }], feeRate });
+    const recvIndex = this.nextReceiveIndex;
+    const carveAddr = this.derive(0, recvIndex).address;
+    const changeIndex = this.nextChangeIndex;
+
+    // Carve out exactly gift + dust to one of our own addresses; the rest comes
+    // back as change. buildTx already spends confirmed coins largest-first.
+    const draft = this.buildTx({ recipients: [{ address: carveAddr, amount: gift + DUST }], feeRate: rate });
+    const carveIdx = draft.outputs.findIndex((o) => o.address === carveAddr);
+    if (carveIdx < 0) throw new Error('Could not size the split output.');
     const hexTx = this.sign(draft.tx);
-    return await this.broadcast(hexTx);
+    const splitTxid = draft.tx.id;
+    await this.broadcast(hexTx);
+
+    // Wait until the carve-out is actually visible in the mempool before we
+    // build the gift on top of it and reserve it. Otherwise a background refresh
+    // could rebuild the address from a not-yet-indexed API response, transiently
+    // drop the coin, and prune the reservation — risking a double-spend.
+    let seen = false;
+    for (let i = 0; i < 8 && !seen; i++) {
+      await sleep(i === 0 ? 400 : 900);
+      try {
+        const us = await this.api.addressUtxos(carveAddr);
+        seen = us.some((u) => u.txid === splitTxid && u.vout === carveIdx);
+      } catch {}
+    }
+    if (!seen) throw new Error('The split is taking a while to propagate. Once it confirms, create the gift from the new coin.');
+
+    // Reflect the split in our coin set — drop the spent inputs, add the
+    // (now mempool-visible) carve-out and change — so balances and gift tracking
+    // are correct immediately; a background scan reconciles the rest.
+    const spent = new Set();
+    for (let i = 0; i < draft.tx.inputsLength; i++) {
+      const inp = draft.tx.getInput(i);
+      spent.add(`${hex.encode(inp.txid)}:${inp.index}`);
+    }
+    this.utxos = this.utxos.filter((u) => !spent.has(utxoId(u)));
+    this.utxos.push({ txid: splitTxid, vout: carveIdx, value: gift + DUST, address: carveAddr, chain: 0, index: recvIndex, confirmed: false });
+    const changeIdx = draft.outputs.findIndex((o, i) => i !== carveIdx);
+    if (changeIdx >= 0) {
+      const co = draft.outputs[changeIdx];
+      this.utxos.push({ txid: splitTxid, vout: changeIdx, value: co.amount, address: co.address, chain: 1, index: changeIndex, confirmed: false });
+    }
+    this._recomputeBalanceFromUtxos();
+
+    return this._buildGiftPsbt([{ txid: splitTxid, vout: carveIdx, value: gift + DUST, chain: 0, index: recvIndex }], BigInt(gift));
   }
 
   // --- realtime (mempool.space WebSocket) ---------------------------------

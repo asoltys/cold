@@ -50,7 +50,6 @@ const ui = {
   giftCode: null, // last-created gift PSBT code
   giftError: '',
   giftSplitOffer: null, // { amt, lock, freed, fee } when offering to split a coin first
-  giftSplitTxid: null, // txid of a broadcast pre-split, awaiting confirmation
   revokeId: null, // outpoint of a gift being revoked (confirm state)
   claimCode: null, // gift code being claimed (opened from a #gift= link)
   claimedAmount: 0,
@@ -875,7 +874,6 @@ function lock() {
   ui.giftCode = null;
   ui.giftError = '';
   ui.giftSplitOffer = null;
-  ui.giftSplitTxid = null;
   ui.revokeId = null;
   ui.receiveSeenIndex = null;
   ui.txDetail = null;
@@ -1029,28 +1027,29 @@ function doCreateGift(amt, rate) {
     ui.giftCode = wallet.createGift(amt, rate).code;
     ui.giftError = '';
     ui.giftSplitOffer = null;
-    ui.giftSplitTxid = null;
   } catch (e) {
     ui.giftError = e.message;
     ui.giftSplitOffer = null;
   }
   render();
 }
-// Pre-split: broadcast a self-send that carves out a right-sized coin so the
-// later gift locks only ~the gift amount. The gift can be created once it
-// confirms (best-fit then picks the carve-out automatically).
+// Split + gift in one tap: broadcast a self-send carving out a right-sized
+// coin, then immediately build the gift from that (unconfirmed) carve-out, so
+// only ~the gift amount is locked and there's no confirmation wait. The link is
+// ready right away; the recipient sees a pending balance until the split lands.
 async function doSplitForGift(amt) {
   if (wallet.offline) { ui.giftError = t('scanOffline'); render(); return; }
   ui.busy = true; ui.giftError = ''; render();
   try {
     const rate = (wallet.feeRates && wallet.feeRates.halfHourFee) || 5;
-    ui.giftSplitTxid = await wallet.splitForGift(amt, rate);
+    ui.giftCode = (await wallet.createGiftFromSplit(amt, rate)).code;
     ui.giftSplitOffer = null;
-    wallet.scan().catch(() => {});
+    ui.giftError = '';
   } catch (e) {
     ui.giftError = e.message || t('giftSplitFailed');
   }
   ui.busy = false;
+  wallet.scan().catch(() => {}); // reconcile the split from the mempool
   render();
 }
 function giftCard() {
@@ -1067,7 +1066,7 @@ function giftCard() {
           h('div', { class: 'addr-box break', style: 'width:100%;font-size:12px' }, giftUrl()),
           h('div', { class: 'row gap6 wrap' },
             copyBtn(giftUrl(), t('copyLink')),
-            h('button', { class: 'btn-sm grow', onClick: () => { ui.giftCode = null; ui.giftAmount = ''; ui.giftSplitTxid = null; render(); } }, t('giftAnother'))
+            h('button', { class: 'btn-sm grow', onClick: () => { ui.giftCode = null; ui.giftAmount = ''; render(); } }, t('giftAnother'))
           )
         )
       : ui.giftSplitOffer
@@ -1094,7 +1093,6 @@ function giftCard() {
             h('div', { style: 'display:flex;align-items:center' }, unitTag())
           ),
           h('div', { class: 'small faint' }, t('giftMinNote', { n: fmtAmount(giftMinimum(giftRate())) + ' ' + unitLabel() })),
-          ui.giftSplitTxid ? h('div', { class: 'notice ok' }, t('giftSplitPending')) : null,
           ui.giftError && h('div', { class: 'notice err' }, ui.giftError),
           h('button', { class: 'btn-block', onClick: createGiftLink }, t('giftLinkReveal'))
         ),
@@ -1625,7 +1623,7 @@ function giftView() {
     'div',
     { class: 'col', style: 'gap:12px' },
     giftCard(),
-    h('button', { class: 'btn-ghost btn-block', onClick: () => { ui.giftMode = false; ui.giftCode = null; ui.giftError = ''; ui.giftSplitOffer = null; ui.giftSplitTxid = null; ui.revokeId = null; render(); } }, t('back'))
+    h('button', { class: 'btn-ghost btn-block', onClick: () => { ui.giftMode = false; ui.giftCode = null; ui.giftError = ''; ui.giftSplitOffer = null; ui.revokeId = null; render(); } }, t('back'))
   );
 }
 
@@ -2012,7 +2010,8 @@ function coinControl() {
         onChange: (e) => { e.target.checked ? s.coins.add(id) : s.coins.delete(id); render(); },
       }),
       h('div', { class: 'grow' },
-        h('div', { class: 'mono small break' }, shortAddr(u.address, 14, 10)),
+        h('div', { class: 'mono small break' }, shortAddr(u.address, 14, 10),
+          !u.confirmed ? h('span', { class: 'tag pending', style: 'margin-left:6px' }, t('pendingTag')) : null),
         h('div', { class: 'path' }, `${u.chain}/${u.index} · ${shortTxid(u.txid)}:${u.vout}`)
       ),
       h('div', { class: 'amount small' }, fmtAmount(u.value))
@@ -2109,6 +2108,9 @@ function reviewView() {
       )
     ),
     ui.sendError && h('div', { class: 'notice err' }, ui.sendError),
+    wallet.spendsUnconfirmed(d.tx)
+      ? h('div', { class: 'notice info' }, t('unconfirmedInputWarn'))
+      : null,
     wallet.offline
       ? h('div', { class: 'notice info' }, t('offlineSignNote'))
       : null,
