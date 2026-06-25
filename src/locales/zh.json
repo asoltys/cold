@@ -101,7 +101,7 @@
   "showQrAirgap": "显示二维码（用于离线传输）",
   "txBroadcast": "✓ 交易已广播！",
   "copyTxid": "复制交易 ID",
-  "viewOnMempool": "在 mempool.space 查看 ↗",
+  "viewOnMempool": "在区块浏览器中查看 ↗",
   "noTxYet": "暂无交易。",
   "received": "已收到",
   "sent": "已发送",

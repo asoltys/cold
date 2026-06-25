@@ -101,7 +101,7 @@
   "showQrAirgap": "Hiện QR (chuyển ngoại tuyến)",
   "txBroadcast": "✓ Đã phát giao dịch!",
   "copyTxid": "Sao chép ID giao dịch",
-  "viewOnMempool": "Xem trên mempool.space ↗",
+  "viewOnMempool": "Xem trên block explorer ↗",
   "noTxYet": "Chưa có giao dịch.",
   "received": "Đã nhận",
   "sent": "Đã gửi",

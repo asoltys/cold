@@ -101,7 +101,7 @@
   "showQrAirgap": "QR göster (çevrimdışı aktarım için)",
   "txBroadcast": "✓ İşlem yayınlandı!",
   "copyTxid": "İşlem kimliği kopyala",
-  "viewOnMempool": "mempool.space’te gör ↗",
+  "viewOnMempool": "Blok gezgininde görüntüle ↗",
   "noTxYet": "Henüz işlem yok.",
   "received": "Alındı",
   "sent": "Gönderildi",

@@ -101,7 +101,7 @@
   "showQrAirgap": "Onyesha QR (kuhamisha nje ya mtandao)",
   "txBroadcast": "✓ Muamala umetangazwa!",
   "copyTxid": "Nakili kitambulisho cha muamala",
-  "viewOnMempool": "Tazama kwenye mempool.space ↗",
+  "viewOnMempool": "Tazama kwenye block explorer ↗",
   "noTxYet": "Bado hakuna miamala.",
   "received": "Imepokelewa",
   "sent": "Imetumwa",

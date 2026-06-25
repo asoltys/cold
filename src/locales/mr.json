@@ -101,7 +101,7 @@
   "showQrAirgap": "QR दाखवा (ऑफलाइन हस्तांतरणासाठी)",
   "txBroadcast": "✓ व्यवहार प्रसारित झाला!",
   "copyTxid": "व्यवहार ID कॉपी करा",
-  "viewOnMempool": "mempool.space वर पहा ↗",
+  "viewOnMempool": "ब्लॉक एक्सप्लोररमध्ये पहा ↗",
   "noTxYet": "अजून व्यवहार नाहीत.",
   "received": "मिळाले",
   "sent": "पाठवले",

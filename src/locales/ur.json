@@ -101,7 +101,7 @@
   "showQrAirgap": "QR دکھائیں (آف لائن منتقلی کے لیے)",
   "txBroadcast": "✓ لین دین نشر ہو گیا!",
   "copyTxid": "لین دین ID کاپی کریں",
-  "viewOnMempool": "mempool.space پر دیکھیں ↗",
+  "viewOnMempool": "بلاک ایکسپلورر میں دیکھیں ↗",
   "noTxYet": "ابھی کوئی لین دین نہیں۔",
   "received": "موصول",
   "sent": "بھیجا گیا",

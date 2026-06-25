@@ -101,7 +101,7 @@
   "showQrAirgap": "Tampilkan QR (transfer offline)",
   "txBroadcast": "✓ Transaksi disiarkan!",
   "copyTxid": "Salin ID transaksi",
-  "viewOnMempool": "Lihat di mempool.space ↗",
+  "viewOnMempool": "Lihat di block explorer ↗",
   "noTxYet": "Belum ada transaksi.",
   "received": "Diterima",
   "sent": "Terkirim",

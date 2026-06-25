@@ -101,7 +101,7 @@
   "showQrAirgap": "QR দেখান (অফলাইন স্থানান্তরের জন্য)",
   "txBroadcast": "✓ লেনদেন সম্প্রচারিত!",
   "copyTxid": "লেনদেন ID কপি",
-  "viewOnMempool": "mempool.space-এ দেখুন ↗",
+  "viewOnMempool": "ব্লক এক্সপ্লোরারে দেখুন ↗",
   "noTxYet": "এখনো কোনো লেনদেন নেই।",
   "received": "গৃহীত",
   "sent": "প্রেরিত",

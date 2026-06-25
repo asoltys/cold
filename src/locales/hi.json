@@ -101,7 +101,7 @@
   "showQrAirgap": "QR दिखाएँ (ऑफ़लाइन स्थानांतरण के लिए)",
   "txBroadcast": "✓ लेन-देन प्रसारित हुआ!",
   "copyTxid": "लेन-देन ID कॉपी करें",
-  "viewOnMempool": "mempool.space पर देखें ↗",
+  "viewOnMempool": "ब्लॉक एक्सप्लोरर में देखें ↗",
   "noTxYet": "अभी कोई लेन-देन नहीं।",
   "received": "प्राप्त",
   "sent": "भेजा गया",

@@ -101,7 +101,7 @@
   "showQrAirgap": "إظهار رمز QR (للنقل دون اتصال)",
   "txBroadcast": "✓ تم إرسال المعاملة!",
   "copyTxid": "نسخ معرّف المعاملة",
-  "viewOnMempool": "عرض على mempool.space ↗",
+  "viewOnMempool": "عرض في مستكشف الكتل ↗",
   "noTxYet": "لا توجد معاملات بعد.",
   "received": "مستلَم",
   "sent": "مُرسَل",

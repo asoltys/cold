@@ -101,7 +101,7 @@
   "showQrAirgap": "Показать QR (для офлайн-передачи)",
   "txBroadcast": "✓ Транзакция отправлена!",
   "copyTxid": "Копировать ID транзакции",
-  "viewOnMempool": "Открыть на mempool.space ↗",
+  "viewOnMempool": "Открыть в блок-эксплорере ↗",
   "noTxYet": "Транзакций пока нет.",
   "received": "Получено",
   "sent": "Отправлено",

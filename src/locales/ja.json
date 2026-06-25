@@ -101,7 +101,7 @@
   "showQrAirgap": "QRを表示（オフライン転送用）",
   "txBroadcast": "✓ トランザクションを送信しました！",
   "copyTxid": "トランザクションIDをコピー",
-  "viewOnMempool": "mempool.spaceで見る ↗",
+  "viewOnMempool": "ブロックエクスプローラーで表示 ↗",
   "noTxYet": "まだ取引はありません。",
   "received": "受取",
   "sent": "送金",

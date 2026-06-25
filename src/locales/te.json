@@ -101,7 +101,7 @@
   "showQrAirgap": "QR చూపు (ఆఫ్‌లైన్ బదిలీ కోసం)",
   "txBroadcast": "✓ లావాదేవీ ప్రసారమైంది!",
   "copyTxid": "లావాదేవీ ID కాపీ",
-  "viewOnMempool": "mempool.space లో చూడండి ↗",
+  "viewOnMempool": "బ్లాక్ ఎక్స్‌ప్లోరర్‌లో చూడండి ↗",
   "noTxYet": "ఇంకా లావాదేవీలు లేవు.",
   "received": "అందింది",
   "sent": "పంపబడింది",

@@ -101,7 +101,7 @@
   "showQrAirgap": "QR 표시(오프라인 전송용)",
   "txBroadcast": "✓ 거래가 전송되었습니다!",
   "copyTxid": "거래 ID 복사",
-  "viewOnMempool": "mempool.space에서 보기 ↗",
+  "viewOnMempool": "블록 탐색기에서 보기 ↗",
   "noTxYet": "아직 거래가 없습니다.",
   "received": "받음",
   "sent": "보냄",

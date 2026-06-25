@@ -167,7 +167,7 @@ const STR = {
     showQrAirgap: 'Show QR (for offline transfer)',
     txBroadcast: '✓ Transaction broadcast!',
     copyTxid: 'Copy transaction ID',
-    viewOnMempool: 'View on mempool.space ↗',
+    viewOnMempool: 'View on block explorer ↗',
     noTxYet: 'No transactions yet.',
     loadingHistory: 'Loading transactions…',
     received: 'Received',

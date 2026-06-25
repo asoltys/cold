@@ -117,7 +117,7 @@
   "showQrAirgap": "Mostrar QR (para transferencia sin conexión)",
   "txBroadcast": "✓ ¡Transacción difundida!",
   "copyTxid": "Copiar ID de transacción",
-  "viewOnMempool": "Ver en mempool.space ↗",
+  "viewOnMempool": "Ver en el explorador de bloques ↗",
   "noTxYet": "Aún no hay transacciones.",
   "received": "Recibido",
   "sent": "Enviado",
