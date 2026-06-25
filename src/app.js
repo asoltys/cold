@@ -1294,7 +1294,7 @@ function accountsScreen() {
       h('div', { class: 'col', style: 'gap:0' },
         accounts.map((a) => {
           const isActive = a.id === activeId;
-          const tag = a.type === 'watch' ? ' · ' + t('watchOnlyTag') : a.persisted ? ' · ' + t('savedTag') : '';
+          const tag = a.type === 'watch' ? ' · ' + t('watchOnlyTag') : ''; // "saved" shown in the link below, not the title
           if (ui.editId === a.id) {
             return h('div', { class: 'row gap6', style: 'padding:10px 0; border-bottom:1px solid var(--line)' },
               h('input', { type: 'text', style: 'flex:1', value: ui.editLabel, autofocus: true,
