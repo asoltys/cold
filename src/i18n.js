@@ -207,6 +207,7 @@ const STR = {
     giftSplitFirst: 'Split a coin first',
     giftLockWhole: 'Lock the whole coin ({n})',
     giftSplitFailed: 'Could not split the coin.',
+    giftChecking: 'Opening your gift…',
     giftTakenTitle: 'Already claimed',
     giftTakenBody: 'Sorry, this gift has already been claimed.',
     giftHistoryTitle: 'Gift link',

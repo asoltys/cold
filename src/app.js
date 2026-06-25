@@ -856,6 +856,7 @@ function enterOfflineFallback() {
   wallet.setOffline(true);
   wallet.deriveWindow(40);
   ui.offlineFallback = true;
+  ui.claimChecking = false; // can't verify a gift offline; don't hang on the loader
   ui.tab = 'settings';
   render();
 }
@@ -1515,6 +1516,20 @@ function claimScreen() {
           }, t('openWallet'))
         ),
         h('button', { class: 'btn-block', onClick: () => { ui.screen = 'wallet'; ui.claimStep = null; render(); } }, t('skipVerification'))
+      )
+    );
+  }
+  // While verifying the gift is still unclaimed, show a loading screen rather
+  // than flashing the claimable amount (which would then jump to "already
+  // claimed" for a spent gift).
+  if (ui.claimChecking) {
+    return h(
+      'div',
+      { class: 'col', style: 'gap:16px' },
+      brandHeader(false),
+      h('div', { class: 'card col', style: 'align-items:center;text-align:center;gap:14px;padding:32px 14px' },
+        h('span', { class: 'spinner' }),
+        h('p', { class: 'muted', style: 'margin:0' }, t('giftChecking'))
       )
     );
   }
