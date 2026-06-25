@@ -209,6 +209,12 @@ export class Api {
     return this.#get(`/address/${address}/utxo`);
   }
 
+  // Spend status of one output: { spent, txid (spender), vin, status }. Reports
+  // a spend even by an unconfirmed tx — used to tell if a gift was already claimed.
+  outspend(txid, vout) {
+    return this.#get(`/tx/${txid}/outspend/${vout}`);
+  }
+
   addressTxs(address) {
     return this.#get(`/address/${address}/txs`);
   }

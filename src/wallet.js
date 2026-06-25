@@ -1748,6 +1748,22 @@ function _sumInputs(tx) {
 function _giftChange(tx) {
   return tx.outputsLength > 0 ? tx.getOutput(0).amount : 0n;
 }
+// The gift's funding outpoints (the coins its presigned inputs spend). If any is
+// already spent — even by an unconfirmed claim — the gift has been taken and
+// re-claiming would be a doomed double-spend. Used to gate the claim screen.
+export function giftOutpoints(code) {
+  try {
+    const tx = btc.Transaction.fromPSBT(base64urlnopad.decode(code));
+    const out = [];
+    for (let i = 0; i < tx.inputsLength; i++) {
+      const inp = tx.getInput(i);
+      out.push({ txid: hex.encode(inp.txid), vout: inp.index });
+    }
+    return out;
+  } catch {
+    return [];
+  }
+}
 export function previewGift(code) {
   try {
     const tx = btc.Transaction.fromPSBT(base64urlnopad.decode(code));

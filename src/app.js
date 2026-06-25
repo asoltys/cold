@@ -4,7 +4,7 @@
 // which rebuilds the active screen. Text inputs write back into `ui` on `input`
 // (without re-rendering) so their values survive structural re-renders.
 
-import { Wallet, newMnemonic, isValidMnemonic, utxoId, previewGift, buildClaimTx, giftMinimum, parseExtendedKey, xpubToZpub, encryptVault, decryptVault } from './wallet.js';
+import { Wallet, newMnemonic, isValidMnemonic, utxoId, previewGift, giftOutpoints, buildClaimTx, giftMinimum, parseExtendedKey, xpubToZpub, encryptVault, decryptVault } from './wallet.js';
 import { qrSvg } from './qr.js';
 import { scanQr } from './scan.js';
 import { getSyncConfig, setSyncConfig } from './nostr.js';
@@ -25,6 +25,8 @@ const wallet = new Wallet();
 const ui = {
   screen: 'unlock', // 'unlock' | 'wallet' | 'claim' | 'howItWorks'
   claimStep: null, // 'welcome' | 'backup' when opening a gift link
+  claimChecking: false, // verifying the gift's funding coin is still unspent
+  claimTaken: null, // { txid } if the gift was already claimed (coin spent)
   returnScreen: 'unlock', // where 'howItWorks' returns to (Back / logo)
   unlockTab: 'create', // 'create' | 'import' | 'watch'
   watchXpub: '', // watch-only xpub/zpub input
@@ -601,6 +603,8 @@ async function activateAccount(acc, opts = {}) {
   ui.claimStep = 'welcome';
   ui.claimCode = opts.gift || null;
   ui.claimError = '';
+  ui.claimTaken = null;
+  ui.claimChecking = !!opts.gift; // gate the Claim button until we've checked
   ui.tab = 'receive';
   // Not baselined yet — stays null until the scan + ack logic below sets it,
   // so the celebration never fires for payments that were already there at
@@ -641,6 +645,10 @@ async function activateAccount(acc, opts = {}) {
     // Go Live immediately: the socket must not wait on Nostr (up to 6s) or any
     // discovery scan. The cache/Nostr state is already on screen.
     wallet.startRealtime();
+
+    // Opened a gift link? Verify its funding coin is still unspent before letting
+    // the claim proceed — so a second opener can't try to race/double-spend.
+    if (opts.gift) checkGiftClaimed(opts.gift);
 
     // Cross-device state in the background. State comes from the local cache or
     // Nostr — both restore the full balance, coins, and history — so a full API
@@ -1398,9 +1406,27 @@ function readGiftHash() {
   }
 }
 
+// Has this gift already been claimed? Its funding coin being spent — even by an
+// unconfirmed claim — means the gift is gone; show the "already claimed" screen
+// rather than let the user attempt a doomed double-spend.
+async function checkGiftClaimed(code) {
+  const ops = giftOutpoints(code);
+  if (!ops.length) { ui.claimChecking = false; render(); return; }
+  try {
+    const res = await wallet.api.outspend(ops[0].txid, ops[0].vout);
+    if (res && res.spent) ui.claimTaken = { txid: res.txid || null };
+  } catch {
+    // Couldn't check (offline/transient) — leave it claimable; the broadcast in
+    // doClaim is the final guard (a double-spend is rejected by the network).
+  }
+  ui.claimChecking = false;
+  render();
+}
+
 // Broadcast the presigned gift to this fresh wallet's first receive address.
 async function doClaim() {
   if (wallet.offline) { ui.claimError = t('scanOffline'); render(); return; }
+  if (ui.claimChecking || ui.claimTaken) return; // not verified / already taken
   ui.busy = true;
   ui.claimError = '';
   render();
@@ -1413,7 +1439,16 @@ async function doClaim() {
     ui.claimStep = 'backup';
     wallet.scan().catch(() => {});
   } catch (e) {
-    ui.claimError = t('claimFailed');
+    // Broadcast failed — most likely someone claimed it in the race window.
+    // Re-check the funding coin and, if spent, show the "already claimed" screen.
+    const ops = giftOutpoints(ui.claimCode);
+    if (ops.length) {
+      try {
+        const res = await wallet.api.outspend(ops[0].txid, ops[0].vout);
+        if (res && res.spent) ui.claimTaken = { txid: res.txid || null };
+      } catch {}
+    }
+    if (!ui.claimTaken) ui.claimError = t('claimFailed');
   }
   ui.busy = false;
   render();
@@ -1483,6 +1518,23 @@ function claimScreen() {
       )
     );
   }
+  // Already claimed (funding coin spent, possibly only in the mempool) — show a
+  // dead end with a link to the claim, instead of a claimable amount.
+  if (ui.claimTaken) {
+    return h(
+      'div',
+      { class: 'col', style: 'gap:16px' },
+      brandHeader(false),
+      h('div', { class: 'card col', style: 'align-items:center;text-align:center;gap:12px' },
+        h('div', { style: 'font-size:56px;line-height:1' }, '🎁'),
+        h('h2', { style: 'margin:0' }, t('giftTakenTitle')),
+        h('p', { class: 'muted', style: 'margin:0' }, t('giftTakenBody')),
+        ui.claimTaken.txid
+          ? h('a', { class: 'btn btn-sm', href: wallet.api.explorerTx(ui.claimTaken.txid), target: '_blank', rel: 'noopener' }, t('viewOnMempool'))
+          : null
+      )
+    );
+  }
   const pv = previewGift(ui.claimCode);
   // The headline is the full amount received (inputs minus the sender's change).
   // The network fee is determined now, at claim time, and comes out of that
@@ -1503,7 +1555,7 @@ function claimScreen() {
       h('p', { class: 'muted', style: 'margin:0' }, t('claimBody'))
     ),
     ui.claimError && h('div', { class: 'notice err' }, ui.claimError),
-    ui.busy
+    ui.busy || ui.claimChecking
       ? h('button', { class: 'btn-primary btn-block', disabled: true }, h('span', { class: 'spinner' }))
       : h('button', { class: 'btn-primary btn-block', onClick: doClaim },
           t('claimBtn'), ' ',
