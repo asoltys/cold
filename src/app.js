@@ -1430,7 +1430,7 @@ function claimScreen() {
       { class: 'col', style: 'gap:16px' },
       brandHeader(false),
       h('div', { class: 'card col', style: 'align-items:center;text-align:center;gap:8px' },
-        h('div', { class: 'check-badge', style: 'background:var(--accent)' }, '✓'),
+        h('div', { style: 'color:var(--green); font-size:72px; line-height:1' }, '✓'),
         h('h2', { style: 'margin:0' }, t('claimedTitle')),
         h('p', { class: 'muted', style: 'margin:0' }, t('claimedBody'))
       ),
