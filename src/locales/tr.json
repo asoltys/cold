@@ -210,5 +210,8 @@
   "importPlaceholder": "12 veya 24 kelimeniz ya da bir xpub / xprv",
   "invalidImport": "Bu geçerli bir kurtarma ifadesi, xpub veya xprv değil.",
   "importedKey": "İçe aktarılan anahtar",
-  "importedKeyNote": "Bu cüzdan genişletilmiş bir özel anahtardan içe aktarıldı, bu yüzden kurtarma ifadesi yok. Cüzdanı korumak için o anahtarın kendisini yedekleyin."
+  "importedKeyNote": "Bu cüzdan genişletilmiş bir özel anahtardan içe aktarıldı, bu yüzden kurtarma ifadesi yok. Cüzdanı korumak için o anahtarın kendisini yedekleyin.",
+  "clearAll": "Tümünü temizle",
+  "clearAllWarn": "⚠ Bu, bu cihazdaki tüm cüzdanları kaldırır. Kurtarma ifadesini veya anahtarını yedeklemediğiniz her cüzdan kalıcı olarak kaybolur.",
+  "rename": "Yeniden adlandır"
 }

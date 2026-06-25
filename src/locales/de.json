@@ -210,5 +210,8 @@
   "importPlaceholder": "Deine 12 oder 24 Wörter oder ein xpub / xprv",
   "invalidImport": "Das ist keine gültige Wiederherstellungsphrase, kein xpub oder xprv.",
   "importedKey": "Importierter Schlüssel",
-  "importedKeyNote": "Diese Wallet wurde aus einem erweiterten privaten Schlüssel importiert und hat daher keine Wiederherstellungsphrase. Sichere diesen Schlüssel selbst, um die Wallet zu behalten."
+  "importedKeyNote": "Diese Wallet wurde aus einem erweiterten privaten Schlüssel importiert und hat daher keine Wiederherstellungsphrase. Sichere diesen Schlüssel selbst, um die Wallet zu behalten.",
+  "clearAll": "Alle löschen",
+  "clearAllWarn": "⚠ Dies entfernt alle Wallets von diesem Gerät. Jede Wallet, deren Wiederherstellungsphrase oder Schlüssel du nicht gesichert hast, ist für immer verloren.",
+  "rename": "Umbenennen"
 }

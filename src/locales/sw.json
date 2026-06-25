@@ -210,5 +210,8 @@
   "importPlaceholder": "Maneno yako 12 au 24, au xpub / xprv",
   "invalidImport": "Hiyo si kifungu sahihi cha kurejesha, xpub, au xprv.",
   "importedKey": "Ufunguo ulioagizwa",
-  "importedKeyNote": "Pochi hii iliagizwa kutoka kwa ufunguo wa faragha uliopanuliwa, kwa hiyo hakuna kifungu cha kurejesha. Hifadhi ufunguo huo wenyewe ili kuendelea kuwa na pochi."
+  "importedKeyNote": "Pochi hii iliagizwa kutoka kwa ufunguo wa faragha uliopanuliwa, kwa hiyo hakuna kifungu cha kurejesha. Hifadhi ufunguo huo wenyewe ili kuendelea kuwa na pochi.",
+  "clearAll": "Futa zote",
+  "clearAllWarn": "⚠ Hii inaondoa pochi zote kwenye kifaa hiki. Pochi yoyote ambayo kifungu chake cha kurejesha au ufunguo haukuhifadhi nakala itapotea milele.",
+  "rename": "Badilisha jina"
 }

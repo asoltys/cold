@@ -210,5 +210,8 @@
   "importPlaceholder": "12 atau 24 kata Anda, atau xpub / xprv",
   "invalidImport": "Itu bukan frasa pemulihan, xpub, atau xprv yang valid.",
   "importedKey": "Kunci yang diimpor",
-  "importedKeyNote": "Dompet ini diimpor dari kunci privat yang diperluas, jadi tidak ada frasa pemulihan. Cadangkan kunci itu sendiri untuk menyimpan dompet."
+  "importedKeyNote": "Dompet ini diimpor dari kunci privat yang diperluas, jadi tidak ada frasa pemulihan. Cadangkan kunci itu sendiri untuk menyimpan dompet.",
+  "clearAll": "Hapus semua",
+  "clearAllWarn": "⚠ Ini menghapus semua dompet dari perangkat ini. Dompet mana pun yang frasa pemulihan atau kuncinya belum Anda cadangkan akan hilang selamanya.",
+  "rename": "Ganti nama"
 }

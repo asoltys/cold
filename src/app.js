@@ -33,6 +33,9 @@ const ui = {
   pw: null, // { purpose, accId, mode, v1, v2, error } — vault password prompt
   vaultPw: '', // on-open vault unlock input
   vaultError: '',
+  confirmClear: false, // "Clear all" confirmation shown
+  editId: null, // account being renamed
+  editLabel: '',
   createStep: 'gen', // 'gen' | 'confirm'
   draftMnemonic: '',
   confirm: [], // [{ index, value }]
@@ -809,6 +812,9 @@ function lock() {
   ui.pw = null;
   ui.vaultPw = '';
   ui.vaultError = '';
+  ui.confirmClear = false;
+  ui.editId = null;
+  ui.editLabel = '';
   ui.createStep = 'gen';
   ui.draftMnemonic = '';
   ui.importText = '';
@@ -1266,6 +1272,19 @@ function claimScreen() {
 // Account switcher: pick a wallet, add another, or lock the session.
 function accountsScreen() {
   if (ui.pw) return h('div', { class: 'col', style: 'gap:16px' }, brandHeader(false), pwPromptCard());
+  if (ui.confirmClear) {
+    return h('div', { class: 'col', style: 'gap:16px' },
+      brandHeader(false),
+      h('div', { class: 'card col' },
+        h('h3', {}, t('clearAll')),
+        h('div', { class: 'warn-box' }, t('clearAllWarn')),
+        h('div', { class: 'row gap6' },
+          h('button', { class: 'btn-ghost grow', onClick: () => { ui.confirmClear = false; render(); } }, t('back')),
+          h('button', { class: 'btn-primary grow', onClick: clearAll }, t('clearAll'))
+        )
+      )
+    );
+  }
   return h(
     'div',
     { class: 'col', style: 'gap:16px' },
@@ -1276,12 +1295,22 @@ function accountsScreen() {
         accounts.map((a) => {
           const isActive = a.id === activeId;
           const tag = a.type === 'watch' ? ' · ' + t('watchOnlyTag') : a.persisted ? ' · ' + t('savedTag') : '';
+          if (ui.editId === a.id) {
+            return h('div', { class: 'row gap6', style: 'padding:10px 0; border-bottom:1px solid var(--line)' },
+              h('input', { type: 'text', style: 'flex:1', value: ui.editLabel, autofocus: true,
+                onInput: (e) => (ui.editLabel = e.target.value),
+                onKeyDown: (e) => { if (e.key === 'Enter') renameAccount(a.id); } }),
+              h('button', { class: 'btn-sm', onClick: () => renameAccount(a.id) }, t('save')),
+              h('button', { class: 'btn-sm', onClick: () => { ui.editId = null; render(); } }, t('back'))
+            );
+          }
           return h('div', { class: 'col', style: 'gap:4px; padding:10px 0; border-bottom:1px solid var(--line)' },
             h('div', { class: 'row between' },
               h('button', {
                 class: 'linklike', style: 'text-align:left;flex:1;font-size:15px;' + (isActive ? 'font-weight:600' : ''),
                 onClick: () => { if (isActive) { ui.screen = 'wallet'; render(); } else switchAccount(a.id); },
               }, (isActive ? '● ' : '○ ') + a.label + tag),
+              h('button', { class: 'btn-sm', title: t('rename'), onClick: () => { ui.editId = a.id; ui.editLabel = a.label; render(); } }, '✎'),
               h('button', { class: 'btn-sm', title: t('remove'), onClick: () => removeAccount(a.id) }, '✕')
             ),
             a.type === 'full'
@@ -1292,10 +1321,32 @@ function accountsScreen() {
         })
       ),
       h('button', { class: 'btn-block', onClick: () => { ui.screen = 'unlock'; ui.unlockTab = 'create'; ui.fromWallet = true; ui.unlockError = ''; render(); } }, t('addWallet')),
-      h('button', { class: 'btn-ghost btn-block', onClick: lock }, t('lockAll'))
+      h('button', { class: 'btn-ghost btn-block', onClick: () => { ui.confirmClear = true; render(); } }, t('clearAll'))
     ),
     h('button', { class: 'btn-ghost btn-block', onClick: () => { ui.screen = 'wallet'; render(); } }, t('back'))
   );
+}
+
+function renameAccount(id) {
+  const acc = accounts.find((a) => a.id === id);
+  if (acc) {
+    const v = (ui.editLabel || '').trim();
+    if (v) acc.label = v;
+    persistAccounts();
+    if (acc.type === 'watch') saveWatchAccounts();
+    if (acc.persisted) writeVault();
+  }
+  ui.editId = null;
+  render();
+}
+
+// Wipe every wallet from this device: session accounts, the encrypted vault,
+// and saved watch-only accounts. Unbacked-up seeds are unrecoverable after this.
+function clearAll() {
+  try { localStorage.removeItem(VAULT_KEY); } catch {}
+  try { localStorage.removeItem(WATCH_KEY); } catch {}
+  ui.confirmClear = false;
+  lock();
 }
 
 function pwPromptCard() {

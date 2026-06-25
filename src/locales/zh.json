@@ -210,5 +210,8 @@
   "importPlaceholder": "你的 12 或 24 个单词，或 xpub / xprv",
   "invalidImport": "这不是有效的恢复短语、xpub 或 xprv。",
   "importedKey": "导入的密钥",
-  "importedKeyNote": "该钱包是从扩展私钥导入的，因此没有恢复短语。请备份该密钥本身以保留钱包。"
+  "importedKeyNote": "该钱包是从扩展私钥导入的，因此没有恢复短语。请备份该密钥本身以保留钱包。",
+  "clearAll": "清除全部",
+  "clearAllWarn": "⚠ 这将从此设备移除所有钱包。任何你尚未备份恢复短语或密钥的钱包都将永久丢失。",
+  "rename": "重命名"
 }
