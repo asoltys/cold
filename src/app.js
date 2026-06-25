@@ -64,6 +64,9 @@ const ui = {
   txPage: 0, // History: current page of transactions (10 per page)
   giftsAll: false, // History: showing the full paginated list of sent gifts
   giftsPage: 0, // History: current page within the all-gifts list
+  addrScan: false, // Settings: showing the per-address rescan list
+  addrScanPage: 0, // Settings: current page within the address list
+  rescanningAddr: null, // 'chain/index' of the address currently rescanning
   send: blankSend(),
   draft: null, // built tx summary awaiting review
   broadcastTx: null, // scanned signed tx awaiting broadcast confirmation
@@ -911,7 +914,60 @@ function brandHeader(withLock) {
 // users who skipped backup verification) and the offline snapshot transfer.
 // The phrase is gated: the real words are never put in the DOM until "Reveal",
 // so the warning is read first.
+// Rescan a single address on demand — recovers a deposit to a reused old
+// address without a full wallet rescan.
+async function doRescanAddress(chain, index) {
+  if (wallet.offline) { toast(t('scanOffline')); return; }
+  ui.rescanningAddr = chain + '/' + index;
+  render();
+  try {
+    await wallet.rescanAddress(chain, index);
+    toast(t('rescanDone'));
+  } catch (e) {
+    toast(e.message || t('rescanFailed'));
+  }
+  ui.rescanningAddr = null;
+  render();
+}
+
+// Paginated list of every known address, each with its own rescan button.
+function addressScanView() {
+  const addrs = wallet.knownAddresses();
+  const pages = Math.ceil(addrs.length / PAGE_SIZE) || 1;
+  const page = Math.min(ui.addrScanPage, pages - 1);
+  const slice = addrs.slice(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE);
+  return h(
+    'div',
+    { class: 'col', style: 'gap:16px' },
+    h('div', { class: 'card col', style: 'gap:12px' },
+      h('div', { class: 'row between' },
+        h('h3', { style: 'margin:0' }, t('rescanAddresses')),
+        h('button', { class: 'btn-sm', onClick: () => { ui.addrScan = false; render(); } }, t('back'))
+      ),
+      h('p', { class: 'small muted', style: 'margin:0' }, t('rescanAddrDesc')),
+      h('div', { class: 'list' },
+        ...slice.map((a) => {
+          const id = a.chain + '/' + a.index;
+          const busy = ui.rescanningAddr === id;
+          return h('div', { class: 'item' },
+            h('div', { class: 'grow' },
+              h('div', { class: 'mono small break' }, shortAddr(a.address, 16, 10),
+                a.used ? null : h('span', { class: 'badge off dot', style: 'font-size:10px;margin-left:6px;padding:1px 7px' }, t('unusedTag'))),
+              h('div', { class: 'path' }, `${a.chain}/${a.index}` + (a.balance ? ' · ' + fmtAmount(a.balance) + ' ' + unitLabel() : ''))
+            ),
+            busy
+              ? h('button', { class: 'btn-sm', disabled: true }, h('span', { class: 'spinner sm' }))
+              : h('button', { class: 'btn-sm', disabled: !!ui.rescanningAddr, onClick: () => doRescanAddress(a.chain, a.index) }, t('rescanOne'))
+          );
+        })
+      ),
+      pager(page, addrs.length, (p) => { ui.addrScanPage = p; render(); })
+    )
+  );
+}
+
 function settingsTab() {
+  if (ui.addrScan && !wallet.offline) return addressScanView();
   const shown = ui.revealShown;
   const words = wallet.mnemonic.split(' ');
   const cells = words.map((w, i) =>
@@ -967,12 +1023,10 @@ function settingsTab() {
       'div',
       { class: 'card col' },
       h('h3', {}, t('rescan')),
-      h('p', { class: 'small muted', style: 'margin:0' },
-        t('rescanDesc')),
+      h('p', { class: 'small muted', style: 'margin:0' }, t('rescanDesc')),
       wallet.offline
         ? null
-        : h('button', { disabled: wallet.scanning, onClick: () => wallet.scan() },
-            wallet.scanning ? t('scanning') : t('rescanWallet'))
+        : h('button', { onClick: () => { ui.addrScan = true; ui.addrScanPage = 0; render(); } }, t('rescanAddresses'))
     ),
     explorerCard(),
     wallet.watchOnly || !wallet.mnemonic ? null : syncCard()
@@ -1628,6 +1682,7 @@ function tabsBar() {
         ui.revealShown = false; // re-mask the recovery phrase whenever tabs change
         ui.txDetail = null; // back to the history list when leaving/returning
         ui.giftsAll = false; // and back to the paged history, not the all-gifts view
+        ui.addrScan = false; // and back to the main Settings, not the address list
         ui.bump = null;
         ui.giftMode = false;
         render();

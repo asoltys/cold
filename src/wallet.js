@@ -428,6 +428,59 @@ export class Wallet {
     return changed;
   }
 
+  // Every address the wallet currently knows about (scanned receive + change),
+  // sorted by chain then index, for the per-address rescan list in Settings.
+  knownAddresses() {
+    const mk = (e, chain) => ({ chain, index: e.index, address: e.address, used: !!e.used, balance: (e.confirmed || 0) + (e.pending || 0) });
+    return [
+      ...this.receive.map((e) => mk(e, 0)),
+      ...this.change.map((e) => mk(e, 1)),
+    ].sort((a, b) => a.chain - b.chain || a.index - b.index);
+  }
+
+  // Re-query a single address and reconcile just its coins/history into state —
+  // the targeted alternative to a full rescan, for recovering a deposit to a
+  // reused old address. Returns whether the address is used.
+  async rescanAddress(chain, index) {
+    const { address } = this.derive(chain, index);
+    const info = await this.api.addressInfo(address);
+    const cs = info.chain_stats || {};
+    const ms = info.mempool_stats || {};
+    const used = (cs.tx_count || 0) > 0 || (ms.tx_count || 0) > 0;
+    const confirmed = (cs.funded_txo_sum || 0) - (cs.spent_txo_sum || 0);
+    const pending = (ms.funded_txo_sum || 0) - (ms.spent_txo_sum || 0);
+
+    const arr = chain === 0 ? this.receive : this.change;
+    let entry = arr.find((e) => e.index === index);
+    if (!entry) { entry = { chain, index, address }; arr.push(entry); arr.sort((a, b) => a.index - b.index); }
+    this.addrMap.set(address, { chain, index });
+    entry.used = used;
+    entry.confirmed = confirmed;
+    entry.pending = pending;
+
+    const us = await this.api.addressUtxos(address);
+    this.utxos = this.utxos.filter((u) => u.address !== address);
+    for (const u of us) this.utxos.push({ txid: u.txid, vout: u.vout, value: u.value, address, chain, index, confirmed: !!u.status.confirmed });
+
+    const list = await this.api.addressTxs(address);
+    for (const tx of list) {
+      const summary = this._txSummary(tx);
+      const at = this.txs.findIndex((t) => t.txid === tx.txid);
+      if (at >= 0) this.txs[at] = summary;
+      else this.txs.push(summary);
+    }
+
+    this.nextReceiveIndex = firstUnused(this.receive);
+    this.nextChangeIndex = firstUnused(this.change);
+    this.utxos.sort((x, y) => y.value - x.value);
+    this._sortTxs();
+    this._recomputeBalanceFromChains();
+    this.loaded = true;
+    this.saveCache();
+    this.emit();
+    return used;
+  }
+
   // silent=false: foreground load (shows loading state, always re-renders).
   // silent=true:  background refresh (poll / WS) — no spinner, and only emits
   //               if the visible state changed, so it never disrupts typing.
@@ -1079,16 +1132,12 @@ export class Wallet {
       this._lastPoll = Date.now();
       this.refreshLive();
     }, 3000);
-    // Periodic full scan: reconciles pending→confirmed history, spends, and
-    // stale cache/relay state — but only when the socket is down. While live the
-    // WS already pushes confirmations and block events, so a full re-scan would
-    // just burn the rate limit (and risk starving the very socket we rely on).
-    this._deepTimer = setInterval(() => {
-      if (this.live) return;
-      this.scan({ silent: true }).catch(() => {});
-    }, 120000);
+    // No periodic full re-scan: the WS (and the frontier poll above) keep the
+    // balance current, and refreshLive's _reconcileHeld catches spends of held
+    // coins. The only thing neither covers is a deposit to a reused old address,
+    // which is handled on demand via per-address rescan in Settings.
     // Only mempool.space has a live socket; other explorers rely on the poll
-    // and deep scan above (wsUrl returns null → no socket).
+    // above (wsUrl returns null → no socket).
     if (typeof WebSocket === 'undefined' || !this.wsUrl()) return;
     this._wsWant = true;
 
