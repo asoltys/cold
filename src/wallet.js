@@ -92,6 +92,7 @@ export class Wallet {
     this._pollTimer = null;
     this._deepTimer = null; // periodic full-scan safety net
     this._polling = false; // a light poll is in flight
+    this._lastPoll = 0; // last frontier poll (throttles the adaptive poll timer)
     this._hbTimer = null; // heartbeat / liveness watchdog
     this._lastMsg = 0; // time of last WS message (incl. pong)
     this._wakeHooked = false;
@@ -1066,13 +1067,26 @@ export class Wallet {
   startRealtime() {
     if (this.offline) return;
     this.stopRealtime();
-    // Safety-net poll: only the fresh frontier (next receive/change address),
-    // in case the WebSocket misses a deposit. Already-scanned addresses are
-    // never re-polled — the deep scan below covers spends/confirmations.
-    this._pollTimer = setInterval(() => this.refreshLive(), 20000);
-    // Periodic full scan: reconciles everything refreshLive can't see on its own
-    // — pending→confirmed history, spends, and stale cache/relay state.
-    this._deepTimer = setInterval(() => this.scan({ silent: true }).catch(() => {}), 120000);
+    // Frontier poll (next receive/change address only). While the socket is live
+    // it pushes deposits instantly, so we poll just as a slow half-open-socket
+    // safety net (~25s). When the socket is down, poll fast (~6s) so receives
+    // still show quickly. The 3s tick is a cheap time check — it issues no
+    // request unless one is due, which keeps REST volume (and 429s) low.
+    this._pollTimer = setInterval(() => {
+      if (this.offline) return;
+      const due = this.live ? 25000 : 6000;
+      if (Date.now() - (this._lastPoll || 0) < due) return;
+      this._lastPoll = Date.now();
+      this.refreshLive();
+    }, 3000);
+    // Periodic full scan: reconciles pending→confirmed history, spends, and
+    // stale cache/relay state — but only when the socket is down. While live the
+    // WS already pushes confirmations and block events, so a full re-scan would
+    // just burn the rate limit (and risk starving the very socket we rely on).
+    this._deepTimer = setInterval(() => {
+      if (this.live) return;
+      this.scan({ silent: true }).catch(() => {});
+    }, 120000);
     // Only mempool.space has a live socket; other explorers rely on the poll
     // and deep scan above (wsUrl returns null → no socket).
     if (typeof WebSocket === 'undefined' || !this.wsUrl()) return;
@@ -1136,6 +1150,9 @@ export class Wallet {
       this._lastMsg = Date.now();
       this.retrack();
       this.emit();
+      // Catch any deposit that landed while we were disconnected — mempool only
+      // pushes new activity after tracking starts, not what's already there.
+      this.refreshLive().catch(() => {});
     };
     ws.onmessage = (ev) => {
       this._lastMsg = Date.now();

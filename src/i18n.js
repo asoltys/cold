@@ -174,6 +174,8 @@ const STR = {
     received: 'Received',
     sent: 'Sent',
     pendingTag: '⏳ pending',
+    liveTag: 'Live',
+    pollingTag: 'Polling',
     awaitingConfirmation: 'awaiting confirmation',
     feeShort: 'fee {x}',
     historyOffline: 'Transaction history is unavailable in offline mode.',

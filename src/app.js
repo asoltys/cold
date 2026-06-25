@@ -1582,7 +1582,14 @@ function balanceCard() {
   return h(
     'div',
     { class: 'card balance' },
-    h('div', { class: 'small faint', style: 'text-transform:uppercase;letter-spacing:.05em' }, t('balance')),
+    h('div', { class: 'row between', style: 'align-items:center' },
+      h('div', { class: 'small faint', style: 'text-transform:uppercase;letter-spacing:.05em' }, t('balance')),
+      // Live = receiving instant WebSocket pushes; otherwise we're polling, so
+      // deposits can lag a few seconds. Surfaced so a stuck socket is visible.
+      wallet.offline ? null
+        : h('span', { class: 'badge ' + (wallet.live ? 'live' : 'off') + ' dot', style: 'font-size:11px;padding:2px 8px' },
+            wallet.live ? t('liveTag') : t('pollingTag'))
+    ),
     // Headline is the spendable balance: confirmed coins plus our own pending
     // change, minus gift locks — so a pending spend debits immediately, while a
     // pending incoming receive stays out of it until it confirms.
