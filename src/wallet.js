@@ -1161,19 +1161,37 @@ export class Wallet {
 
   // What realtime watches: the fresh frontier (next receive + next change), plus
   // any address holding an unconfirmed coin — so a pending deposit's confirmation
-  // pushes instantly instead of waiting for a poll. Capped at the socket's 10-
-  // address-per-connection limit (frontier first, then pending coins).
-  watchedAddresses() {
-    const set = new Set([
-      this.derive(0, this.nextReceiveIndex).address,
-      this.derive(1, this.nextChangeIndex).address,
-    ]);
+  // pushes instantly instead of waiting for a poll. Returns derivation targets
+  // ({chain,index}); Electrum/Fulcrum handles many subscriptions, but our watched
+  // set is naturally small so we cap generously.
+  _watchedTargets() {
+    const seen = new Set();
+    const out = [];
+    const add = (chain, index) => {
+      const k = chain + '/' + index;
+      if (!seen.has(k)) { seen.add(k); out.push({ chain, index }); }
+    };
+    add(0, this.nextReceiveIndex);
+    add(1, this.nextChangeIndex);
     const stuck = this._stuckTxids();
     for (const u of this.utxos) {
-      if (set.size >= 10) break;
-      if (!u.confirmed && !stuck.has(u.txid)) set.add(u.address);
+      if (out.length >= 25) break;
+      if (!u.confirmed && !stuck.has(u.txid)) add(u.chain, u.index);
     }
-    return [...set];
+    return out;
+  }
+  watchedAddresses() {
+    return this._watchedTargets().map((t) => this.derive(t.chain, t.index).address);
+  }
+  // Electrum scripthash for one of our addresses: sha256(scriptPubKey), reversed,
+  // hex. This is what Fulcrum subscribes on.
+  _scripthash(chain, index) {
+    const h = sha256(this.derive(chain, index).script);
+    h.reverse();
+    return hex.encode(h);
+  }
+  watchedScripthashes() {
+    return this._watchedTargets().map((t) => this._scripthash(t.chain, t.index));
   }
 
   startRealtime() {
@@ -1220,9 +1238,7 @@ export class Wallet {
       if (Date.now() - this._lastMsg > 45000) {
         this._reconnectNow();
       } else {
-        try {
-          this._ws.send(JSON.stringify({ action: 'ping' }));
-        } catch {}
+        this._rpcSend('server.ping', []);
       }
     }, 15000);
 
@@ -1266,34 +1282,36 @@ export class Wallet {
       return;
     }
     this._ws = ws;
+    this._wsBuf = '';            // partial-line accumulator (newline-delimited JSON-RPC)
+    this._subscribed = new Set(); // scripthashes subscribed on this connection
+    this._rpcId = 0;
     ws.onopen = () => {
       this.live = true;
       this._wsBackoff = 0; // healthy again — reset the reconnect backoff
       this._lastMsg = Date.now();
+      // Electrum handshake, then subscribe our watched scripthashes.
+      this._rpcSend('server.version', ['halwallet', '1.4']);
       this.retrack();
       this.emit();
-      // Catch any deposit that landed while we were disconnected — mempool only
-      // pushes new activity after tracking starts, not what's already there.
+      // The server only pushes activity AFTER we subscribe, so reconcile once on
+      // open to catch anything that landed while we were disconnected.
       this.refreshLive().catch(() => {});
     };
     ws.onmessage = (ev) => {
       this._lastMsg = Date.now();
-      let msg;
-      try {
-        msg = JSON.parse(typeof ev.data === 'string' ? ev.data : '');
-      } catch {
-        return;
+      this._wsBuf += (typeof ev.data === 'string' ? ev.data : '');
+      // Electrum frames are newline-delimited JSON-RPC; parse each complete line.
+      let nl;
+      while ((nl = this._wsBuf.indexOf('\n')) >= 0) {
+        const line = this._wsBuf.slice(0, nl).trim();
+        this._wsBuf = this._wsBuf.slice(nl + 1);
+        if (line) this._handleRpc(line);
       }
-      // React only to address/block events — never the global tx firehose.
-      if (
-        msg['multi-address-transactions'] ||
-        msg['address-transactions'] ||
-        msg['block-transactions'] ||
-        msg['txConfirmed']
-      ) {
-        // Update instantly from the pushed tx data, then reconcile via a scan.
-        this._ingestWs(msg);
-        this._scheduleRefresh();
+      // Fallback: a server that sends one complete JSON per frame without a
+      // trailing newline. Only consume the buffer if it parses cleanly.
+      const rest = this._wsBuf.trim();
+      if (rest) {
+        try { JSON.parse(rest); this._handleRpc(rest); this._wsBuf = ''; } catch {}
       }
     };
     ws.onerror = () => {
@@ -1309,85 +1327,39 @@ export class Wallet {
     };
   }
 
-  retrack() {
-    if (this._ws && this._ws.readyState === 1) {
-      try {
-        this._ws.send(JSON.stringify({ 'track-addresses': this.watchedAddresses() }));
-      } catch {}
+  // Send an Electrum JSON-RPC request (fire-and-forget; we react to notifications,
+  // not responses). Newline-terminated per the protocol.
+  _rpcSend(method, params) {
+    if (!this._ws || this._ws.readyState !== 1) return;
+    const id = ++this._rpcId;
+    try {
+      this._ws.send(JSON.stringify({ id, method, params }) + '\n');
+    } catch {}
+    return id;
+  }
+
+  // A scripthash-status notification means a tx touched one of our addresses (a
+  // deposit, or a confirmation). We don't trust the pushed status payload — it's
+  // just the trigger; reconcile authoritative state over REST.
+  _handleRpc(line) {
+    let msg;
+    try { msg = JSON.parse(line); } catch { return; }
+    if (msg && msg.method === 'blockchain.scripthash.subscribe') {
+      this._scheduleRefresh();
     }
   }
 
-  // Optimistically apply transactions from a WS push so an incoming deposit
-  // shows the instant mempool.space pushes it — no extra round-trip. The
-  // debounced scan that follows reconciles everything (spends, confirmations).
-  _ingestWs(msg) {
-    const txs = [];
-    const multi = msg['multi-address-transactions'];
-    if (multi && typeof multi === 'object') {
-      for (const addr of Object.keys(multi)) {
-        const g = multi[addr] || {};
-        for (const t of g.mempool || []) txs.push(t);
-        for (const t of g.confirmed || []) txs.push(t);
-      }
+  // Subscribe any watched scripthashes not yet subscribed on this connection.
+  // Reset on reconnect (_subscribed is cleared in _connectWs), so a fresh socket
+  // re-subscribes the full set.
+  retrack() {
+    if (!this._ws || this._ws.readyState !== 1) return;
+    if (!this._subscribed) this._subscribed = new Set();
+    for (const sh of this.watchedScripthashes()) {
+      if (this._subscribed.has(sh)) continue;
+      this._subscribed.add(sh);
+      this._rpcSend('blockchain.scripthash.subscribe', [sh]);
     }
-    const single = msg['address-transactions'];
-    if (Array.isArray(single)) txs.push(...single);
-
-    let changed = false;
-    const have = new Set(this.utxos.map(utxoId));
-    const mine = new Set(this.addrMap.keys());
-    for (const tx of txs) {
-      if (!tx || !Array.isArray(tx.vout)) continue;
-      let relevant = false;
-      tx.vout.forEach((vo, i) => {
-        const a = vo && vo.scriptpubkey_address;
-        if (!a || !this.addrMap.has(a)) return;
-        relevant = true;
-        const id = `${tx.txid}:${i}`;
-        if (have.has(id)) return;
-        const p = this.addrMap.get(a);
-        const confirmed = !!(tx.status && tx.status.confirmed);
-        this.utxos.push({ txid: tx.txid, vout: i, value: vo.value, address: a, chain: p.chain, index: p.index, confirmed });
-        have.add(id);
-        // Mark the receiving address used + record its balance, so the fresh
-        // index advances immediately (next address/QR shows right away).
-        const arr = p.chain === 0 ? this.receive : this.change;
-        let entry = arr.find((e) => e.index === p.index);
-        if (!entry) {
-          entry = { chain: p.chain, index: p.index, address: a, used: false, confirmed: 0, pending: 0 };
-          arr.push(entry);
-        }
-        entry.used = true;
-        if (confirmed) entry.confirmed = (entry.confirmed || 0) + vo.value;
-        else entry.pending = (entry.pending || 0) + vo.value;
-        changed = true;
-      });
-      for (const vin of tx.vin || []) {
-        const a = vin.prevout && vin.prevout.scriptpubkey_address;
-        if (a && mine.has(a)) relevant = true;
-      }
-      // Record it in history — or refresh it, so a pending tx flips to confirmed.
-      if (relevant) {
-        const idx = this.txs.findIndex((t) => t.txid === tx.txid);
-        const summary = this._txSummary(tx);
-        if (idx < 0) {
-          this.txs.push(summary);
-          changed = true;
-        } else if (this.txs[idx].confirmed !== summary.confirmed) {
-          this.txs[idx] = summary;
-          changed = true;
-        }
-      }
-    }
-    if (changed) {
-      this.nextReceiveIndex = firstUnused(this.receive);
-      this.nextChangeIndex = firstUnused(this.change);
-      this._recomputeBalanceFromChains();
-      this._sortTxs();
-      this.retrack(); // start watching the new fresh address
-      this.emit();
-    }
-    return changed;
   }
 
   _scheduleReconnect() {

@@ -45,11 +45,24 @@ function resolveHosts(net) {
   return [host('https://mempool.space', 'mempool'), host('https://blockstream.info', 'esplora')];
 }
 
-// WebSocket URL for live updates — only mempool.space exposes one, so other
-// explorers fall back to polling (returns null → no socket).
+// Realtime is a private Fulcrum (Electrum protocol over WebSocket-Secure). It
+// reliably pushes a scripthash-status notification the moment a tx touches a
+// watched address — unlike the public Esplora/blockchain.info sockets, whose
+// address push doesn't fire. Independent of the REST explorer choice. Mainnet
+// only; testnet falls back to polling (null). Overridable for staging/testing.
+const ELECTRUM_KEY = 'btc-wallet-electrum';
+export function getElectrumWsUrl() {
+  try {
+    const u = localStorage.getItem(ELECTRUM_KEY);
+    if (u) return u;
+  } catch {}
+  // Served as a path under coinos.io (a dedicated subdomain hit a Cloudflare
+  // WebSocket quirk; the main hostname proxies WS cleanly).
+  return 'wss://coinos.io/electrum';
+}
 export function wsUrl(net) {
-  if (getExplorerConfig().server !== 'mempool') return null;
-  return 'wss://mempool.space' + (net === 'testnet' ? '/testnet/api/v1/ws' : '/api/v1/ws');
+  if (net === 'testnet') return null;
+  return getElectrumWsUrl();
 }
 
 const REQUEST_TIMEOUT_MS = 10000;
