@@ -848,7 +848,7 @@ function brandHeader(withLock) {
     ),
     withLock &&
       h('button', { class: 'btn-sm', onClick: () => { ui.screen = 'accounts'; render(); } },
-        (acc ? acc.label : t('accounts')) + ' ▾')
+        acc ? acc.label : t('accounts'))
   );
 }
 
