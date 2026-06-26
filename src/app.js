@@ -1481,14 +1481,15 @@ async function doClaim() {
 function claimScreen() {
   if (ui.claimStep === 'backup') {
     const words = wallet.mnemonic.split(' ');
+    const claimed = ui.claimedAmount > 0; // false when "create a wallet anyway"
     return h(
       'div',
       { class: 'col', style: 'gap:16px' },
       brandHeader(false),
       h('div', { class: 'card col', style: 'align-items:center;text-align:center;gap:8px' },
-        h('div', { style: 'color:var(--green); font-size:72px; line-height:1' }, '✓'),
-        h('h2', { style: 'margin:0' }, t('claimedTitle')),
-        h('p', { class: 'muted', style: 'margin:0' }, t('claimedBody'))
+        h('div', { style: 'font-size:72px;line-height:1' + (claimed ? ';color:var(--green)' : '') }, claimed ? '✓' : '🔑'),
+        h('h2', { style: 'margin:0' }, claimed ? t('claimedTitle') : t('newWalletTitle')),
+        h('p', { class: 'muted', style: 'margin:0' }, claimed ? t('claimedBody') : t('newWalletBody'))
       ),
       h('div', { class: 'card col' },
         h('h3', {}, t('recoveryPhrase')),
@@ -1567,7 +1568,11 @@ function claimScreen() {
         ui.claimTaken.txid
           ? h('a', { class: 'btn btn-sm', href: wallet.api.explorerTx(ui.claimTaken.txid), target: '_blank', rel: 'noopener' }, t('viewOnMempool'))
           : null
-      )
+      ),
+      // A fresh wallet was already generated for the claim — offer to keep it,
+      // or head back to the home screen.
+      h('button', { class: 'btn-primary btn-block', onClick: () => { ui.claimTaken = null; ui.claimedAmount = 0; ui.claimStep = 'backup'; render(); } }, t('createWalletAnyway')),
+      h('button', { class: 'btn-ghost btn-block', onClick: goHome }, t('goToHome'))
     );
   }
   const pv = previewGift(ui.claimCode);
