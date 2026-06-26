@@ -278,6 +278,13 @@ async function copy(text) {
   toast(t('copied'));
 }
 
+// Open a URL in a new window/tab. window.open is more reliable than an
+// <a target="_blank"> inside an installed PWA (standalone mode), where the link
+// can otherwise navigate the app away instead of opening externally.
+function openExternal(url) {
+  try { window.open(url, '_blank', 'noopener,noreferrer'); } catch {}
+}
+
 function download(filename, text, mime = 'application/json') {
   const url = URL.createObjectURL(new Blob([text], { type: mime }));
   const a = h('a', { href: url, download: filename });
@@ -1590,7 +1597,7 @@ function claimScreen() {
       // view the claim on a block explorer, or head back to the home screen.
       h('button', { class: 'btn-primary btn-block', onClick: () => { ui.claimTaken = null; ui.claimedAmount = 0; ui.claimStep = 'backup'; commitAccount(); render(); } }, t('createWalletAnyway')),
       ui.claimTaken.txid
-        ? h('a', { class: 'btn btn-block', href: wallet.api.explorerTx(ui.claimTaken.txid), target: '_blank', rel: 'noopener' }, t('viewOnMempool'))
+        ? h('a', { class: 'btn btn-block', href: wallet.api.explorerTx(ui.claimTaken.txid), target: '_blank', rel: 'noopener', onClick: (e) => { e.preventDefault(); openExternal(wallet.api.explorerTx(ui.claimTaken.txid)); } }, t('viewOnMempool'))
         : null,
       h('button', { class: 'btn-ghost btn-block', onClick: goHome }, t('goToHome'))
     );
@@ -2453,7 +2460,7 @@ function sendResultView() {
     h('div', { class: 'addr-box' }, r.txid),
     h('div', { class: 'row gap6' },
       copyBtn(r.txid, t('copyTxid')),
-      h('a', { class: 'btn btn-sm', href: wallet.api.explorerTx(r.txid), target: '_blank', rel: 'noopener' }, t('viewOnMempool'))
+      h('a', { class: 'btn btn-sm', href: wallet.api.explorerTx(r.txid), target: '_blank', rel: 'noopener', onClick: (e) => { e.preventDefault(); openExternal(wallet.api.explorerTx(r.txid)); } }, t('viewOnMempool'))
     ),
     again
   );
@@ -2647,7 +2654,7 @@ function txDetailView(tx) {
     ),
     h('div', { class: 'row gap6 wrap' },
       copyBtn(tx.txid, t('copyId')),
-      h('a', { class: 'btn btn-sm', href: wallet.api.explorerTx(tx.txid), target: '_blank', rel: 'noopener' }, t('viewOnMempool'))
+      h('a', { class: 'btn btn-sm', href: wallet.api.explorerTx(tx.txid), target: '_blank', rel: 'noopener', onClick: (e) => { e.preventDefault(); openExternal(wallet.api.explorerTx(tx.txid)); } }, t('viewOnMempool'))
     ),
     // RBF: an unconfirmed send can be rebroadcast at a higher fee.
     !tx.confirmed && !incoming && !wallet.offline
