@@ -4,7 +4,7 @@
 // which rebuilds the active screen. Text inputs write back into `ui` on `input`
 // (without re-rendering) so their values survive structural re-renders.
 
-import { Wallet, newMnemonic, isValidMnemonic, utxoId, previewGift, giftOutpoints, buildClaimTx, giftMinimum, parseExtendedKey, xpubToZpub, encryptVault, decryptVault } from './wallet.js';
+import { Wallet, newMnemonic, isValidMnemonic, accountXpubFor, utxoId, previewGift, giftOutpoints, buildClaimTx, giftMinimum, parseExtendedKey, xpubToZpub, encryptVault, decryptVault } from './wallet.js';
 import { qrSvg } from './qr.js';
 import { scanQr } from './scan.js';
 import { getSyncConfig, setSyncConfig } from './nostr.js';
@@ -616,6 +616,10 @@ async function activateAccount(acc, opts = {}) {
   if (acc.type === 'watch') wallet.load({ xpub: acc.xpub, netName: 'mainnet', offline: false });
   else if (acc.xprv) wallet.load({ xprv: acc.xprv, netName: 'mainnet', offline: false });
   else wallet.load({ mnemonic: acc.mnemonic, passphrase: acc.passphrase || '', netName: 'mainnet', offline: false });
+  // Record the account-level xpub so this wallet survives a session wipe as a
+  // watch-only entry (see the durable account directory) — you keep seeing your
+  // balance/history and re-enter the seed to spend again.
+  if (acc.type !== 'watch' && !acc.provisional) acc.xpub = wallet.accountXpub();
   persistAccounts();
   const hadCache = wallet.restoreCache(); // show last-known balance/history instantly
   // An opened gift link starts on a claim/back-up screen instead of the wallet.
@@ -713,17 +717,25 @@ function defaultLabel(type) {
   return t(type === 'watch' ? 'watchLabelN' : 'walletLabelN', { n });
 }
 
+// The durable account directory (localStorage): a view-only mirror of every
+// account — id, label, and account xpub, never a seed. So a wallet survives a
+// session wipe (browser closed without "Save to device") as a watch-only entry:
+// you keep seeing balance/history and re-enter the seed to spend again.
 function loadWatchAccounts() {
-  try { return JSON.parse(localStorage.getItem(WATCH_KEY) || '[]'); } catch { return []; }
-}
-function saveWatchAccounts() {
   try {
-    const watch = accounts.filter((a) => a.type === 'watch').map((a) => ({ id: a.id, label: a.label, type: 'watch', xpub: a.xpub }));
-    localStorage.setItem(WATCH_KEY, JSON.stringify(watch));
+    const dir = JSON.parse(localStorage.getItem(WATCH_KEY) || '[]');
+    return dir.filter((d) => d.xpub).map((d) => ({ id: d.id, label: d.label, type: 'watch', xpub: d.xpub }));
+  } catch { return []; }
+}
+function saveDirectory() {
+  try {
+    const dir = accounts.filter((a) => a.xpub && !a.provisional).map((a) => ({ id: a.id, label: a.label, xpub: a.xpub }));
+    localStorage.setItem(WATCH_KEY, JSON.stringify(dir));
   } catch {}
 }
 function persistAccounts() {
   try { sessionStorage.setItem(ACCOUNTS_KEY, JSON.stringify({ accounts, activeId })); } catch {}
+  saveDirectory();
 }
 function clearAccounts() {
   accounts = [];
@@ -738,7 +750,6 @@ function addOrGetAccount(partial) {
   if (!acc) {
     acc = { id: genId(), ...partial };
     accounts.push(acc);
-    if (acc.type === 'watch') saveWatchAccounts();
     persistAccounts();
   }
   return acc;
@@ -748,14 +759,17 @@ function addOrGetAccount(partial) {
 // longer discarded on bail. Called once the user claims, keeps, or enters it.
 function commitAccount() {
   const a = accounts.find((x) => x.id === activeId);
-  if (a && a.provisional) { delete a.provisional; persistAccounts(); }
+  if (a && a.provisional) {
+    delete a.provisional;
+    if (a.type !== 'watch') a.xpub = wallet.accountXpub(); // now eligible for the durable directory
+    persistAccounts();
+  }
 }
 
 function removeAccount(id) {
   const acc = accounts.find((a) => a.id === id);
   if (!acc) return;
   accounts = accounts.filter((a) => a.id !== id);
-  if (acc.type === 'watch') saveWatchAccounts();
   persistAccounts();
   if (activeId === id) {
     if (accounts.length) activateAccount(accounts[0], { fresh: true });
@@ -813,14 +827,27 @@ function writeVault() {
   } catch {}
 }
 
+// Bring vault-saved seeds into the session. Each upgrades the matching watch-only
+// directory entry (by xpub) to a spendable full account so wallets aren't
+// duplicated; one with no directory entry is added fresh.
 function mergeVaultList(list) {
   for (const v of list) {
-    const acc = addOrGetAccount(
-      v.xprv
-        ? { type: 'full', label: v.label || defaultLabel('full'), xprv: v.xprv }
-        : { type: 'full', label: v.label || defaultLabel('full'), mnemonic: v.mnemonic, passphrase: v.passphrase || '' }
-    );
-    acc.persisted = true;
+    const xpub = v.xprv ? accountXpubFor({ xprv: v.xprv }) : accountXpubFor({ mnemonic: v.mnemonic, passphrase: v.passphrase || '' });
+    const existing = accounts.find((a) => a.xpub === xpub);
+    if (existing) {
+      existing.type = 'full';
+      if (v.xprv) { existing.xprv = v.xprv; delete existing.mnemonic; delete existing.passphrase; }
+      else { existing.mnemonic = v.mnemonic; existing.passphrase = v.passphrase || ''; delete existing.xprv; }
+      if (v.label) existing.label = v.label;
+      existing.persisted = true;
+    } else {
+      const acc = addOrGetAccount(
+        v.xprv
+          ? { type: 'full', label: v.label || defaultLabel('full'), xprv: v.xprv, xpub }
+          : { type: 'full', label: v.label || defaultLabel('full'), mnemonic: v.mnemonic, passphrase: v.passphrase || '', xpub }
+      );
+      acc.persisted = true;
+    }
   }
 }
 
@@ -833,6 +860,42 @@ function startSave(id) {
   ui.pw = { purpose: 'save', accId: id, mode: hasVault() ? 'enter' : 'set', v1: '', v2: '', error: '' };
   render();
 }
+// --- load a seed into a watch-only account (make it spendable) --------------
+function startLoadSeed(opts = {}) {
+  ui.loadSeed = { value: '', passphrase: '', save: !!opts.save, error: '' };
+  render();
+}
+function cancelLoadSeed() { ui.loadSeed = null; render(); }
+async function doLoadSeed() {
+  const ls = ui.loadSeed;
+  const acc = activeAccount();
+  if (!ls || !acc || !acc.xpub) return;
+  const raw = (ls.value || '').trim().replace(/\s+/g, ' ');
+  if (!raw) { ls.error = t('enterSeedToSpend'); render(); return; }
+  let next = null;
+  try {
+    if (isValidMnemonic(raw)) {
+      if (accountXpubFor({ mnemonic: raw, passphrase: ls.passphrase || '' }) !== acc.xpub) { ls.error = t('seedMismatch'); render(); return; }
+      next = { mnemonic: raw, passphrase: ls.passphrase || '' };
+    } else {
+      const pk = parseExtendedKey(raw); // throws if not an extended key
+      if (pk.kind !== 'xprv') { ls.error = t('seedNeedsPrivate'); render(); return; }
+      if (accountXpubFor({ xprv: pk.key }) !== acc.xpub) { ls.error = t('seedMismatch'); render(); return; }
+      next = { xprv: pk.key };
+    }
+  } catch { ls.error = t('seedInvalid'); render(); return; }
+  // Upgrade in place — keep id/label/xpub so the cache, directory entry and
+  // history all carry over; the account is now spendable.
+  acc.type = 'full';
+  if (next.mnemonic) { acc.mnemonic = next.mnemonic; acc.passphrase = next.passphrase; delete acc.xprv; }
+  else { acc.xprv = next.xprv; delete acc.mnemonic; delete acc.passphrase; }
+  const save = ls.save;
+  ui.loadSeed = null;
+  await activateAccount(acc, { fresh: false });
+  if (save) startSave(acc.id); // opens the Save-to-device (vault) flow
+  else render();
+}
+
 function startForget(id) {
   if (vaultPassword != null) {
     const acc = accounts.find((a) => a.id === id);
@@ -869,9 +932,11 @@ function unlockVault() {
   let list;
   try { list = decryptVault(loadVaultBlob(), ui.vaultPw); } catch { ui.vaultError = t('pwWrong'); render(); return; }
   vaultPassword = ui.vaultPw;
-  accounts = list
-    .map((v) => ({ id: genId(), type: 'full', label: v.label || defaultLabel('full'), mnemonic: v.mnemonic || '', passphrase: v.passphrase || '', xprv: v.xprv || '', persisted: true }))
-    .concat(loadWatchAccounts());
+  // Start from the durable directory (watch-only views of every known wallet),
+  // then upgrade the vault-saved ones to spendable — so non-saved wallets still
+  // appear (watch-only) instead of vanishing.
+  accounts = loadWatchAccounts();
+  mergeVaultList(list);
   ui.vaultPw = '';
   ui.vaultError = '';
   activateAccount(accounts[0], { fresh: true });
@@ -1036,10 +1101,15 @@ function settingsTab() {
     'div',
     { class: 'col', style: 'gap:16px' },
     wallet.watchOnly
-      ? h('div', { class: 'card col' },
-          h('h3', {}, t('watchOnly')),
-          h('p', { class: 'small muted', style: 'margin:0' }, t('watchOnlyNote'))
-        )
+      ? (ui.loadSeed
+          ? loadSeedCard()
+          : h('div', { class: 'card col' },
+              h('h3', {}, t('watchOnly')),
+              h('p', { class: 'small muted', style: 'margin:0' }, t('watchOnlyNote')),
+              activeAccount() && activeAccount().xpub
+                ? h('button', { class: 'btn-primary btn-block', style: 'margin-top:4px', onClick: () => startLoadSeed() }, t('loadSeedBtn'))
+                : null
+            ))
       : !wallet.mnemonic
       ? h('div', { class: 'card col' },
           h('h3', {}, t('importedKey')),
@@ -1726,7 +1796,6 @@ function renameAccount(id) {
     const v = (ui.editLabel || '').trim();
     if (v) acc.label = v;
     persistAccounts();
-    if (acc.type === 'watch') saveWatchAccounts();
     if (acc.persisted) writeVault();
   }
   ui.editId = null;
@@ -1826,8 +1895,8 @@ function balanceCard() {
 function tabsBar() {
   const tabs = [
     ['receive', t('tabReceive')],
-    // Watch-only wallets can't sign, so no Send tab.
-    ...(wallet.watchOnly ? [] : [['send', t('tabSend')]]),
+    // Watch-only wallets show Send too — it prompts to load the seed to spend.
+    ['send', t('tabSend')],
     ['history', t('tabHistory')],
     ['settings', t('tabSettings')],
   ];
@@ -1908,7 +1977,49 @@ function receiveTab() {
 }
 
 // ---------------------------------------------------------------- Send
+// Form to enter a recovery phrase / xprv and make a watch-only wallet spendable.
+// Shared by the Send tab and Settings. The entered seed must derive to this
+// account's xpub — you can't load the wrong wallet's seed.
+function loadSeedCard() {
+  const ls = ui.loadSeed;
+  return h(
+    'div',
+    { class: 'card col' },
+    h('h3', {}, t('loadSeedTitle')),
+    h('p', { class: 'small muted', style: 'margin:0' }, t('loadSeedDesc')),
+    h('textarea', {
+      class: 'mono-input', rows: '3', placeholder: t('seedPlaceholder'),
+      autocapitalize: 'none', autocomplete: 'off', spellcheck: 'false', value: ls.value,
+      onInput: (e) => { ls.value = e.target.value; },
+    }),
+    h('input', {
+      type: 'password', class: 'mono-input', placeholder: t('bip39PassphraseOpt'),
+      autocapitalize: 'none', autocomplete: 'off', value: ls.passphrase,
+      onInput: (e) => { ls.passphrase = e.target.value; },
+    }),
+    h('label', { class: 'row gap6', style: 'align-items:center;cursor:pointer' },
+      h('input', { type: 'checkbox', checked: ls.save, onChange: (e) => { ls.save = e.target.checked; } }),
+      h('span', { class: 'small' }, t('alsoSaveDevice'))
+    ),
+    ls.error ? h('div', { class: 'notice err' }, ls.error) : null,
+    h('div', { class: 'row gap6' },
+      h('button', { class: 'btn-ghost', onClick: cancelLoadSeed }, t('cancel')),
+      h('button', { class: 'btn-primary grow', onClick: doLoadSeed }, t('loadSeedBtn'))
+    )
+  );
+}
+
 function sendTab() {
+  // Watch-only wallet (e.g. restored after a session wipe without "Save to
+  // device"): prompt to re-enter the seed before spending.
+  if (wallet.watchOnly) {
+    if (ui.loadSeed) return loadSeedCard();
+    return h('div', { class: 'card col', style: 'gap:12px' },
+      h('h3', {}, t('watchOnlySendTitle')),
+      h('p', { class: 'small muted', style: 'margin:0' }, t('watchOnlySendDesc')),
+      h('button', { class: 'btn-primary btn-block', onClick: () => startLoadSeed() }, t('loadSeedBtn'))
+    );
+  }
   if (ui.sendResult) return sendResultView();
   if (ui.broadcastTx) return broadcastConfirmView();
   if (ui.draft) return reviewView();

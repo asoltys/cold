@@ -47,6 +47,21 @@ export function newMnemonic(strengthBits = 128) {
   return generateMnemonic(wordlist, strengthBits);
 }
 
+// Account-level xpub for a seed/key without constructing a Wallet — used to
+// verify an entered recovery phrase matches a watch-only account before
+// upgrading it to spendable.
+export function accountXpubFor({ mnemonic, passphrase = '', xprv } = {}, netName = 'mainnet') {
+  const { coin } = NETS[netName];
+  let acct;
+  if (xprv) {
+    const node = HDKey.fromExtendedKey(xprv);
+    acct = node.depth === 0 ? node.derive(`m/84'/${coin}'/0'`) : node;
+  } else {
+    acct = HDKey.fromMasterSeed(mnemonicToSeedSync(mnemonic, passphrase)).derive(`m/84'/${coin}'/0'`);
+  }
+  return acct.publicExtendedKey;
+}
+
 export function isValidMnemonic(m) {
   try {
     return validateMnemonic(m.trim().replace(/\s+/g, ' '), wordlist);
@@ -1684,11 +1699,22 @@ export class Wallet {
     this.loaded = true;
   }
 
+  // A cache key derived from the account xpub (not the seed) — the same key a
+  // watch-only load of this wallet would use. A full wallet also writes its cache
+  // here so that, if the session is wiped and the wallet reopens as watch-only,
+  // its balance/history shows instantly instead of needing a rescan.
+  _xpubCacheKey() {
+    const bytes = new TextEncoder().encode(this.accountXpub());
+    return 'btc-wallet-cache:' + hex.encode(sha256(bytes)).slice(0, 32);
+  }
+
   saveCache() {
     const snap = this._snapshot();
     this._savedAt = snap.savedAt;
     try {
       localStorage.setItem(this._cacheKey(), JSON.stringify(snap));
+      const xk = this._xpubCacheKey();
+      if (xk !== this._cacheKey()) localStorage.setItem(xk, JSON.stringify(snap)); // watch-only mirror
     } catch {}
     // Push to the configured relays too (debounced), so other devices get the
     // update — unless cross-device sync is turned off.
@@ -1702,7 +1728,10 @@ export class Wallet {
 
   restoreCache() {
     try {
-      const raw = localStorage.getItem(this._cacheKey());
+      let raw = localStorage.getItem(this._cacheKey());
+      // A wallet just upgraded from watch-only (seed re-entered) has no seed-keyed
+      // cache yet — fall back to the xpub mirror so it shows instantly.
+      if (!raw && !this.watchOnly) raw = localStorage.getItem(this._xpubCacheKey());
       if (!raw) return false;
       this._applySnapshot(JSON.parse(raw));
       this.emit();
