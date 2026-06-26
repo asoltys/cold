@@ -37,9 +37,14 @@ const USED_HIT_DELAY_MS = 500;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+const REGTEST_NET = { bech32: 'bcrt', pubKeyHash: 0x6f, scriptHash: 0xc4, wif: 0xef };
+
 const NETS = {
-  mainnet: { net: btc.NETWORK, coin: 0 },
-  testnet: { net: btc.TEST_NETWORK, coin: 1 },
+  mainnet:  { net: btc.NETWORK,       coin: 0 },
+  testnet:  { net: btc.TEST_NETWORK,  coin: 1 },
+  testnet4: { net: btc.TEST_NETWORK,  coin: 1 },
+  signet:   { net: btc.TEST_NETWORK,  coin: 1 },
+  regtest:  { net: REGTEST_NET,       coin: 1 },
 };
 
 export function newMnemonic(strengthBits = 128) {
@@ -105,6 +110,9 @@ export class Wallet {
     this._nostrPubTimer = null;
 
     this._subs = new Set();
+
+    // Transaction labels, keyed by txid, persisted in localStorage.
+    this._labels = null;
   }
 
   // --- reactive glue (tiny pub/sub; the UI re-renders on change) ----------
@@ -741,6 +749,23 @@ export class Wallet {
   }
   freshChange() {
     return this.derive(1, this.nextChangeIndex);
+  }
+
+  advanceReceive() {
+    const addr = this.derive(0, this.nextReceiveIndex);
+    if (!this.receive.find((a) => a.index === this.nextReceiveIndex)) {
+      this.receive.push({
+        chain: 0,
+        index: this.nextReceiveIndex,
+        address: addr.address,
+        used: false,
+        confirmed: 0,
+        pending: 0,
+      });
+      this.addrMap.set(addr.address, { chain: 0, index: this.nextReceiveIndex });
+    }
+    this.nextReceiveIndex++;
+    this.emit();
   }
 
   // --- spending -----------------------------------------------------------
@@ -1538,6 +1563,34 @@ export class Wallet {
     }
   }
 
+  // --- transaction labels -------------------------------------------------
+  _loadLabels() {
+    if (this._labels) return this._labels;
+    try {
+      const raw = localStorage.getItem(this._cacheKey() + LABELS_KEY_SUFFIX);
+      this._labels = raw ? JSON.parse(raw) : {};
+    } catch { this._labels = {}; }
+    return this._labels;
+  }
+  _saveLabels() {
+    if (!this._labels) return;
+    try { localStorage.setItem(this._cacheKey() + LABELS_KEY_SUFFIX, JSON.stringify(this._labels)); } catch {}
+  }
+  getAllTxLabels() {
+    return { ...this._loadLabels() };
+  }
+  setAllTxLabels(labels) {
+    this._labels = { ...labels };
+    this._saveLabels();
+  }
+  getTxLabel(txid) {
+    return this._loadLabels()[txid] || '';
+  }
+  setTxLabel(txid, label) {
+    this._loadLabels()[txid] = label;
+    this._saveLabels();
+  }
+
   // --- local history cache ------------------------------------------------
   // Cache the scanned state in localStorage, keyed by a hash of the seed (the
   // seed itself is never stored). Re-importing the same seed in this browser
@@ -1656,9 +1709,9 @@ export class Wallet {
   // Exported on the ONLINE device. Contains no secrets — just what an offline
   // signer needs: coins, fee rates, and which addresses are next/fresh.
   exportSnapshot() {
-    return {
+    const snap = {
       app: 'bitcoin-wallet',
-      version: 1,
+      version: 2,
       netName: this.netName,
       exportedAt: new Date().toISOString(),
       feeRates: this.feeRates,
@@ -1672,6 +1725,13 @@ export class Wallet {
         confirmed: u.confirmed,
       })),
     };
+    // Include labels in BIP-329 format if any exist.
+    const txLabels = this._loadLabels();
+    const labelEntries = Object.entries(txLabels).filter(([, v]) => v);
+    if (labelEntries.length) {
+      snap.labels = exportLabelsBIP329(txLabels);
+    }
+    return snap;
   }
 
   // Imported on the OFFLINE device (which already has the seed loaded).
@@ -1715,12 +1775,95 @@ export class Wallet {
     this._recomputeBalanceFromUtxos();
     this.loaded = true;
     this.emit();
+    // Restore labels from snapshot (BIP-329 format in v2 snapshots).
+    if (snap.labels) {
+      try {
+        const labels = importLabelsBIP329(snap.labels);
+        this.setAllTxLabels(labels);
+      } catch {}
+    }
     return { imported: utxos.length, unmatched };
   }
 }
 
 export function utxoId(u) {
   return `${u.txid}:${u.vout}`;
+}
+
+// --- descriptor import ----------------------------------------------------
+// Parse a Bitcoin output descriptor and extract the embedded extended key.
+// Handles:
+//   wpkh(<key>/0/*)          — BIP84 native segwit
+//   tr(<key>/0/*)            — BIP86 taproot
+//   sh(wpkh(<key>/0/*))      — BIP49 wrapped segwit
+//   pkh(<key>/0/*)           — BIP44 legacy
+//   wsh(multi(...)/0/*)      — multisig (first key)
+// Keys may include origin: [fingerprint/84'/0'/0']xpub...
+// Returns { kind: 'xpub'|'xprv', key } or throws.
+export function parseDescriptor(text) {
+  const raw = (text || '').trim();
+
+  // Strip outer function wrappers, keeping innermost key.
+  let inner = raw;
+  while (/^(wpkh|tr|pkh|sh|wsh|multi)\s*\(/.test(inner)) {
+    inner = inner.replace(/^(wpkh|tr|pkh|sh|wsh|multi)\s*\(/, '');
+    let depth = 1;
+    for (let i = 0; i < inner.length; i++) {
+      if (inner[i] === '(') depth++;
+      else if (inner[i] === ')') { depth--; if (depth === 0) { inner = inner.slice(0, i); break; } }
+    }
+  }
+
+  // Strip key origin [fingerprint/path]
+  inner = inner.replace(/^\[[^\]]*\]/, '');
+
+  // Strip trailing derivation path like /0/*, /0/0, /*
+  inner = inner.replace(/\/\d+(\/\*)?(\/\d+)?$/, '');
+  inner = inner.replace(/\/\*$/, '');
+
+  // Now inner should be an extended key (xpub/zpub/xprv/zprv) or hex pubkey.
+  // Try extended key first.
+  try {
+    const pk = parseExtendedKey(inner);
+    return pk;
+  } catch {}
+
+  // Maybe it's a raw hex public key — 66 hex chars (compressed, 33 bytes).
+  if (/^[0-9a-f]{66}$/i.test(inner)) {
+    throw new Error('Descriptor contains a raw public key, not an HD wallet key. Use an xpub or a seed phrase to create a wallet.');
+  }
+
+  throw new Error('Could not extract an extended key from the descriptor.');
+}
+
+// --- BIP-329 label export/import ------------------------------------------
+// BIP-329: Wallet Labels Export/Import format.
+// https://github.com/bitcoin/bips/blob/master/bip-0329.mediawiki
+const LABELS_KEY_SUFFIX = ':labels';
+
+export function exportLabelsBIP329(txLabels) {
+  const labels = [];
+  for (const [txid, label] of Object.entries(txLabels || {})) {
+    if (label) labels.push({ type: 'tx', ref: txid, label });
+  }
+  return {
+    app: 'halwallet',
+    version: 1,
+    labels,
+  };
+}
+
+export function importLabelsBIP329(data) {
+  if (!data || data.app !== 'halwallet' || !Array.isArray(data.labels)) {
+    throw new Error('Not a valid BIP-329 labels file.');
+  }
+  const txLabels = {};
+  for (const entry of data.labels) {
+    if (entry.type === 'tx' && entry.ref && entry.label) {
+      txLabels[entry.ref] = entry.label;
+    }
+  }
+  return txLabels;
 }
 
 // Watch-only: accept a native-segwit account xpub or zpub and normalize it to
@@ -1780,6 +1923,8 @@ export function decryptVault(blob, password) {
 }
 
 // Convert a standard account xpub to a BIP84 zpub for export/interop.
+export { NETS };
+
 export function xpubToZpub(xpub) {
   const data = new Uint8Array(_b58c.decode(xpub));
   data.set(_ZPUB_VER, 0);

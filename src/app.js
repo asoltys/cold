@@ -4,7 +4,7 @@
 // which rebuilds the active screen. Text inputs write back into `ui` on `input`
 // (without re-rendering) so their values survive structural re-renders.
 
-import { Wallet, newMnemonic, isValidMnemonic, utxoId, previewGift, giftOutpoints, buildClaimTx, giftMinimum, parseExtendedKey, xpubToZpub, encryptVault, decryptVault } from './wallet.js';
+import { Wallet, newMnemonic, isValidMnemonic, utxoId, previewGift, giftOutpoints, buildClaimTx, giftMinimum, parseExtendedKey, xpubToZpub, encryptVault, decryptVault, NETS, parseDescriptor, exportLabelsBIP329, importLabelsBIP329 } from './wallet.js';
 import { qrSvg } from './qr.js';
 import { scanQr } from './scan.js';
 import { getSyncConfig, setSyncConfig } from './nostr.js';
@@ -578,18 +578,36 @@ function optionsPanel() {
   );
 }
 
-// Import accepts a recovery phrase, an xpub/zpub (watch-only), or an xprv/zprv
-// (full spending). Classify the pasted text and open the right kind of wallet.
+// Import accepts a recovery phrase, a descriptor (e.g. wpkh(...)), an xpub/zpub
+// (watch-only), or an xprv/zprv (full spending). Classify the pasted text and
+// open the right kind of wallet.
 async function openWallet(input) {
   ui.unlockError = '';
   const raw = (input || '').trim();
   const m = raw.replace(/\s+/g, ' ');
   if (isValidMnemonic(m)) { await enterWallet(m, ui.passphrase); return; }
+  const netName = getPreferredNet();
+  // Try descriptor first (wpkh(...), tr(...), sh(wpkh(...)), etc.)
+  if (/^(wpkh|tr|pkh|sh|wsh)\s*\(/i.test(raw)) {
+    try {
+      const pk = parseDescriptor(raw);
+      const acc = pk.kind === 'xpub'
+        ? addOrGetAccount({ type: 'watch', label: defaultLabel('watch'), xpub: pk.key, netName })
+        : addOrGetAccount({ type: 'full', label: defaultLabel('full'), xprv: pk.key, netName });
+      ui.fromWallet = false;
+      await activateAccount(acc, { fresh: true });
+      return;
+    } catch (e) {
+      ui.unlockError = e.message;
+      render();
+      return;
+    }
+  }
   let pk;
   try { pk = parseExtendedKey(raw); } catch { ui.unlockError = t('invalidImport'); render(); return; }
   const acc = pk.kind === 'xpub'
-    ? addOrGetAccount({ type: 'watch', label: defaultLabel('watch'), xpub: pk.key })
-    : addOrGetAccount({ type: 'full', label: defaultLabel('full'), xprv: pk.key });
+    ? addOrGetAccount({ type: 'watch', label: defaultLabel('watch'), xpub: pk.key, netName })
+    : addOrGetAccount({ type: 'full', label: defaultLabel('full'), xprv: pk.key, netName });
   ui.fromWallet = false;
   await activateAccount(acc, { fresh: true });
 }
@@ -601,21 +619,31 @@ async function enterWallet(mnemonic, passphrase, opts = {}) {
     label: defaultLabel('full'),
     mnemonic: (mnemonic || '').trim().replace(/\s+/g, ' '),
     passphrase: passphrase || '',
+    netName: getPreferredNet(),
   });
   await activateAccount(acc, { ...opts, fresh: true });
+}
+
+const NET_PREF_KEY = 'btc-wallet-preferred-net';
+function getPreferredNet() {
+  try { return localStorage.getItem(NET_PREF_KEY) || 'mainnet'; } catch { return 'mainnet'; }
+}
+function setPreferredNet(net) {
+  try { localStorage.setItem(NET_PREF_KEY, net); } catch {}
 }
 
 // Load an account into the wallet and start scanning. Full-account seeds are
 // kept in sessionStorage (ephemeral); a refresh restores the open account.
 async function activateAccount(acc, opts = {}) {
   activeId = acc.id;
+  const netName = acc.netName || (opts.netName) || getPreferredNet();
   // A gift link generates this wallet only to claim into. Keep it provisional
   // until the user commits (claims, or chooses to keep it / enters the wallet),
   // so bailing from an already-claimed gift doesn't leave an empty account.
   if (opts.gift) acc.provisional = true;
-  if (acc.type === 'watch') wallet.load({ xpub: acc.xpub, netName: 'mainnet', offline: false });
-  else if (acc.xprv) wallet.load({ xprv: acc.xprv, netName: 'mainnet', offline: false });
-  else wallet.load({ mnemonic: acc.mnemonic, passphrase: acc.passphrase || '', netName: 'mainnet', offline: false });
+  if (acc.type === 'watch') wallet.load({ xpub: acc.xpub, netName, offline: false });
+  else if (acc.xprv) wallet.load({ xprv: acc.xprv, netName, offline: false });
+  else wallet.load({ mnemonic: acc.mnemonic, passphrase: acc.passphrase || '', netName, offline: false });
   persistAccounts();
   const hadCache = wallet.restoreCache(); // show last-known balance/history instantly
   // An opened gift link starts on a claim/back-up screen instead of the wallet.
@@ -817,8 +845,8 @@ function mergeVaultList(list) {
   for (const v of list) {
     const acc = addOrGetAccount(
       v.xprv
-        ? { type: 'full', label: v.label || defaultLabel('full'), xprv: v.xprv }
-        : { type: 'full', label: v.label || defaultLabel('full'), mnemonic: v.mnemonic, passphrase: v.passphrase || '' }
+        ? { type: 'full', label: v.label || defaultLabel('full'), xprv: v.xprv, netName: getPreferredNet() }
+        : { type: 'full', label: v.label || defaultLabel('full'), mnemonic: v.mnemonic, passphrase: v.passphrase || '', netName: getPreferredNet() }
     );
     acc.persisted = true;
   }
@@ -869,8 +897,9 @@ function unlockVault() {
   let list;
   try { list = decryptVault(loadVaultBlob(), ui.vaultPw); } catch { ui.vaultError = t('pwWrong'); render(); return; }
   vaultPassword = ui.vaultPw;
+  const netName = getPreferredNet();
   accounts = list
-    .map((v) => ({ id: genId(), type: 'full', label: v.label || defaultLabel('full'), mnemonic: v.mnemonic || '', passphrase: v.passphrase || '', xprv: v.xprv || '', persisted: true }))
+    .map((v) => ({ id: genId(), type: 'full', label: v.label || defaultLabel('full'), mnemonic: v.mnemonic || '', passphrase: v.passphrase || '', xprv: v.xprv || '', netName, persisted: true }))
     .concat(loadWatchAccounts());
   ui.vaultPw = '';
   ui.vaultError = '';
@@ -910,7 +939,7 @@ function lock() {
   wallet.stopRealtime();
   clearAccounts();
   vaultPassword = null;
-  wallet.load({ mnemonic: '', passphrase: '', netName: 'mainnet', offline: false });
+  wallet.load({ mnemonic: '', passphrase: '', netName: getPreferredNet(), offline: false });
   wallet.mnemonic = '';
   ui.screen = hasVault() ? 'vault' : 'unlock';
   ui.unlockTab = 'create';
@@ -1071,9 +1100,21 @@ function settingsTab() {
       : h(
           'div',
           { class: 'card col' },
-          h('h3', {}, t('offlineTransfer')),
-          snapshotActions()
-        ),
+        h('h3', {}, t('offlineTransfer')),
+        snapshotActions()
+    ),
+    h(
+      'div',
+      { class: 'card col' },
+      h('h3', {}, t('labels')),
+      h('p', { class: 'small muted', style: 'margin:0' }, t('labelsDesc')),
+      h('div', { class: 'row gap6 wrap' },
+        h('button', { class: 'btn-sm', onClick: exportLabels }, t('exportLabels')),
+        h('label', { class: 'btn btn-sm', style: 'cursor:pointer' }, t('importLabels'),
+          h('input', { type: 'file', accept: 'application/json,.json', style: 'display:none', onChange: importLabelsFile })
+        )
+      )
+    ),
     h(
       'div',
       { class: 'card col' },
@@ -1084,6 +1125,7 @@ function settingsTab() {
         : h('button', { onClick: () => { ui.addrScan = true; ui.addrScanPage = 0; render(); } }, t('rescanAddresses'))
     ),
     explorerCard(),
+    networkCard(),
     wallet.watchOnly || !wallet.mnemonic ? null : syncCard()
   );
 }
@@ -1295,10 +1337,43 @@ async function doRevoke(id) {
   render();
 }
 
+// Network selector: switch between mainnet, testnet, testnet4, signet, regtest.
+function networkCard() {
+  return h(
+    'div',
+    { class: 'card col' },
+    h('h3', {}, t('network')),
+    h('p', { class: 'small muted', style: 'margin:0' }, t('networkDesc')),
+    h(
+      'select',
+      {
+        value: wallet.netName,
+        onChange: (e) => {
+          const net = e.target.value;
+          setPreferredNet(net);
+          wallet.load({
+            mnemonic: wallet.mnemonic,
+            passphrase: wallet.passphrase,
+            xpub: wallet.xpub || '',
+            xprv: wallet.xprv || '',
+            netName: net,
+            offline: wallet.offline,
+          });
+          render();
+          if (!wallet.offline) wallet.reloadExplorer();
+        },
+      },
+      Object.keys(NETS).map((n) =>
+        h('option', { value: n, selected: n === wallet.netName }, t('net_' + n))
+      )
+    )
+  );
+}
+
 // Block explorer / server selection: a preset (mempool.space, blockstream.info)
 // or a custom Esplora/electrs REST URL (e.g. your own node).
 function explorerCard() {
-  const cfg = getExplorerConfig();
+  const cfg = getExplorerConfig(wallet.netName);
   const rt = getRealtimeEnabled();
   const setRealtime = (on) => {
     if (on === getRealtimeEnabled()) return;
@@ -1316,7 +1391,7 @@ function explorerCard() {
       {
         onChange: (e) => {
           const server = e.target.value;
-          setExplorerConfig({ server, url: cfg.url });
+          setExplorerConfig({ server, url: cfg.url, net: wallet.netName });
           render();
           if (server !== 'custom' || cfg.url) wallet.reloadExplorer();
         },
@@ -1332,7 +1407,7 @@ function explorerCard() {
             value: cfg.url,
             // Apply on blur/Enter, not every keystroke (each change rescans).
             onChange: (e) => {
-              setExplorerConfig({ server: 'custom', url: e.target.value.trim() });
+              setExplorerConfig({ server: 'custom', url: e.target.value.trim(), net: wallet.netName });
               wallet.reloadExplorer();
             },
           }),
@@ -1889,7 +1964,10 @@ function receiveTab() {
     { class: 'card col', style: 'align-items:center;gap:14px' },
     h('div', { html: qrSvg(fresh.address) }),
     h('div', { class: 'addr-box', style: 'width:100%' }, fresh.address),
-    copyBtn(fresh.address, t('copyAddress'))
+    h('div', { class: 'row gap6 wrap', style: 'width:100%' },
+      copyBtn(fresh.address, t('copyAddress')),
+      h('button', { class: 'btn-sm', onClick: () => { wallet.advanceReceive(); render(); } }, t('newAddress'))
+    )
   );
 }
 
@@ -2525,6 +2603,7 @@ function giftHistoryItem(g) {
 function txHistoryItem(tx) {
   const incoming = tx.net >= 0;
   const stuck = !tx.confirmed && wallet.isStuck(tx);
+  const label = wallet.getTxLabel(tx.txid);
   return h(
     'div',
     { class: 'item', style: 'cursor:pointer', onClick: () => openTx(tx.txid) },
@@ -2536,6 +2615,7 @@ function txHistoryItem(tx) {
           : stuck ? h('span', { class: 'tag', style: 'background:var(--red-soft);color:var(--red)' }, t('stuckTag'))
           : h('span', { class: 'tag pending' }, t('pendingTag'))
       ),
+      label ? h('div', { class: 'small', style: 'color:var(--ink)' }, label) : null,
       h('div', { class: 'small faint' }, tx.confirmed ? timeAgo(tx.blockTime) : stuck ? t('stuckNote') : t('awaitingConfirmation'))
     ),
     h('div', { style: 'text-align:right' },
@@ -2681,6 +2761,14 @@ function txDetailView(tx) {
       copyBtn(tx.txid, t('copyId')),
       h('a', { class: 'btn btn-sm', href: wallet.api.explorerTx(tx.txid), target: '_blank', rel: 'noopener', onClick: (e) => { e.preventDefault(); openExternal(wallet.api.explorerTx(tx.txid)); } }, t('viewOnMempool'))
     ),
+    h('label', { class: 'field' },
+      h('span', { class: 'lab' }, t('txLabel')),
+      h('input', {
+        type: 'text', placeholder: t('txLabelPlaceholder'),
+        value: wallet.getTxLabel(tx.txid),
+        onInput: (e) => { wallet.setTxLabel(tx.txid, e.target.value); },
+      })
+    ),
     // RBF: an unconfirmed send can be rebroadcast at a higher fee.
     !tx.confirmed && !incoming && !wallet.offline
       ? (ui.busy
@@ -2725,6 +2813,32 @@ async function importSnapshotFile(e) {
     if (res.unmatched.length) msg += t('unmatchedSuffix', { n: res.unmatched.length });
     toast(msg);
     ui.tab = 'settings';
+    render();
+  } catch (err) {
+    toast(t('importFailed', { msg: err.message }));
+  }
+  e.target.value = '';
+}
+
+// --- BIP-329 label export/import ------------------------------------------
+function exportLabels() {
+  const labels = wallet.getAllTxLabels();
+  const bip329 = exportLabelsBIP329(labels);
+  const stamp = new Date().toISOString().slice(0, 10);
+  download(`wallet-labels-${stamp}.json`, JSON.stringify(bip329, null, 2));
+  toast(t('labelsExported'));
+}
+
+async function importLabelsFile(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  try {
+    const data = JSON.parse(await file.text());
+    const labels = importLabelsBIP329(data);
+    const existing = wallet.getAllTxLabels();
+    Object.assign(existing, labels);
+    wallet.setAllTxLabels(existing);
+    toast(t('importedNLabels', { n: Object.keys(labels).length }));
     render();
   } catch (err) {
     toast(t('importFailed', { msg: err.message }));

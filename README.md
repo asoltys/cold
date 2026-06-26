@@ -10,13 +10,23 @@ from the filesystem with no server).
 
 The name is a nod to [Hal Finney](https://en.wikipedia.org/wiki/Hal_Finney_(computer_scientist)).
 
+## Installation on an old phone
+
+Hal Wallet makes an excellent air-gapped (offline) signing device for an old
+smartphone. See **[INSTALL.md](INSTALL.md)** for a complete step-by-step guide
+to repurpose a retired phone as a dedicated cold storage wallet.
+
 ## Features
 
 - **BIP84 / native SegWit (p2wpkh)** HD wallet from a 12-word BIP39 seed
-  (imports any valid BIP39 phrase; optional passphrase). Mainnet.
+  (imports any valid BIP39 phrase; optional passphrase).
+- **Multi-network support** — switch between **Mainnet**, **Testnet**,
+  **Testnet4**, **Signet**, and **Regtest** in Settings. Each network has a
+  default block explorer and supports custom Esplora/electrs URLs.
 - **One fresh address at a time** — a new receive address is only handed out
   after the current one is paid, so used addresses stay contiguous and scans
-  stay tiny (no 20-address gap probing).
+  stay tiny (no 20-address gap probing). A manual **"New address"** button
+  lets you advance early when you need a fresh address.
 - **Choose your own block explorer** — mempool.space by default (with
   blockstream.info as a silent failover), blockstream.info only, or a **custom
   Esplora / electrs REST URL** (e.g. your own node) in Settings.
@@ -31,6 +41,9 @@ The name is a nod to [Hal Finney](https://en.wikipedia.org/wiki/Hal_Finney_(comp
 - **QR scanner** on the send page — scan a Bitcoin address, a BIP21 URI (fills
   the amount too), or a signed transaction to broadcast it. Uses the native
   `BarcodeDetector` where available and lazy-loads jsQR otherwise.
+- **Transaction labeling** — add a label (e.g. "coffee with Alice") to any
+  transaction in the History detail view. Labels persist across sessions
+  on the device.
 - **Optional encrypted cross-device sync over Nostr** — wallet state is
   NIP-44-encrypted to yourself and stored as a replaceable event (kind 30078) on
   the relay(s) you choose (default relay.coinos.io). The Nostr identity is
@@ -90,7 +103,8 @@ coins. A manual **Settings → Rescan** forces a full re-scan on demand.
 1. **Online device:** open the wallet, let it scan, then **Settings → Export
    snapshot** (a keyless JSON of your UTXOs + fee rates).
 2. Move the file to an **offline device** running the saved `index.html`.
-3. There, enter your **seed phrase** (it auto-detects no network), then
+3. On the offline device, enter your **seed phrase** and select the correct
+   **network** in Settings (mainnet/testnet/signet/etc.), then
    **Settings → Import snapshot**.
 4. Build and **sign** a transaction; copy/download the signed hex (or scan the
    QR) and broadcast it from any online device.
@@ -109,6 +123,7 @@ coins. A manual **Settings → Rescan** forces a full re-scan on demand.
 | `src/i18n.js` | UI strings + translations |
 | `src/style.css` | Hand-rolled styles |
 | `build.js` / `dev.js` | Bun bundler → inlined `index.html` + PWA sidecars, and dev server |
+| `INSTALL.md` | Step-by-step guide for air-gapped installation on an old phone |
 
 ## Security notes
 
