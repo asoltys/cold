@@ -1584,14 +1584,14 @@ function claimScreen() {
       h('div', { class: 'card col', style: 'align-items:center;text-align:center;gap:12px' },
         h('div', { style: 'font-size:56px;line-height:1' }, '🎁'),
         h('h2', { style: 'margin:0' }, t('giftTakenTitle')),
-        h('p', { class: 'muted', style: 'margin:0' }, t('giftTakenBody')),
-        ui.claimTaken.txid
-          ? h('a', { class: 'btn btn-sm', href: wallet.api.explorerTx(ui.claimTaken.txid), target: '_blank', rel: 'noopener' }, t('viewOnMempool'))
-          : null
+        h('p', { class: 'muted', style: 'margin:0' }, t('giftTakenBody'))
       ),
       // A fresh wallet was already generated for the claim — offer to keep it,
-      // or head back to the home screen.
+      // view the claim on a block explorer, or head back to the home screen.
       h('button', { class: 'btn-primary btn-block', onClick: () => { ui.claimTaken = null; ui.claimedAmount = 0; ui.claimStep = 'backup'; commitAccount(); render(); } }, t('createWalletAnyway')),
+      ui.claimTaken.txid
+        ? h('a', { class: 'btn btn-block', href: wallet.api.explorerTx(ui.claimTaken.txid), target: '_blank', rel: 'noopener' }, t('viewOnMempool'))
+        : null,
       h('button', { class: 'btn-ghost btn-block', onClick: goHome }, t('goToHome'))
     );
   }
