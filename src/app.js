@@ -221,6 +221,9 @@ function openHowItWorks() {
   render();
 }
 
+// Per-tab session nav (tab + open tx), so a refresh keeps the user's place.
+const NAV_KEY = 'btc-wallet-nav';
+
 function render() {
   const screen =
     ui.screen === 'wallet'
@@ -238,6 +241,10 @@ function render() {
   // Fast-poll the receive address only while the user is actually watching for a
   // payment (wallet screen, Receive tab, online). Idempotent — safe each render.
   wallet.setWatchReceive(ui.screen === 'wallet' && ui.tab === 'receive' && !wallet.offline);
+  // Remember where we are so a refresh restores it (only meaningful on the wallet).
+  if (ui.screen === 'wallet') {
+    try { sessionStorage.setItem(NAV_KEY, JSON.stringify({ tab: ui.tab, txDetail: ui.txDetail })); } catch {}
+  }
 }
 wallet.subscribe(render);
 
@@ -605,7 +612,11 @@ async function activateAccount(acc, opts = {}) {
   ui.claimError = '';
   ui.claimTaken = null;
   ui.claimChecking = !!opts.gift; // gate the Claim button until we've checked
-  ui.tab = 'receive';
+  // Restore the tab / open tx from the last session so a refresh keeps the
+  // user's place. A gift link always opens the claim screen instead.
+  const nav = (() => { try { return JSON.parse(sessionStorage.getItem(NAV_KEY) || 'null'); } catch { return null; } })();
+  ui.tab = (!opts.gift && nav && nav.tab) || 'receive';
+  ui.txDetail = (!opts.gift && nav && nav.txDetail) || null;
   // Not baselined yet — stays null until the scan + ack logic below sets it,
   // so the celebration never fires for payments that were already there at
   // import (the index only looks "advanced" because the scan hadn't run yet).
@@ -616,6 +627,7 @@ async function activateAccount(acc, opts = {}) {
   ui.giftMode = false;
   ui.offlineFallback = false;
   render();
+  if (ui.txDetail) openTx(ui.txDetail); // restored a tx detail — fill in fee/details if missing
 
   // No manual offline switch: try to scan, and if the network is unreachable,
   // fall back to offline mode automatically.
