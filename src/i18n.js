@@ -259,6 +259,8 @@ const STR = {
     explorerDesc: 'The server this wallet queries for balances and history. Point it at your own node for maximum privacy.',
     explorerUrl: 'Server URL',
     explorerUrlHint: 'Esplora / electrs REST base, e.g. https://mempool.space/api',
+    instantNotif: 'Instant notifications',
+    instantNotifDesc: 'Uses coinos to push payments the instant they arrive. Turn off to poll the explorer above instead — a bit slower, but your addresses are never sent to coinos.',
     deviceSync: 'Device sync',
     deviceSyncDesc: 'Keep this wallet in sync across your devices by storing an encrypted copy on a Nostr relay — only a device with your seed can read it. Turn it off to keep everything on this device.',
     syncAcross: 'Sync across devices',

@@ -45,11 +45,10 @@ function resolveHosts(net) {
   return [host('https://mempool.space', 'mempool'), host('https://blockstream.info', 'esplora')];
 }
 
-// Realtime is a private Fulcrum (Electrum protocol over WebSocket-Secure). It
-// reliably pushes a scripthash-status notification the moment a tx touches a
-// watched address — unlike the public Esplora/blockchain.info sockets, whose
-// address push doesn't fire. Independent of the REST explorer choice. Mainnet
-// only; testnet falls back to polling (null). Overridable for staging/testing.
+// Realtime notifications come from coinos's WebSocket watcher: it pushes the
+// instant a tx touches a watched address (the app subscribes its frontier +
+// pending scripthashes). Independent of the REST explorer choice. Mainnet only;
+// testnet falls back to polling (null). Overridable for staging/testing.
 const ELECTRUM_KEY = 'btc-wallet-electrum';
 export function getElectrumWsUrl() {
   try {
@@ -60,8 +59,20 @@ export function getElectrumWsUrl() {
   // WebSocket quirk; the main hostname proxies WS cleanly).
   return 'wss://coinos.io/electrum';
 }
+
+// Privacy opt-out: turning this off means the app never connects to coinos's
+// watcher (so it can't see your addresses) and relies on polling your explorer
+// instead. On by default.
+const REALTIME_KEY = 'btc-wallet-realtime';
+export function getRealtimeEnabled() {
+  try { return localStorage.getItem(REALTIME_KEY) !== 'off'; } catch { return true; }
+}
+export function setRealtimeEnabled(on) {
+  try { localStorage.setItem(REALTIME_KEY, on ? 'on' : 'off'); } catch {}
+}
+
 export function wsUrl(net) {
-  if (net === 'testnet') return null;
+  if (net === 'testnet' || !getRealtimeEnabled()) return null;
   return getElectrumWsUrl();
 }
 

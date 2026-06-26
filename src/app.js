@@ -8,7 +8,7 @@ import { Wallet, newMnemonic, isValidMnemonic, utxoId, previewGift, giftOutpoint
 import { qrSvg } from './qr.js';
 import { scanQr } from './scan.js';
 import { getSyncConfig, setSyncConfig } from './nostr.js';
-import { getExplorerConfig, setExplorerConfig, EXPLORER_PRESETS } from './api.js';
+import { getExplorerConfig, setExplorerConfig, EXPLORER_PRESETS, getRealtimeEnabled, setRealtimeEnabled } from './api.js';
 import { t, LANGS, getLang, setLang, isRTL, loadLocale } from './i18n.js';
 import {
   fmtBtc,
@@ -1298,6 +1298,13 @@ async function doRevoke(id) {
 // or a custom Esplora/electrs REST URL (e.g. your own node).
 function explorerCard() {
   const cfg = getExplorerConfig();
+  const rt = getRealtimeEnabled();
+  const setRealtime = (on) => {
+    if (on === getRealtimeEnabled()) return;
+    setRealtimeEnabled(on);
+    render();
+    if (!wallet.offline) wallet.startRealtime(); // reconnect or drop the watcher
+  };
   return h(
     'div',
     { class: 'card col' },
@@ -1330,7 +1337,17 @@ function explorerCard() {
           }),
           h('div', { class: 'small faint' }, t('explorerUrlHint'))
         )
-      : null
+      : null,
+    // Realtime via coinos — the one place addresses are shared off-device. Opt
+    // out to poll the explorer above instead (a bit slower, nothing told to coinos).
+    h('div', { class: 'row between', style: 'margin-top:8px' },
+      h('span', { class: 'lab', style: 'margin:0' }, t('instantNotif')),
+      h('div', { class: 'seg' },
+        h('button', { type: 'button', class: rt ? 'active' : '', onClick: () => setRealtime(true) }, t('syncOn')),
+        h('button', { type: 'button', class: !rt ? 'active' : '', onClick: () => setRealtime(false) }, t('syncOff'))
+      )
+    ),
+    h('div', { class: 'small faint' }, t('instantNotifDesc'))
   );
 }
 
