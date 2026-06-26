@@ -74,6 +74,15 @@ const ui = {
   addrScan: false, // Settings: showing the per-address rescan list
   addrScanPage: 0, // Settings: current page within the address list
   rescanning: new Set(), // 'chain/index' ids queued/in-flight for rescan
+  scanMoreCount: 10,
+  scanMoreBusy: false,
+  showSilentPayment: false, // Receive: show silent payment address
+  spScanBusy: false, // Settings: SP block scan in progress
+  spScanProgress: 0, // Settings: SP scan progress percent
+  spScanTotal: 0,
+  spScanDone: 0,
+  spScanStarted: 0,
+  spScanFromHeight: 709632,
   send: blankSend(),
   draft: null, // built tx summary awaiting review
   broadcastTx: null, // scanned signed tx awaiting broadcast confirmation
@@ -1032,6 +1041,9 @@ function lock() {
   ui.confirm = [];
   ui.revealShown = false;
   ui.pubkeyShown = false;
+  ui.scanMoreBusy = false;
+  ui.showSilentPayment = false;
+  ui.spScanBusy = false;
   ui.giftMode = false;
   ui.giftAmount = '';
   ui.giftCode = null;
@@ -1087,6 +1099,52 @@ async function doRescanAddress(chain, index) {
   render();
 }
 
+// Bulk-scan N additional addresses on both chains.
+async function doScanMore(count) {
+  if (wallet.offline) { toast(t('scanOffline')); return; }
+  ui.scanMoreBusy = true;
+  render();
+  try {
+    await wallet.scanNextAddresses(count);
+    ui.tab = 'settings'; // force re-render after scan
+    toast(t('scanMoreDone', { n: count * 2 }));
+  } catch (e) {
+    toast(e.message || t('rescanFailed'));
+  }
+  ui.scanMoreBusy = false;
+  render();
+}
+
+// Scan blocks for silent payments.
+async function doSPScan() {
+  if (wallet.offline) { toast(t('scanOffline')); return; }
+  ui.spScanBusy = true;
+  ui.spScanTotal = 0;
+  ui.spScanDone = 0;
+  ui.spScanStarted = Date.now();
+  render();
+  try {
+    const from = ui.spScanFromHeight || 709632;
+    const results = await wallet.scanBlocksForSilentPayments(from, (total, done) => {
+      ui.spScanTotal = total;
+      ui.spScanDone = done;
+      render();
+    });
+    if (results.length) {
+      toast(t('spScanFound', { n: results.length }));
+    } else {
+      toast(t('spScanNone'));
+    }
+    render();
+  } catch (e) {
+    toast(e.message || t('spScanError'));
+  }
+  ui.spScanBusy = false;
+  ui.spScanTotal = 0;
+  ui.spScanDone = 0;
+  render();
+}
+
 // Paginated list of every known address, each with its own rescan button.
 function addressScanView() {
   const addrs = wallet.knownAddresses();
@@ -1102,6 +1160,20 @@ function addressScanView() {
         h('button', { class: 'btn-sm', onClick: () => { ui.addrScan = false; render(); } }, t('back'))
       ),
       h('p', { class: 'small muted', style: 'margin:0' }, t('rescanAddrDesc')),
+      h('div', { class: 'row between', style: 'align-items:center;gap:8px' },
+        h('label', { class: 'field', style: 'margin:0;flex:1' },
+          h('span', { class: 'lab' }, t('scanMoreAddrLabel')),
+          h('input', {
+            type: 'number', min: 1, max: 1000,
+            class: 'mono-input',
+            value: ui.scanMoreCount,
+            onInput: (e) => { ui.scanMoreCount = Math.max(1, parseInt(e.target.value) || 10); },
+          })
+        ),
+        ui.scanMoreBusy
+          ? h('button', { class: 'btn-sm', disabled: true }, h('span', { class: 'spinner sm' }))
+          : h('button', { class: 'btn-sm', onClick: () => doScanMore(ui.scanMoreCount) }, t('scanMoreAddrBtn', { n: ui.scanMoreCount }))
+      ),
       h('div', { class: 'list' },
         ...slice.map((a) => {
           const id = a.chain + '/' + a.index;
@@ -1197,9 +1269,62 @@ function settingsTab() {
         ? null
         : h('button', { onClick: () => { ui.addrScan = true; ui.addrScanPage = 0; render(); } }, t('rescanAddresses'))
     ),
+    wallet.canReceiveSilentPayments ? silentPaymentCard() : null,
     explorerCard(),
     networkCard(),
     wallet.watchOnly || !wallet.mnemonic ? null : syncCard()
+  );
+}
+
+// Estimated time remaining for the silent payment block scan.
+function spScanETA() {
+  const elapsed = Date.now() - (ui.spScanStarted || Date.now());
+  const pct = ui.spScanDone / ui.spScanTotal;
+  if (!pct || elapsed < 1000) return '';
+  const remaining = Math.round(elapsed / pct * (1 - pct) / 1000);
+  if (remaining < 5) return t('spScanMoment');
+  if (remaining < 60) return t('spScanSeconds', { n: remaining });
+  const min = Math.floor(remaining / 60);
+  const sec = remaining % 60;
+  return `${min}m ${sec}s`;
+}
+
+// Silent payment card — address info and block scanning.
+function silentPaymentCard() {
+  const spAddr = wallet.silentPaymentAddress();
+  return h(
+    'div',
+    { class: 'card col' },
+    h('h3', {}, t('silentPayments')),
+    h('p', { class: 'small muted', style: 'margin:0' }, t('spSettingsDesc')),
+    h('div', { class: 'addr-box break mono small', style: 'font-size:12px' }, spAddr),
+    h('div', { class: 'row gap6 wrap' },
+      copyBtn(spAddr, t('copyAddress'))
+    ),
+    wallet.offline ? null : h('div', { class: 'col', style: 'gap:8px;margin-top:8px' },
+      h('label', { class: 'field', style: 'margin:0' },
+        h('span', { class: 'lab' }, t('spScanFromHeight')),
+        h('input', {
+          type: 'number', min: 1, class: 'mono-input',
+          value: ui.spScanFromHeight || 709632,
+          onInput: (e) => { ui.spScanFromHeight = parseInt(e.target.value) || 709632; },
+        })
+      ),
+      ui.spScanBusy
+        ? h('div', { class: 'col gap4' },
+            h('div', { class: 'row between' },
+              h('span', { class: 'small muted' }, t('spScanning')),
+              ui.spScanTotal ? h('span', { class: 'small faint' }, spScanETA()) : null
+            ),
+            ui.spScanTotal ? h('div', { class: 'progress-bar', style: 'width:100%;height:6px;border-radius:3px;overflow:hidden;background:var(--muted-bg)' },
+              h('div', { style: `width:${Math.round(ui.spScanDone/ui.spScanTotal*100)}%;height:100%;background:var(--accent);transition:width 0.3s` })
+            ) : null
+          )
+        : h('button', { class: 'btn-block', onClick: () => doSPScan() }, t('spScanBtn')),
+      wallet.silentPaymentHits().length
+        ? h('div', { class: 'small muted', style: 'margin-top:4px' }, t('spDetectedCount', { n: wallet.silentPaymentHits().length }))
+        : null
+    )
   );
 }
 
@@ -2032,14 +2157,39 @@ function receiveTab() {
   }
 
   const fresh = wallet.freshReceive();
+  // Silent payment address toggle (only for seed wallets).
+  const showSP = ui.showSilentPayment && wallet.canReceiveSilentPayments;
+  const displayAddr = showSP ? wallet.silentPaymentAddress() : fresh.address;
   return h(
     'div',
-    { class: 'card col', style: 'align-items:center;gap:14px' },
-    h('div', { html: qrSvg(fresh.address) }),
-    h('div', { class: 'addr-box', style: 'width:100%' }, fresh.address),
-    h('div', { class: 'row gap6 wrap', style: 'width:100%' },
-      copyBtn(fresh.address, t('copyAddress')),
-      h('button', { class: 'btn-sm', onClick: () => { wallet.advanceReceive(); render(); } }, t('newAddress'))
+    { class: 'col', style: 'gap:12px' },
+    wallet.canReceiveSilentPayments
+      ? h('div', { class: 'row between', style: 'align-items:center;gap:8px' },
+          h('label', { class: 'small muted' }, t('addressMode')),
+          h('div', { class: 'row gap4' },
+            h('button', {
+              class: 'btn-sm' + (showSP ? '' : ' active'),
+              onClick: () => { ui.showSilentPayment = false; render(); },
+            }, t('addrModeNormal')),
+            h('button', {
+              class: 'btn-sm' + (showSP ? ' active' : ''),
+              onClick: () => { ui.showSilentPayment = true; render(); },
+            }, t('addrModeSP'))
+          )
+        )
+      : null,
+    h('div', { class: 'card col', style: 'align-items:center;gap:14px' },
+      showSP ? h('span', { class: 'badge', style: 'margin-bottom:4px' }, 'Silent Payment') : null,
+      h('div', { html: qrSvg(displayAddr) }),
+      h('div', { class: 'addr-box', style: 'width:100%' }, displayAddr),
+      h('div', { class: 'row gap6 wrap', style: 'width:100%' },
+        copyBtn(displayAddr, t('copyAddress')),
+        showSP ? null : h('button', { class: 'btn-sm', onClick: () => { wallet.advanceReceive(); render(); } }, t('newAddress'))
+      ),
+      showSP ? h('p', { class: 'small muted', style: 'text-align:center;margin:4px 0 0' }, t('spReceiveDesc')) : null,
+      showSP && wallet.silentPaymentHits().length
+        ? h('p', { class: 'small faint', style: 'text-align:center;margin:4px 0 0' }, t('spReceiveDetected', { n: wallet.silentPaymentHits().length }))
+        : null
     )
   );
 }
@@ -2539,7 +2689,8 @@ function reviewView() {
           o.silent
             ? h('span', { class: 'k col', style: 'gap:2px;align-items:flex-start' },
                 h('span', { class: 'mono break' }, shortAddr(o.silent, 12, 8)),
-                h('span', { class: 'small faint' }, t('silentPaymentNote'))
+                h('span', { class: 'small faint' }, t('silentPaymentNote')),
+                h('span', { class: 'small muted', style: 'font-size:11px' }, t('spDerivedOutput'))
               )
             : h('span', { class: 'k mono break' }, shortAddr(o.address, 14, 8)),
           h('span', { class: 'v' }, fmtAmount(o.amount), ' ', unitTag())

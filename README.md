@@ -20,6 +20,19 @@ to repurpose a retired phone as a dedicated cold storage wallet.
 
 - **BIP84 / native SegWit (p2wpkh)** HD wallet from a 12-word BIP39 seed
   (imports any valid BIP39 phrase; optional passphrase).
+- **Silent Payments (BIP-352)** — **send** to any `sp1…` / `tsp1…` address
+  (ECDH-derived one-time taproot outputs) and **receive** by sharing your
+  reusable silent payment address. Block scanning detects incoming silent
+  payments from any sender.
+- **Descriptor import** — paste a descriptor such as `wpkh(xpub…)`,
+  `tr(xpub…)`, `sh(wpkh(xpub…))`, etc. with optional multi-derivation
+  (`<0;1>/*`) and checksum suffix.
+- **Extended key import** — `xpub`/`zpub`/`tpub`/`vpub`/`upub` (watch-only)
+  and `xprv`/`zprv`/`tprv`/`vprv`/`uprv` (full spending), with auto-detection
+  of the target network from the key prefix.
+- **Network selector on import** — override the default network when pasting
+  a seed phrase, key, or descriptor. Network is auto-detected when pasting a
+  testnet-prefixed key.
 - **Multi-network support** — switch between **Mainnet**, **Testnet**,
   **Testnet4**, **Signet**, and **Regtest** in Settings. Each network has a
   default block explorer and supports custom Esplora/electrs URLs.
@@ -44,6 +57,13 @@ to repurpose a retired phone as a dedicated cold storage wallet.
 - **Transaction labeling** — add a label (e.g. "coffee with Alice") to any
   transaction in the History detail view. Labels persist across sessions
   on the device.
+- **Label export/import (BIP-329)** — export labels as a standard JSON file
+  and re-import on another device. Labels are also embedded in wallet snapshots.
+- **Per-address rescan** — targeted re-check of a single reused address (no
+  full wallet rescan). Paginated list with individual **Rescan** buttons and a
+  **"Scan X more"** bulk option to extend the address pool.
+- **Scan from date & gap limit** — configure the start date and gap limit in
+  the import pane's advanced options for deep recovery from a past date.
 - **Optional encrypted cross-device sync over Nostr** — wallet state is
   NIP-44-encrypted to yourself and stored as a replaceable event (kind 30078) on
   the relay(s) you choose (default relay.coinos.io). The Nostr identity is
@@ -115,6 +135,7 @@ coins. A manual **Settings → Rescan** forces a full re-scan on demand.
 | --- | --- |
 | `src/wallet.js` | BIP84 derivation, scanning, coin selection, signing, realtime, cache, sync |
 | `src/api.js` | Esplora wrapper + explorer selection (mempool / blockstream / custom) with throttle/cooldown/timeout |
+| `src/silentpay.js` | BIP-352 silent payments — send (ECDH taproot output derivation) and receive (key derivation, address generation, block scanning) |
 | `src/nostr.js` | Optional encrypted cross-device state sync over Nostr (configurable relays) |
 | `src/scan.js` | Camera QR scanner (native BarcodeDetector / lazy jsQR) |
 | `src/app.js` | UI controller (vanilla DOM) |

@@ -262,9 +262,25 @@ export class Api {
     return this.#get(`/address/${address}/txs`);
   }
 
-  // Full transaction (vin with prevouts, vout, status) — used for fee bumping.
+  // Full transaction (vin with witnesses, vout, status) — used for fee bumping
+  // and silent-payment scanning.
   getTx(txid) {
     return this.#get(`/tx/${txid}`);
+  }
+
+  // Current chain-tip block height.
+  blockHeight() {
+    return this.#get('/blocks/tip/height');
+  }
+
+  // Block hash at a given height.
+  blockHash(height) {
+    return this.#get(`/block-height/${height}`, true);
+  }
+
+  // Transactions in a block, starting from index (0-based, up to 25 entries).
+  blockTxs(hash, startIndex = 0) {
+    return this.#get(`/block/${hash}/txs/${startIndex}`);
   }
 
   async feeRates() {

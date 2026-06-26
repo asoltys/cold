@@ -319,6 +319,10 @@ and more convenient. But Hal Wallet on DIY hardware gives you:
 
 ## Tips for air-gapped use
 
+- **Silent payments** — generate your reusable silent payment address on the
+  online device (Settings → **Silent Payments** → copy the `sp1…` address) and
+  share it publicly. Senders use it directly; scan blocks on the online device
+  periodically to detect incoming payments.
 - **Label transactions** in History → tap a tx → enter a label. Export/import
   labels via Settings or wallet snapshots.
 - **Generate fresh addresses** with the "New address" button for privacy.

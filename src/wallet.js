@@ -21,9 +21,17 @@ import * as btc from '@scure/btc-signer';
 import { p2wpkh } from '@scure/btc-signer/payment';
 import { concatBytes } from '@scure/btc-signer/utils.js';
 
+import { secp256k1 } from '@noble/curves/secp256k1';
+const Point = secp256k1.ProjectivePoint;
+
 import { Api, pool, wsUrl } from './api.js';
 import { NostrSync, getSyncConfig } from './nostr.js';
-import { isSilentPaymentAddress, decodeSilentPaymentAddress, silentPaymentScripts, silentPaymentPlaceholder } from './silentpay.js';
+import {
+  isSilentPaymentAddress, decodeSilentPaymentAddress, encodeSilentPaymentAddress,
+  silentPaymentScripts, silentPaymentPlaceholder,
+  deriveSilentPaymentKeys,
+  detectSilentPaymentInTx, privKeyToBigInt,
+} from './silentpay.js';
 
 // Default gap limit when scanning (how many unused addresses to check before
 // concluding the wallet has no more activity).  Standard BIP44 value; override
@@ -530,6 +538,19 @@ export class Wallet {
     return used;
   }
 
+  // Bulk-scan N additional addresses on both chains, extending the known set.
+  async scanNextAddresses(count) {
+    const addrs = [];
+    for (const chain of [0, 1]) {
+      const arr = chain === 0 ? this.receive : this.change;
+      const start = arr.length;
+      for (let i = 0; i < count; i++) addrs.push({ chain, index: start + i });
+    }
+    for (const { chain, index } of addrs) {
+      await this.rescanAddress(chain, index);
+    }
+  }
+
   // silent=false: foreground load (shows loading state, always re-renders).
   // silent=true:  background refresh (poll / WS) — no spinner, and only emits
   //               if the visible state changed, so it never disrupts typing.
@@ -895,7 +916,82 @@ export class Wallet {
     });
   }
 
-  // True if a built tx spends any of our still-unconfirmed coins — meaning it
+  // ── Silent Payment (receiving) ──────────────────────────────────────────
+
+  // Derive the silent payment scan+spend keys from the wallet's seed.
+  _spKeys() {
+    if (!this.mnemonic) throw new Error('Silent payments need a mnemonic wallet.');
+    const seed = mnemonicToSeedSync(this.mnemonic, this.passphrase || '');
+    return deriveSilentPaymentKeys(seed, this.netCfg.coin);
+  }
+
+  // The wallet's reusable silent payment address (sp1… / tsp1…).
+  silentPaymentAddress() {
+    const keys = this._spKeys();
+    return encodeSilentPaymentAddress(keys.scanPublicKey, keys.spendPublicKey, this.netCfg.coin !== 0);
+  }
+
+  // Scan a single transaction for incoming silent payments.
+  // Returns an array of { txid, vout, value, tweak } hits.
+  async scanTxForSilentPayment(txid) {
+    const tx = await this.api.getTx(txid);
+    const keys = this._spKeys();
+    const a = privKeyToBigInt(keys.scanPrivateKey);
+    const Bspend = Point.fromHex(keys.spendPublicKey);
+    return detectSilentPaymentInTx(tx, a, Bspend);
+  }
+
+  // Scan a set of blocks (fromBlock to tip) for incoming silent payments.
+  // Calls progress(total, done) after each block.
+  // Returns an array of { txid, vout, value, tweak, blockHeight }.
+  async scanBlocksForSilentPayments(fromBlock, progress) {
+    if (this.watchOnly) throw new Error('Silent payment receiving requires a seed wallet.');
+    const keys = this._spKeys();
+    const a = privKeyToBigInt(keys.scanPrivateKey);
+    const Bspend = Point.fromHex(keys.spendPublicKey);
+    const results = [];
+    const tip = await this.api.blockHeight();
+    const total = Math.max(0, tip - fromBlock + 1);
+    for (let height = fromBlock; height <= tip; height++) {
+      const hash = await this.api.blockHash(height);
+      let index = 0;
+      while (true) {
+        const txs = await this.api.blockTxs(hash, index);
+        for (const tx of txs) {
+          const hits = detectSilentPaymentInTx(tx, a, Bspend);
+          for (const h of hits) {
+            h.blockHeight = height;
+            results.push(h);
+            this._recordSilentPayment(h);
+          }
+        }
+        if (txs.length < 25) break;
+        index += 25;
+      }
+      if (progress) progress(total, height - fromBlock + 1);
+    }
+    this.saveCache();
+    return results;
+  }
+
+  // Track a detected silent payment in the wallet state.
+  _recordSilentPayment(hit) {
+    if (!this._spPayments) this._spPayments = [];
+    const key = hit.txid + ':' + hit.vout;
+    if (this._spPayments.some((p) => (p.txid + ':' + p.vout) === key)) return;
+    // Store tweak as hex string for JSON-safe serialization.
+    this._spPayments.push({ ...hit, tweak: '0x' + hit.tweak.toString(16) });
+  }
+
+  // Stored silent payments detected so far.
+  silentPaymentHits() {
+    return this._spPayments || [];
+  }
+
+  // True if the wallet has a mnemonic seed (can receive silent payments).
+  get canReceiveSilentPayments() {
+    return !this.watchOnly && !!this.mnemonic;
+  }
   // can't confirm until that parent (ancestor) transaction confirms first.
   spendsUnconfirmed(tx) {
     const pending = new Set(this.utxos.filter((u) => !u.confirmed).map((u) => utxoId(u)));
@@ -1634,7 +1730,7 @@ export class Wallet {
   // Nostr sync. savedAt lets us pick the newest copy across devices.
   _snapshot() {
     return {
-      v: 1,
+      v: 2,
       savedAt: Date.now(),
       receive: this.receive,
       change: this.change,
@@ -1643,6 +1739,7 @@ export class Wallet {
       nextReceiveIndex: this.nextReceiveIndex,
       nextChangeIndex: this.nextChangeIndex,
       feeRates: this.feeRates,
+      spPayments: this._spPayments || [],
     };
   }
 
@@ -1654,6 +1751,7 @@ export class Wallet {
     this.nextReceiveIndex = d.nextReceiveIndex || 0;
     this.nextChangeIndex = d.nextChangeIndex || 0;
     this.feeRates = d.feeRates || this.feeRates;
+    this._spPayments = d.spPayments || [];
     this.addrMap = new Map();
     for (const a of [...this.receive, ...this.change]) {
       this.addrMap.set(a.address, { chain: a.chain, index: a.index });
