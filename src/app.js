@@ -2764,7 +2764,10 @@ async function broadcast() {
   render();
   try {
     const hexTx = wallet.sign(ui.draft.tx);
-    const txid = await wallet.broadcast(hexTx);
+    const txid = await Promise.race([
+      wallet.broadcast(hexTx),
+      new Promise((_, rej) => setTimeout(() => rej(new Error(t('broadcastTimeout'))), 30000)),
+    ]);
     ui.sendResult = { txid };
     ui.draft = null;
     ui.send = blankSend();

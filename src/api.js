@@ -336,19 +336,20 @@ export class Api {
     const attempts = this._hosts.map(async (host) => {
       const ctrl = new AbortController();
       const timer = setTimeout(() => ctrl.abort(), this._timeoutMs);
-      let res;
       try {
-        res = await fetch(host.base + '/tx', { method: 'POST', body: hexTx, signal: ctrl.signal });
+        // Keep the abort timer active across BOTH the request and the body read —
+        // a stalled response body must not hang the broadcast forever.
+        const res = await fetch(host.base + '/tx', { method: 'POST', body: hexTx, signal: ctrl.signal });
+        const body = await res.text();
+        if (res.status === 429) {
+          host.cooldownUntil = Date.now() + 30000;
+          this.#penalize();
+        }
+        if (!res.ok) throw new Error(body || `${res.status} broadcast failed`);
+        return body.trim(); // txid
       } finally {
         clearTimeout(timer);
       }
-      const body = await res.text();
-      if (res.status === 429) {
-        host.cooldownUntil = Date.now() + 30000;
-        this.#penalize();
-      }
-      if (!res.ok) throw new Error(body || `${res.status} broadcast failed`);
-      return body.trim(); // txid
     });
     const results = await Promise.allSettled(attempts);
     const ok = results.find((r) => r.status === 'fulfilled');

@@ -179,6 +179,7 @@ const STR = {
     bumpInsufficient: 'Not enough funds to bump at this rate. Try a lower rate.',
     scanOffline: 'You’re offline — reconnect to broadcast this transaction.',
     broadcastFailed: 'Broadcast failed: {msg}',
+    broadcastTimeout: 'Timed out reaching the network. The payment was not sent — try again.',
     signingFailed: 'Signing failed: {msg}',
     done: 'Done',
     txSignedNote: 'Signed, but not sent yet. To actually send it, broadcast the code below from any online device (e.g. mempool.space → Broadcast). It will not send on its own.',
