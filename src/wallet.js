@@ -481,22 +481,19 @@ export class Wallet {
       } catch {
         continue;
       }
-      if (entry) {
-        entry.confirmed = confirmed;
-        entry.pending = pending;
-      }
+      // Derive the entry's balance from the ACTUAL unspent coins, not from
+      // get_balance/address-stats: a confirmed coin that's being spent by an
+      // unconfirmed tx still shows as "confirmed" there (with a compensating
+      // negative unconfirmed), so trusting it would keep a just-spent coin in the
+      // headline balance on another device. listunspent excludes spent coins.
       this.utxos = this.utxos.filter((u) => u.address !== address);
+      let eConf = 0, ePend = 0;
       for (const u of us) {
-        this.utxos.push({
-          txid: u.txid,
-          vout: u.vout,
-          value: u.value,
-          address,
-          chain: p.chain,
-          index: p.index,
-          confirmed: !!u.status.confirmed,
-        });
+        const conf = !!(u.status && u.status.confirmed);
+        if (conf) eConf += u.value; else ePend += u.value;
+        this.utxos.push({ txid: u.txid, vout: u.vout, value: u.value, address, chain: p.chain, index: p.index, confirmed: conf });
       }
+      if (entry) { entry.confirmed = eConf; entry.pending = ePend; }
       changed = true;
     }
     return changed;
@@ -1586,14 +1583,18 @@ export class Wallet {
   // when the matching id comes back; queues until the socket is open, and times
   // out so a wedged call can't hang a scan. ids are monotonic for the session so
   // they never alias a fire-and-forget _rpcSend id.
-  _rpcCall(method, params) {
+  _rpcCall(method, params, attempt = 0) {
     return new Promise((resolve, reject) => {
       if (this.offline) { reject(new Error('offline')); return; }
       const id = ++this._rpcId;
       if (!this._pending) this._pending = new Map();
       const timer = setTimeout(() => {
-        if (this._pending.delete(id)) reject(new Error('electrum timeout: ' + method));
-      }, 20000);
+        if (!this._pending.delete(id)) return;
+        // A public Electrum server can drop a response, or the socket can flap
+        // mid-call — retry a couple of times on a fresh id before giving up.
+        if (attempt < 2 && !this.offline) this._rpcCall(method, params, attempt + 1).then(resolve, reject);
+        else reject(new Error('electrum timeout: ' + method));
+      }, 12000);
       this._pending.set(id, { resolve, reject, timer });
       const payload = JSON.stringify({ id, method, params }) + '\n';
       if (this._ws && this._ws.readyState === 1) {
