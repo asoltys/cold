@@ -85,7 +85,10 @@ export function setBackend(b) {
 // electrs (validated); the point, though, is pointing at your own Fulcrum/electrs.
 export const ELECTRUM_PRESETS = [
   { id: 'blockstream', label: 'blockstream.info', url: 'wss://blockstream.info/electrum-websocket/' },
+  { id: 'electroncash', label: 'btc.electroncash.dk', url: 'wss://btc.electroncash.dk:60004' },
+  { id: 'blackie', label: 'blackie.c3-soft.com', url: 'wss://blackie.c3-soft.com:57004' },
   { id: 'jochen', label: 'electrum.jochen-hoenicke.de', url: 'wss://electrum.jochen-hoenicke.de:50010' },
+  { id: 'mempoolguide', label: 'mempool.guide', url: 'wss://mempool.guide/electrum-websocket/' },
   { id: 'custom', label: 'Custom (your node)', url: '' },
 ];
 const ELECTRUM_SERVER_KEY = 'btc-wallet-electrum-server';
