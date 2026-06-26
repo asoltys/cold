@@ -2768,7 +2768,10 @@ async function broadcast() {
     ui.sendResult = { txid };
     ui.draft = null;
     ui.send = blankSend();
-    await wallet.scan();
+    ui.busy = false;
+    render();                      // show success immediately — don't hold the
+    wallet.scan().catch(() => {}); // spinner up for the post-send rescan
+    return;
   } catch (e) {
     ui.sendError = t('broadcastFailed', { msg: e.message });
   }
