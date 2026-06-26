@@ -10,6 +10,8 @@
 // simply 404 (harmlessly) when the file is opened on its own from file://.
 
 import { mkdir, readdir } from 'node:fs/promises';
+import { statSync } from 'node:fs';
+import { execSync } from 'node:child_process';
 
 const FAVICON =
   'data:image/svg+xml,' +
@@ -177,4 +179,10 @@ if (import.meta.main) {
   const kb = (Buffer.byteLength(html) / 1024).toFixed(0);
   console.log(`✓ dist/index.html written (${kb} KB) — open it offline, no server needed`);
   console.log(`✓ PWA: manifest.webmanifest, sw.js (cold-${version}), ${STATIC.length} icons, jsqr.js, ${locales.length} locales`);
+
+  // Package dist/ as a standalone release zip.
+  const zipName = 'Halwallet.zip';
+  execSync(`cd dist && zip -r ../${zipName} .`, { stdio: 'ignore' });
+  const zipKb = (require('node:fs').statSync(zipName).size / 1024).toFixed(0);
+  console.log(`✓ ${zipName} created (${zipKb} KB) — ready for GitHub release`);
 }

@@ -10,11 +10,11 @@ from the filesystem with no server).
 
 The name is a nod to [Hal Finney](https://en.wikipedia.org/wiki/Hal_Finney_(computer_scientist)).
 
-## Installation on an old phone
+## Installation
 
-Hal Wallet makes an excellent air-gapped (offline) signing device for an old
-smartphone. See **[INSTALL.md](INSTALL.md)** for a complete step-by-step guide
-to repurpose a retired phone as a dedicated cold storage wallet.
+Download the latest `Halwallet.zip` from the [releases page](https://github.com/asoltys/halwallet/releases), unzip it, and open `dist/index.html` in your browser. No server, no build tools, no internet needed.
+
+Hal Wallet also makes an excellent air-gapped (offline) signing device. See **[INSTALL.md](INSTALL.md)** for a step-by-step guide to set it up on an old phone or single-board computer.
 
 ## Features
 
@@ -99,8 +99,10 @@ bun run build    # → dist/  (index.html + PWA sidecars)
 
 `dist/index.html` inlines all code, the crypto/QR/Nostr libraries, and the CSS —
 save that one file and open it directly in a browser, no server or internet
-needed. The build also emits PWA extras (`manifest.webmanifest`, `sw.js`,
-icons, and a lazy-loaded `jsqr.js`) for the hosted site; they're optional and
+needed. The build also creates `Halwallet.zip` (the entire `dist/` folder) for
+download.
+The PWA extras (`manifest.webmanifest`, `sw.js`,
+icons, and a lazy-loaded `jsqr.js`) are for the hosted site; they're optional and
 simply 404 when `index.html` is opened on its own.
 
 ## How state is kept
@@ -143,8 +145,8 @@ coins. A manual **Settings → Rescan** forces a full re-scan on demand.
 | `src/format.js` | sat/BTC formatting helpers |
 | `src/i18n.js` | UI strings + translations |
 | `src/style.css` | Hand-rolled styles |
-| `build.js` / `dev.js` | Bun bundler → inlined `index.html` + PWA sidecars, and dev server |
-| `INSTALL.md` | Step-by-step guide for air-gapped installation on an old phone |
+| `build.js` / `dev.js` | Bun bundler → inlined `index.html` + zip package + PWA sidecars, and dev server |
+| `INSTALL.md` | Step-by-step air-gapped installation guide (non-technical) |
 
 ## Security notes
 
