@@ -1490,9 +1490,9 @@ export class Wallet {
     return 'btc-wallet-cache:' + hex.encode(sha256(bytes)).slice(0, 32);
   }
 
-  // The fresh receive index the user has acknowledged (tapped past the
-  // "payment received" screen for). Persisted so a received payment keeps
-  // showing the celebration until acknowledged, even across refreshes.
+  // The fresh receive index the "payment received" screen has been shown for.
+  // Persisted (and advanced as soon as the celebration appears) so a payment
+  // celebrates once and never reappears on a refresh or reopen.
   getReceiveAck() {
     try {
       const v = localStorage.getItem(this._cacheKey() + ':ack');

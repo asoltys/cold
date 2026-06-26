@@ -626,9 +626,9 @@ async function activateAccount(acc, opts = {}) {
   try {
     // Celebration baseline. Opening/importing/switching a wallet (opts.fresh)
     // baselines to the current frontier, so payments already received before
-    // opening never trigger the "payment received" screen. A same-session
-    // refresh keeps the persisted ack, so an unacknowledged celebration
-    // survives the refresh.
+    // opening never trigger the "payment received" screen. On a same-session
+    // refresh we restore the persisted ack — which is advanced the moment the
+    // celebration is shown, so a payment celebrates once and never reappears.
     let ack;
     if (opts.fresh) {
       ack = wallet.nextReceiveIndex;
@@ -1798,6 +1798,10 @@ function receiveTab() {
   // stays null and we never celebrate. The recency guard additionally ensures an
   // already-old payment never celebrates when a wallet is opened.
   if (ui.receiveSeenIndex != null && wallet.nextReceiveIndex > ui.receiveSeenIndex && hasRecentIncoming()) {
+    // Mark it acknowledged as soon as it's shown — so a refresh or navigating
+    // away (without tapping) won't bring the celebration back. It stays visible
+    // this session (ui.receiveSeenIndex is unchanged) until the tap below.
+    wallet.setReceiveAck(wallet.nextReceiveIndex);
     let amt = 0;
     for (let i = ui.receiveSeenIndex; i < wallet.nextReceiveIndex; i++) {
       const e = wallet._addrInfo(0, i);
