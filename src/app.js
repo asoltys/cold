@@ -1151,6 +1151,7 @@ function lock() {
   ui.vaultPw = '';
   ui.vaultError = '';
   ui.confirmClear = false;
+  ui.confirmRemove = null;
   ui.editId = null;
   ui.editLabel = '';
   ui.createStep = 'gen';
@@ -1932,6 +1933,20 @@ function accountsScreen() {
       )
     );
   }
+  if (ui.confirmRemove) {
+    const acc = accounts.find((a) => a.id === ui.confirmRemove);
+    return h('div', { class: 'col', style: 'gap:16px' },
+      brandHeader(false),
+      h('div', { class: 'card col' },
+        h('h3', {}, t('removeWalletTitle')),
+        h('div', { class: 'warn-box' }, t('removeWalletWarn', { name: acc ? acc.label : '' })),
+        h('div', { class: 'row gap6' },
+          h('button', { class: 'btn-ghost grow', onClick: () => { ui.confirmRemove = null; render(); } }, t('back')),
+          h('button', { class: 'btn-primary grow', onClick: () => { const id = ui.confirmRemove; ui.confirmRemove = null; removeAccount(id); } }, t('remove'))
+        )
+      )
+    );
+  }
   return h(
     'div',
     { class: 'col', style: 'gap:16px' },
@@ -1958,7 +1973,7 @@ function accountsScreen() {
                 onClick: () => { if (isActive) { ui.screen = 'wallet'; render(); } else switchAccount(a.id); },
               }, (isActive ? '● ' : '○ ') + a.label + tag),
               h('button', { class: 'btn-sm', title: t('rename'), onClick: () => { ui.editId = a.id; ui.editLabel = a.label; render(); } }, '✎'),
-              h('button', { class: 'btn-sm', title: t('remove'), onClick: () => removeAccount(a.id) }, '✕')
+              h('button', { class: 'btn-sm', title: t('remove'), onClick: () => { ui.confirmRemove = a.id; render(); } }, '✕')
             ),
             a.type === 'full'
               ? h('button', { class: 'linklike small', style: 'align-self:flex-start', onClick: () => (a.persisted ? startForget(a.id) : startSave(a.id)) },
