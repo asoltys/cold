@@ -23,6 +23,7 @@ import { concatBytes } from '@scure/btc-signer/utils.js';
 
 import { Api, pool, wsUrl } from './api.js';
 import { NostrSync, getSyncConfig } from './nostr.js';
+import { isSilentPaymentAddress, decodeSilentPaymentAddress, silentPaymentScripts, silentPaymentPlaceholder } from './silentpay.js';
 
 // No look-ahead: stop scanning a chain at the first unused address. This wallet
 // only ever exposes ONE unused address at a time (freshReceive = first unused;
@@ -767,12 +768,26 @@ export class Wallet {
     const changeAddress = this.freshChange().address;
     const feePerByte = BigInt(Math.max(1, Math.round(feeRate)));
 
+    // Silent payment (sp1…) recipients: the real taproot output can only be
+    // derived once coin selection fixes the input set (it commits to every
+    // input), so we select against a same-size placeholder taproot output and
+    // swap in the derived script afterward.
+    const spOuts = []; // { placeholder, scan, spend }
+    if (recipients.some((r) => isSilentPaymentAddress(r.address)) && this.watchOnly)
+      throw new Error('Silent payments require a wallet with keys.');
+
     if (sendMax) {
       if (recipients.length !== 1)
         throw new Error('Send-max requires exactly one recipient.');
       // Drain everything: use the recipient as the "change" address with no
       // fixed outputs, so the estimator sends (total − exact fee) to them.
-      const dest = recipients[0].address;
+      let dest = recipients[0].address;
+      if (isSilentPaymentAddress(dest)) {
+        const { scan, spend } = decodeSilentPaymentAddress(dest);
+        const placeholder = silentPaymentPlaceholder(0);
+        spOuts.push({ placeholder, scan, spend, address: dest });
+        dest = btc.Address(this.netCfg.net).encode(btc.OutScript.decode(placeholder));
+      }
       const sel = btc.selectUTXO(inputs, [], 'all', {
         changeAddress: dest,
         feePerByte,
@@ -781,13 +796,21 @@ export class Wallet {
         bip69: true,
       });
       if (!sel || !sel.tx) throw new Error('Fee exceeds balance.');
-      return summarize(sel, this.netCfg.net);
+      if (spOuts.length) this._applySilentPayments(sel.tx, spOuts);
+      const sweepSummary = summarize(sel, this.netCfg.net);
+      this._tagSilentOutputs(sweepSummary, spOuts);
+      return sweepSummary;
     }
 
-    const outputs = recipients.map((r) => ({
-      address: r.address,
-      amount: BigInt(r.amount),
-    }));
+    const outputs = recipients.map((r) => {
+      if (isSilentPaymentAddress(r.address)) {
+        const { scan, spend } = decodeSilentPaymentAddress(r.address);
+        const placeholder = silentPaymentPlaceholder(spOuts.length);
+        spOuts.push({ placeholder, scan, spend, address: r.address });
+        return { script: placeholder, amount: BigInt(r.amount) };
+      }
+      return { address: r.address, amount: BigInt(r.amount) };
+    });
     const strategy = coinIds ? 'all' : 'default';
     const sel = btc.selectUTXO(inputs, outputs, strategy, {
       changeAddress,
@@ -798,7 +821,43 @@ export class Wallet {
     });
     if (!sel || !sel.tx)
       throw new Error('Insufficient funds for amount + fee.');
-    return summarize(sel, this.netCfg.net);
+    if (spOuts.length) this._applySilentPayments(sel.tx, spOuts);
+    const summary = summarize(sel, this.netCfg.net);
+    this._tagSilentOutputs(summary, spOuts);
+    return summary;
+  }
+
+  // Mark summary outputs that fund a silent payment with the sp1… address the
+  // user actually typed (the on-chain output is a derived one-time taproot addr).
+  _tagSilentOutputs(summary, spOuts) {
+    for (const s of spOuts) {
+      if (!s.derivedAddress) continue;
+      const o = summary.outputs.find((o) => o.address === s.derivedAddress && !o.silent);
+      if (o) o.silent = s.address;
+    }
+  }
+
+  // Replace each placeholder silent-payment output in a freshly-selected (still
+  // unsigned) tx with its real one-time taproot script, derived from the tx's
+  // actual inputs per BIP-352.
+  _applySilentPayments(tx, spOuts) {
+    const byOutpoint = new Map();
+    for (const u of this.utxos) byOutpoint.set(utxoId(u), u);
+    const inputs = [];
+    for (let i = 0; i < tx.inputsLength; i++) {
+      const inp = tx.getInput(i);
+      const u = byOutpoint.get(`${hex.encode(inp.txid)}:${inp.index}`);
+      if (!u) throw new Error('Missing key for a silent payment input.');
+      inputs.push({ txid: u.txid, vout: u.vout, priv: this.node(u.chain, u.index).privateKey });
+    }
+    const scripts = silentPaymentScripts(inputs, spOuts.map((s) => ({ scan: s.scan, spend: s.spend })));
+    spOuts.forEach((s, k) => {
+      const ph = hex.encode(s.placeholder);
+      const idx = tx.outputs.findIndex((o) => hex.encode(o.script) === ph);
+      if (idx < 0) throw new Error('Silent payment output not found after selection.');
+      tx.updateOutput(idx, { script: scripts[k], amount: tx.outputs[idx].amount }, true);
+      s.derivedAddress = btc.Address(this.netCfg.net).encode(btc.OutScript.decode(scripts[k]));
+    });
   }
 
   // True if a built tx spends any of our still-unconfirmed coins — meaning it

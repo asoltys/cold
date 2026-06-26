@@ -259,6 +259,7 @@ const STR = {
     explorerDesc: 'The server this wallet queries for balances and history. Point it at your own node for maximum privacy.',
     explorerUrl: 'Server URL',
     explorerUrlHint: 'Esplora / electrs REST base, e.g. https://mempool.space/api',
+    silentPaymentNote: 'Silent payment',
     instantNotif: 'Instant notifications',
     instantNotifDesc: 'Uses coinos to push payments the instant they arrive. Turn off to poll the explorer above instead — a bit slower, but your addresses are never sent to coinos.',
     deviceSync: 'Device sync',

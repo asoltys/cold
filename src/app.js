@@ -9,6 +9,7 @@ import { qrSvg } from './qr.js';
 import { scanQr } from './scan.js';
 import { getSyncConfig, setSyncConfig } from './nostr.js';
 import { getExplorerConfig, setExplorerConfig, EXPLORER_PRESETS, getRealtimeEnabled, setRealtimeEnabled } from './api.js';
+import { isSilentPaymentAddress } from './silentpay.js';
 import { t, LANGS, getLang, setLang, isRTL, loadLocale } from './i18n.js';
 import {
   fmtBtc,
@@ -2155,7 +2156,9 @@ function recipientRow(s, r, i) {
   const check = h('div', { class: 'addr-check' });
   const syncCheck = () => {
     const a = r.address.trim();
-    check.replaceChildren(...addrVerifyNodes(a));
+    const nodes = addrVerifyNodes(a);
+    if (a && isSilentPaymentAddress(a)) nodes.push(h('span', { class: 'small faint', style: 'margin-left:6px' }, '· ' + t('silentPaymentNote')));
+    check.replaceChildren(...nodes);
     check.style.display = a ? '' : 'none';
   };
 
@@ -2382,7 +2385,12 @@ function reviewView() {
       { class: 'summary col', style: 'gap:0' },
       ...outs.map((o) =>
         h('div', { class: 'line' },
-          h('span', { class: 'k mono break' }, shortAddr(o.address, 14, 8)),
+          o.silent
+            ? h('span', { class: 'k col', style: 'gap:2px;align-items:flex-start' },
+                h('span', { class: 'mono break' }, shortAddr(o.silent, 12, 8)),
+                h('span', { class: 'small faint' }, t('silentPaymentNote'))
+              )
+            : h('span', { class: 'k mono break' }, shortAddr(o.address, 14, 8)),
           h('span', { class: 'v' }, fmtAmount(o.amount), ' ', unitTag())
         )
       ),
