@@ -274,7 +274,7 @@ const STR = {
     explorerUrl: 'Server URL',
     explorerUrlHint: 'Esplora / electrs REST base, e.g. https://mempool.space/api',
     autolockTitle: 'Log out automatically',
-    autolockDesc: "After the app has been in the background this long, sign out completely — the wallet is removed from this device, so keep your recovery phrase. Saved-to-device wallets come back with their password. The timer never runs while the app is open and focused.",
+    autolockDesc: "After the app has been in the background this long, sign out completely — every wallet is removed from this device, including ones saved to device, so make sure you have your recovery phrase. The timer never runs while the app is open and focused.",
     autolockNever: 'Never',
     autolock1m: 'After 1 minute',
     autolock5m: 'After 5 minutes',

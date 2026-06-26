@@ -1025,8 +1025,8 @@ function applyBootAutoLogout() {
   if (!(ms > 0 && away >= ms)) return;
   try { sessionStorage.removeItem(ACCOUNTS_KEY); } catch {}
   try { localStorage.removeItem(WATCH_KEY); } catch {}
+  try { localStorage.removeItem(VAULT_KEY); } catch {}
   clearWalletCaches();
-  wipeBlankVault();
 }
 
 // Remove every trace of the open wallet from this device: the session, the
@@ -1040,22 +1040,15 @@ function clearWalletCaches() {
   } catch {}
 }
 
-// A blank-password vault offers no protection and would auto-unlock on the next
-// open, undoing the sign-out — so wipe it too. A password-protected vault stays.
-function wipeBlankVault() {
-  const blob = loadVaultBlob();
-  if (!blob) return;
-  try { decryptVault(blob, ''); } catch { return; } // needs a real password — keep it
-  try { localStorage.removeItem(VAULT_KEY); } catch {}
-}
-
-// Full sign-out after the app's been backgrounded past the limit.
+// Full sign-out after the app's been backgrounded past the limit: remove every
+// trace of every wallet from this device — including the saved-to-device vault
+// (password-protected or not). You'll need your recovery phrase to get back in.
 function autoLogout() {
   if (ui.screen !== 'wallet') return; // don't interrupt unlock / claim flows
   try { localStorage.removeItem(WATCH_KEY); } catch {}
+  try { localStorage.removeItem(VAULT_KEY); } catch {}
   clearWalletCaches();
-  wipeBlankVault();
-  lock(); // wipes the session + vault password and shows the unlock / vault screen
+  lock();
 }
 
 function lock() {
