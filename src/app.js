@@ -915,8 +915,25 @@ function startForget(id) {
   render();
 }
 function cancelPw() { ui.pw = null; render(); }
+function startChangePw() {
+  ui.pw = { purpose: 'change', mode: 'change', v0: '', v1: '', v2: '', error: '' };
+  render();
+}
 function submitPw() {
   const p = ui.pw;
+  if (p.purpose === 'change') {
+    // Re-encrypt the actual vault (decrypt with the current password, encrypt
+    // with the new one) so we never drop wallets that aren't in this session.
+    let list;
+    try { list = decryptVault(loadVaultBlob(), p.v0 || ''); } catch { p.error = t('pwWrong'); render(); return; }
+    if (p.v1 !== p.v2) { p.error = t('pwMismatch'); render(); return; }
+    try { localStorage.setItem(VAULT_KEY, JSON.stringify(encryptVault(list, p.v1 || ''))); } catch {}
+    if (vaultPassword != null) vaultPassword = p.v1 || ''; // keep the unlocked session in sync
+    ui.pw = null;
+    render();
+    toast(t('pwChanged'));
+    return;
+  }
   if (p.mode === 'set') {
     // Password is optional — a blank one just persists without protection.
     if (p.v1 !== p.v2) { p.error = t('pwMismatch'); render(); return; }
@@ -1934,6 +1951,7 @@ function accountsScreen() {
         })
       ),
       h('button', { class: 'btn-block', onClick: () => { ui.screen = 'unlock'; ui.unlockTab = 'create'; ui.fromWallet = true; ui.unlockError = ''; render(); } }, t('addWallet')),
+      hasVault() ? h('button', { class: 'btn-ghost btn-block', onClick: startChangePw }, t('changePassword')) : null,
       h('button', { class: 'btn-ghost btn-block', onClick: () => { ui.confirmClear = true; render(); } }, t('clearAll'))
     ),
     h('button', { class: 'btn-ghost btn-block', onClick: () => { ui.screen = 'wallet'; render(); } }, t('back'))
@@ -1963,15 +1981,18 @@ function clearAll() {
 
 function pwPromptCard() {
   const p = ui.pw;
+  const change = p.purpose === 'change';
+  const newish = change || p.mode === 'set'; // entering a (new) password with confirm
   return h('div', { class: 'card col' },
-    h('h3', {}, p.mode === 'set' ? t('setPassword') : t('enterPassword')),
-    h('p', { class: 'small muted', style: 'margin:0' }, p.mode === 'set' ? t('setPasswordDesc') : t('enterPasswordDesc')),
-    h('input', { type: 'password', placeholder: p.mode === 'set' ? t('passwordOptional') : t('password'), value: p.v1, onInput: (e) => (p.v1 = e.target.value) }),
-    p.mode === 'set' ? h('input', { type: 'password', placeholder: t('confirmPassword'), value: p.v2, onInput: (e) => (p.v2 = e.target.value) }) : null,
+    h('h3', {}, change ? t('changePassword') : p.mode === 'set' ? t('setPassword') : t('enterPassword')),
+    h('p', { class: 'small muted', style: 'margin:0' }, change ? t('changePasswordDesc') : p.mode === 'set' ? t('setPasswordDesc') : t('enterPasswordDesc')),
+    change ? h('input', { type: 'password', placeholder: t('currentPassword'), value: p.v0, onInput: (e) => (p.v0 = e.target.value) }) : null,
+    h('input', { type: 'password', placeholder: newish ? t('passwordOptional') : t('password'), value: p.v1, onInput: (e) => (p.v1 = e.target.value) }),
+    newish ? h('input', { type: 'password', placeholder: t('confirmPassword'), value: p.v2, onInput: (e) => (p.v2 = e.target.value) }) : null,
     p.error && h('div', { class: 'notice err' }, p.error),
     h('div', { class: 'row gap6' },
       h('button', { class: 'btn-ghost grow', onClick: cancelPw }, t('back')),
-      h('button', { class: 'btn-primary grow', onClick: submitPw }, p.mode === 'set' ? t('save') : t('unlock'))
+      h('button', { class: 'btn-primary grow', onClick: submitPw }, newish ? t('save') : t('unlock'))
     )
   );
 }
