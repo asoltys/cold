@@ -4,7 +4,7 @@
 // which rebuilds the active screen. Text inputs write back into `ui` on `input`
 // (without re-rendering) so their values survive structural re-renders.
 
-import { Wallet, newMnemonic, isValidMnemonic, accountXpubFor, utxoId, previewGift, giftOutpoints, buildClaimTx, giftMinimum, parseExtendedKey, xpubToZpub, encryptVault, decryptVault } from './wallet.js';
+import { Wallet, newMnemonic, isValidMnemonic, accountXpubFor, cacheKeyFor, utxoId, previewGift, giftOutpoints, buildClaimTx, giftMinimum, parseExtendedKey, xpubToZpub, encryptVault, decryptVault } from './wallet.js';
 import { qrSvg } from './qr.js';
 import { scanQr } from './scan.js';
 import { getSyncConfig, setSyncConfig } from './nostr.js';
@@ -724,12 +724,12 @@ function defaultLabel(type) {
 function loadWatchAccounts() {
   try {
     const dir = JSON.parse(localStorage.getItem(WATCH_KEY) || '[]');
-    return dir.filter((d) => d.xpub).map((d) => ({ id: d.id, label: d.label, type: 'watch', xpub: d.xpub }));
+    return dir.filter((d) => d.xpub).map((d) => ({ id: d.id, label: d.label, type: 'watch', xpub: d.xpub, autoLock: d.autoLock || 0 }));
   } catch { return []; }
 }
 function saveDirectory() {
   try {
-    const dir = accounts.filter((a) => a.xpub && !a.provisional).map((a) => ({ id: a.id, label: a.label, xpub: a.xpub }));
+    const dir = accounts.filter((a) => a.xpub && !a.provisional).map((a) => ({ id: a.id, label: a.label, xpub: a.xpub, autoLock: a.autoLock || 0 }));
     localStorage.setItem(WATCH_KEY, JSON.stringify(dir));
   } catch {}
 }
@@ -798,7 +798,11 @@ function restoreAccountsState() {
   }
   if (hasVault()) {
     // A blank (optional) vault password unlocks seamlessly with no prompt.
-    if (attemptVaultUnlock('')) { activateAccount(accounts[0], { fresh: true }); return true; }
+    if (attemptVaultUnlock('')) {
+      if (accounts.length) activateAccount(accounts[0], { fresh: true });
+      else { ui.screen = 'unlock'; render(); }
+      return true;
+    }
     ui.screen = 'vault'; render(); return true;
   }
   const watch = loadWatchAccounts();
@@ -942,6 +946,14 @@ function attemptVaultUnlock(password) {
   // appear (watch-only) instead of vanishing.
   accounts = loadWatchAccounts();
   mergeVaultList(list);
+  // Now that we have the password, finish signing out any saved wallets whose
+  // timer expired while we were away (couldn't re-encrypt the vault until now).
+  if (_bootAwayMs) {
+    const due = accounts.filter((a) => accAutoLock(a) > 0 && _bootAwayMs >= accAutoLock(a));
+    for (const a of due) { wipeAccountCache(a); accounts = accounts.filter((x) => x.id !== a.id); }
+    if (due.some((a) => a.persisted)) writeVault();
+    _bootAwayMs = 0;
+  }
   return true;
 }
 
@@ -950,7 +962,8 @@ function unlockVault() {
   if (!attemptVaultUnlock(ui.vaultPw)) { ui.vaultError = t('pwWrong'); render(); return; }
   ui.vaultPw = '';
   ui.vaultError = '';
-  activateAccount(accounts[0], { fresh: true });
+  if (accounts.length) activateAccount(accounts[0], { fresh: true });
+  else lock(); // everything got signed out by the timer
 }
 function skipVault() {
   ui.vaultPw = '';
@@ -982,10 +995,11 @@ async function retryOnline() {
   }
 }
 
-// --- auto log-out (drop to watch-only after the app is left in the background) -
-// Options in ms; 0 = never. The countdown only runs while the app is hidden /
-// unfocused — never while you're actively looking at it.
-const AUTOLOCK_KEY = 'btc-wallet-autolock';
+// --- auto log-out, per wallet ----------------------------------------------
+// Each account can choose how long the app may sit in the background before that
+// wallet is signed out (removed from this device — session, directory, cache,
+// and its vault entry). Other wallets are untouched. The countdown only runs
+// while the app is hidden/unfocused, never while you're looking at it. 0 = never.
 const AUTOLOCK_OPTIONS = [
   { ms: 0, label: 'autolockNever' },
   { ms: 60_000, label: 'autolock1m' },
@@ -993,62 +1007,100 @@ const AUTOLOCK_OPTIONS = [
   { ms: 3_600_000, label: 'autolock1h' },
   { ms: 86_400_000, label: 'autolock1d' },
 ];
-function getAutoLock() { try { return Number(localStorage.getItem(AUTOLOCK_KEY)) || 0; } catch { return 0; } }
-function setAutoLock(ms) { try { localStorage.setItem(AUTOLOCK_KEY, String(ms)); } catch {} }
+const accAutoLock = (a) => (a && Number(a.autoLock)) || 0;
 
 const AWAY_AT_KEY = 'btc-wallet-bg-at';
 let _awayTimer = null;
-// Going to the background: record when, and arm a timer. The timestamp is the
-// reliable signal (background timers get throttled, and a discarded tab never
-// fires) — on return/boot we compare elapsed time and log out if it's overdue.
-function onAppHidden() {
-  try { localStorage.setItem(AWAY_AT_KEY, String(Date.now())); } catch {}
-  clearTimeout(_awayTimer);
-  const ms = getAutoLock();
-  if (ms > 0) _awayTimer = setTimeout(autoLogout, ms);
-}
-function _awayElapsed() {
-  try { const t = Number(localStorage.getItem(AWAY_AT_KEY)) || 0; localStorage.removeItem(AWAY_AT_KEY); return t ? Date.now() - t : 0; } catch { return 0; }
-}
-function onAppVisible() {
-  clearTimeout(_awayTimer); _awayTimer = null;
-  const ms = getAutoLock();
-  const away = _awayElapsed();
-  if (ms > 0 && away >= ms) autoLogout(); // overdue while we were away (same session)
-}
-// At boot the in-memory timer is gone (reload / discarded tab), so if we were
-// away past the limit, clear the session + watch-only directory + cached state
-// before anything is restored (vault wallets still come back via the password).
-function applyBootAutoLogout() {
-  const ms = getAutoLock();
-  const away = _awayElapsed();
-  if (!(ms > 0 && away >= ms)) return;
-  try { sessionStorage.removeItem(ACCOUNTS_KEY); } catch {}
-  try { localStorage.removeItem(WATCH_KEY); } catch {}
-  try { localStorage.removeItem(VAULT_KEY); } catch {}
-  clearWalletCaches();
-}
+let _bootAwayMs = 0; // away duration carried into the vault-unlock check this session
+const _awayAt = () => { try { return Number(localStorage.getItem(AWAY_AT_KEY)) || 0; } catch { return 0; } };
+const _clearAwayAt = () => { try { localStorage.removeItem(AWAY_AT_KEY); } catch {} };
 
-// Remove every trace of the open wallet from this device: the session, the
-// durable watch-only directory, and the cached balance/history. Only wallets
-// explicitly saved to the device (encrypted vault) remain — behind the password.
-function clearWalletCaches() {
+// Remove one wallet's cached state — the xpub mirror plus its seed-keyed cache
+// (when the seed is at hand), including the :ack/:gift suffixes.
+function wipeAccountCache(acc) {
+  if (!acc) return;
+  const ids = [];
+  if (acc.xpub) ids.push(acc.xpub);
+  if (acc.xprv) ids.push(acc.xprv);
+  else if (acc.mnemonic) ids.push(`${acc.mnemonic}\n${acc.passphrase || ''}`);
+  const bases = ids.map(cacheKeyFor);
   try {
     const keys = [];
-    for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k && k.startsWith('btc-wallet-cache:')) keys.push(k); }
+    for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k && bases.some((b) => k.startsWith(b))) keys.push(k); }
     keys.forEach((k) => localStorage.removeItem(k));
   } catch {}
 }
 
-// Full sign-out after the app's been backgrounded past the limit: remove every
-// trace of every wallet from this device — including the saved-to-device vault
-// (password-protected or not). You'll need your recovery phrase to get back in.
-function autoLogout() {
-  if (ui.screen !== 'wallet') return; // don't interrupt unlock / claim flows
-  try { localStorage.removeItem(WATCH_KEY); } catch {}
-  try { localStorage.removeItem(VAULT_KEY); } catch {}
-  clearWalletCaches();
-  lock();
+// Sign out a single wallet: remove it from the device entirely (session,
+// directory, cache, and the vault if it was saved). Others are left alone.
+function wipeAccount(id) {
+  const acc = accounts.find((a) => a.id === id);
+  if (!acc) return;
+  const wasActive = activeId === id;
+  wipeAccountCache(acc);
+  const wasPersisted = acc.persisted;
+  accounts = accounts.filter((a) => a.id !== id);
+  if (wasPersisted && vaultPassword != null) writeVault(); // re-encrypt the vault without it
+  persistAccounts(); // refresh the durable directory
+  if (wasActive) {
+    if (accounts.length) activateAccount(accounts[0], { fresh: true });
+    else lock();
+  }
+}
+
+// Sign out every loaded wallet whose timer has elapsed for the given away time.
+function evaluateOverdue(away) {
+  const due = accounts.filter((a) => accAutoLock(a) > 0 && away >= accAutoLock(a)).map((a) => a.id);
+  for (const id of due) wipeAccount(id);
+}
+
+// Arm a timer for the soonest-due wallet so a blurred-but-visible window still
+// signs out on time (the timestamp covers throttled/backgrounded tabs).
+function armAwayTimer() {
+  clearTimeout(_awayTimer); _awayTimer = null;
+  const awayAt = _awayAt();
+  if (!awayAt) return;
+  const locks = accounts.map(accAutoLock).filter((ms) => ms > 0);
+  if (!locks.length) return;
+  const elapsed = Date.now() - awayAt;
+  if (locks.some((ms) => elapsed >= ms)) { evaluateOverdue(elapsed); armAwayTimer(); return; }
+  const next = Math.min(...locks.map((ms) => ms - elapsed));
+  _awayTimer = setTimeout(() => { evaluateOverdue(Date.now() - awayAt); armAwayTimer(); }, Math.max(0, next));
+}
+
+function onAppHidden() {
+  try { localStorage.setItem(AWAY_AT_KEY, String(Date.now())); } catch {}
+  armAwayTimer();
+}
+function onAppVisible() {
+  clearTimeout(_awayTimer); _awayTimer = null;
+  const awayAt = _awayAt(); _clearAwayAt();
+  if (awayAt) evaluateOverdue(Date.now() - awayAt);
+}
+
+// At boot the in-memory timer is gone (reload / discarded tab). Drop overdue
+// wallets from the persisted session and directory before anything is restored;
+// overdue saved wallets are removed from the vault when it's unlocked.
+function applyBootAutoLogout() {
+  const awayAt = _awayAt(); _clearAwayAt();
+  if (!awayAt) return;
+  const away = Date.now() - awayAt;
+  _bootAwayMs = away;
+  const overdue = (a) => { const ms = Number(a.autoLock) || 0; return ms > 0 && away >= ms; };
+  try {
+    const sess = JSON.parse(sessionStorage.getItem(ACCOUNTS_KEY) || 'null');
+    if (sess && Array.isArray(sess.accounts)) {
+      const keep = sess.accounts.filter((a) => { if (overdue(a)) { wipeAccountCache(a); return false; } return true; });
+      sess.accounts = keep;
+      if (!keep.find((a) => a.id === sess.activeId)) sess.activeId = keep[0] ? keep[0].id : null;
+      sessionStorage.setItem(ACCOUNTS_KEY, JSON.stringify(sess));
+    }
+  } catch {}
+  try {
+    const dir = JSON.parse(localStorage.getItem(WATCH_KEY) || '[]');
+    const keep = dir.filter((d) => { if (overdue(d)) { wipeAccountCache(d); return false; } return true; });
+    localStorage.setItem(WATCH_KEY, JSON.stringify(keep));
+  } catch {}
 }
 
 function lock() {
@@ -1451,13 +1503,15 @@ async function doRevoke(id) {
 // Auto log-out after the app has been in the background for the chosen time —
 // drops to watch-only (re-enter the seed to spend). Never counts while focused.
 function autoLockCard() {
-  const cur = getAutoLock();
+  const acc = activeAccount();
+  if (!acc) return null;
+  const cur = accAutoLock(acc);
   return h(
     'div',
     { class: 'card col' },
     h('h3', {}, t('autolockTitle')),
     h('p', { class: 'small muted', style: 'margin:0' }, t('autolockDesc')),
-    h('select', { onChange: (e) => { setAutoLock(Number(e.target.value)); render(); } },
+    h('select', { onChange: (e) => { acc.autoLock = Number(e.target.value) || 0; persistAccounts(); render(); } },
       AUTOLOCK_OPTIONS.map((o) => h('option', { value: String(o.ms), selected: o.ms === cur }, t(o.label)))
     )
   );

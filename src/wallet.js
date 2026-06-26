@@ -47,6 +47,13 @@ export function newMnemonic(strengthBits = 128) {
   return generateMnemonic(wordlist, strengthBits);
 }
 
+// The base localStorage cache key for a wallet identity (xpub, xprv, or
+// seed-id) — mirrors Wallet#_cacheKey, so app code can target a specific
+// account's cached state (e.g. to wipe it on log-out).
+export function cacheKeyFor(id) {
+  return 'btc-wallet-cache:' + hex.encode(sha256(new TextEncoder().encode(id))).slice(0, 32);
+}
+
 // Account-level xpub for a seed/key without constructing a Wallet — used to
 // verify an entered recovery phrase matches a watch-only account before
 // upgrading it to spendable.
