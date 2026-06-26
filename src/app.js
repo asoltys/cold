@@ -2458,7 +2458,7 @@ function txHistoryItem(tx) {
   const stuck = !tx.confirmed && wallet.isStuck(tx);
   return h(
     'div',
-    { class: 'item', style: 'cursor:pointer', onClick: () => { ui.txDetail = tx.txid; render(); } },
+    { class: 'item', style: 'cursor:pointer', onClick: () => openTx(tx.txid) },
     h('div', { class: `ico ${incoming ? 'in' : 'out'}` }, incoming ? '↓' : '↑'),
     h('div', { class: 'grow' },
       h('div', { class: 'row gap6' },
@@ -2555,6 +2555,30 @@ function historyTab() {
         )
       : null
   );
+}
+
+// Open a tx's detail view, lazily fetching its fee/details if we don't have them
+// yet. A watcher-credited receive arrives with no fee (the push can't compute it
+// from the raw tx), so fill it in from the explorer on demand — works for pending
+// mempool txs too.
+async function openTx(txid) {
+  ui.txDetail = txid;
+  render();
+  const tx = wallet.txs.find((t) => t.txid === txid);
+  if (!tx || tx.fee || wallet.offline) return;
+  try {
+    const full = await wallet.api.getTx(txid);
+    if (!full || ui.txDetail !== txid) return;
+    if (full.fee != null) tx.fee = full.fee;
+    if (full.weight) tx.vsize = Math.ceil(full.weight / 4);
+    if (full.status && full.status.confirmed) {
+      tx.confirmed = true;
+      tx.blockHeight = full.status.block_height || tx.blockHeight;
+      tx.blockTime = full.status.block_time || tx.blockTime;
+    }
+    wallet.saveCache();
+    render();
+  } catch {}
 }
 
 function txDetailView(tx) {
