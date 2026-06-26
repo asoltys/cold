@@ -1378,6 +1378,58 @@ export class Wallet {
     return true;
   }
 
+  // Optimistically reflect a just-broadcast outgoing tx so the balance and
+  // history update instantly instead of waiting for the post-send rescan: drop
+  // the spent coins, credit our change as pending, and add a pending history
+  // row. The realtime watcher / backstop poll reconciles it (and fills in the
+  // confirmation) once the explorer has indexed the tx. `tx` is the finalized
+  // btc.Transaction we just signed and broadcast.
+  applySentTx(tx) {
+    const txid = tx.id;
+    if (this.txs.find((t) => t.txid === txid)) return; // already applied
+    const byOutpoint = new Map();
+    for (const u of this.utxos) byOutpoint.set(utxoId(u), u);
+
+    let inSum = 0;
+    const spent = new Set();
+    for (let i = 0; i < tx.inputsLength; i++) {
+      const inp = tx.getInput(i);
+      const id = `${hex.encode(inp.txid)}:${inp.index}`;
+      const u = byOutpoint.get(id);
+      if (!u) continue;
+      inSum += u.value;
+      spent.add(id);
+      const e = (u.chain === 0 ? this.receive : this.change).find((a) => a.index === u.index);
+      if (e) { if (u.confirmed) e.confirmed = Math.max(0, (e.confirmed || 0) - u.value); else e.pending = Math.max(0, (e.pending || 0) - u.value); }
+    }
+    this.utxos = this.utxos.filter((u) => !spent.has(utxoId(u)));
+
+    let outSum = 0, change = 0;
+    for (let i = 0; i < tx.outputsLength; i++) {
+      const o = tx.getOutput(i);
+      outSum += Number(o.amount);
+      let addr;
+      try { addr = btc.Address(this.netCfg.net).encode(btc.OutScript.decode(o.script)); } catch {}
+      const info = addr && this.addrMap.get(addr);
+      if (!info) continue; // recipient output — not ours
+      this.utxos.push({ txid, vout: i, value: Number(o.amount), address: addr, chain: info.chain, index: info.index, confirmed: false });
+      const e = (info.chain === 0 ? this.receive : this.change).find((a) => a.index === info.index);
+      if (e) { e.pending = (e.pending || 0) + Number(o.amount); e.used = true; }
+      change += Number(o.amount);
+    }
+
+    this.txs.unshift({ txid, net: change - inSum, fee: inSum - outSum, vsize: tx.weight ? Math.ceil(tx.weight / 4) : 0, confirmed: false, blockTime: 0, blockHeight: 0, firstSeen: Date.now() });
+    this.nextReceiveIndex = firstUnused(this.receive);
+    this.nextChangeIndex = firstUnused(this.change);
+    this.utxos.sort((a, b) => b.value - a.value);
+    this._sortTxs();
+    this._recomputeBalanceFromUtxos();
+    this.loaded = true;
+    this.saveCache();
+    this.retrack();
+    this.emit();
+  }
+
   startRealtime() {
     if (this.offline) return;
     this.stopRealtime();

@@ -2768,12 +2768,12 @@ async function broadcast() {
       wallet.broadcast(hexTx),
       new Promise((_, rej) => setTimeout(() => rej(new Error(t('broadcastTimeout'))), 30000)),
     ]);
+    wallet.applySentTx(ui.draft.tx); // update balance/history locally, right now
     ui.sendResult = { txid };
     ui.draft = null;
     ui.send = blankSend();
     ui.busy = false;
-    render();                      // show success immediately — don't hold the
-    wallet.scan().catch(() => {}); // spinner up for the post-send rescan
+    render(); // the realtime watcher / backstop poll reconciles + confirms later
     return;
   } catch (e) {
     ui.sendError = t('broadcastFailed', { msg: e.message });
