@@ -1,4 +1,4 @@
-const CACHE = 'cold-3abmqqb0jh24z';
+const CACHE = 'cold-3o4z7zwkjepuc';
 // jsqr.js is precached so the lazy QR decoder is available offline too (for
 // installed PWAs on browsers without a native BarcodeDetector).
 const SHELL = ['./', 'manifest.webmanifest', 'icon-192.png', 'icon-512.png', 'jsqr.js'];

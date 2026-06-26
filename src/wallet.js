@@ -25,11 +25,10 @@ import { Api, pool, wsUrl } from './api.js';
 import { NostrSync, getSyncConfig } from './nostr.js';
 import { isSilentPaymentAddress, decodeSilentPaymentAddress, silentPaymentScripts, silentPaymentPlaceholder } from './silentpay.js';
 
-// No look-ahead: stop scanning a chain at the first unused address. This wallet
-// only ever exposes ONE unused address at a time (freshReceive = first unused;
-// there is no "generate another address" button), so used addresses stay
-// contiguous and there is never a gap to look past. Keeps scans tiny.
-const GAP_LIMIT = 1;
+// Default gap limit when scanning (how many unused addresses to check before
+// concluding the wallet has no more activity).  Standard BIP44 value; override
+// per wallet for deep recovery scans.
+const DEFAULT_GAP_LIMIT = 20;
 
 // Extra pause after finding a used address, before querying the next index —
 // keeps us gentle on the explorers' rate limits when a wallet has activity.
@@ -85,6 +84,8 @@ export class Wallet {
     this._refreshing = false; // a scan/refresh is in flight
     this.nextReceiveIndex = 0;
     this.nextChangeIndex = 0;
+    this.gapLimit = DEFAULT_GAP_LIMIT; // override for deep recovery scans
+    this.minTimestamp = 0; // only include txs after this UNIX timestamp (0 = all)
 
     this._account = null;
     this._accountKey = '';
@@ -125,7 +126,7 @@ export class Wallet {
   }
 
   // --- setup --------------------------------------------------------------
-  load({ mnemonic = '', passphrase = '', xpub = '', xprv = '', netName = 'mainnet', offline = false }) {
+  load({ mnemonic = '', passphrase = '', xpub = '', xprv = '', netName = 'mainnet', offline = false, gapLimit, minTimestamp }) {
     this.stopRealtime();
     this.mnemonic = (mnemonic || '').trim().replace(/\s+/g, ' ');
     this.passphrase = passphrase;
@@ -142,6 +143,10 @@ export class Wallet {
     this._reserved = null; // gift coins set aside from spending (lazy-loaded)
     this._reclaimed = null; // gift coins freed for spending but link still live
     this._savedAt = 0;
+    if (gapLimit !== undefined) this.gapLimit = gapLimit;
+    else this.gapLimit = DEFAULT_GAP_LIMIT;
+    if (minTimestamp !== undefined) this.minTimestamp = minTimestamp;
+    else this.minTimestamp = 0;
     try {
       if (this.mnemonic) this.nostr.load(this.mnemonic, this.passphrase);
       else this.nostr.unload();
@@ -252,7 +257,7 @@ export class Wallet {
     const found = [];
     let gap = 0;
     let i = 0;
-    while (gap < GAP_LIMIT) {
+    while (gap < this.gapLimit) {
       const { address } = this.derive(chain, i);
       const info = await this.api.addressInfo(address);
       const cs = info.chain_stats || {};
@@ -358,6 +363,8 @@ export class Wallet {
         }
         const list = await this.api.addressTxs(a.address);
         for (const tx of list) {
+          const txTime = tx.status && tx.status.block_time;
+          if (this.minTimestamp && txTime && txTime < this.minTimestamp) continue;
           const summary = this._txSummary(tx);
           const at = this.txs.findIndex((t) => t.txid === tx.txid);
           // Refresh in place so a tx that has since confirmed loses its pending
@@ -675,6 +682,9 @@ export class Wallet {
         let added = false;
         for (const tx of list) {
           if (seen.has(tx.txid)) continue;
+          // Respect minTimestamp: skip txs confirmed or first-seen earlier.
+          const txTime = tx.status && tx.status.block_time;
+          if (this.minTimestamp && txTime && txTime < this.minTimestamp) continue;
           seen.add(tx.txid);
           const summary = this._txSummary(tx);
           const at = this.txs.findIndex((t) => t.txid === tx.txid);
@@ -1793,18 +1803,22 @@ export function utxoId(u) {
 // --- descriptor import ----------------------------------------------------
 // Parse a Bitcoin output descriptor and extract the embedded extended key.
 // Handles:
-//   wpkh(<key>/0/*)          — BIP84 native segwit
-//   tr(<key>/0/*)            — BIP86 taproot
-//   sh(wpkh(<key>/0/*))      — BIP49 wrapped segwit
-//   pkh(<key>/0/*)           — BIP44 legacy
-//   wsh(multi(...)/0/*)      — multisig (first key)
+//   wpkh(<key>/0/*)           — BIP84 native segwit
+//   tr(<key>/0/*)             — BIP86 taproot
+//   sh(wpkh(<key>/0/*))       — BIP49 wrapped segwit
+//   pkh(<key>/0/*)            — BIP44 legacy
+//   wsh(multi(...)/0/*)       — multisig (first key)
 // Keys may include origin: [fingerprint/84'/0'/0']xpub...
+// Derivation may use <0;1> for receive/change ranges.
+// Trailing checksum (#xxxxxx) is stripped.
 // Returns { kind: 'xpub'|'xprv', key } or throws.
 export function parseDescriptor(text) {
-  const raw = (text || '').trim();
+  let inner = (text || '').trim();
+
+  // Strip descriptor checksum: #xxxxxx at end
+  inner = inner.replace(/#[0-9a-z]{4,12}$/i, '');
 
   // Strip outer function wrappers, keeping innermost key.
-  let inner = raw;
   while (/^(wpkh|tr|pkh|sh|wsh|multi)\s*\(/.test(inner)) {
     inner = inner.replace(/^(wpkh|tr|pkh|sh|wsh|multi)\s*\(/, '');
     let depth = 1;
@@ -1817,11 +1831,12 @@ export function parseDescriptor(text) {
   // Strip key origin [fingerprint/path]
   inner = inner.replace(/^\[[^\]]*\]/, '');
 
-  // Strip trailing derivation path like /0/*, /0/0, /*
+  // Strip trailing derivation path: /0/*, /<0;1>/*, /<0;0>, /0/0, /*
+  inner = inner.replace(/\/<\d+;\d+>(\/\*)?$/, '');
   inner = inner.replace(/\/\d+(\/\*)?(\/\d+)?$/, '');
   inner = inner.replace(/\/\*$/, '');
 
-  // Now inner should be an extended key (xpub/zpub/xprv/zprv) or hex pubkey.
+  // Now inner should be an extended key (xpub/zpub/xprv/zprv/tpub/vpub/etc.) or hex pubkey.
   // Try extended key first.
   try {
     const pk = parseExtendedKey(inner);
@@ -1834,6 +1849,18 @@ export function parseDescriptor(text) {
   }
 
   throw new Error('Could not extract an extended key from the descriptor.');
+}
+
+// Detect the target network from a key prefix in a descriptor or raw key.
+// Returns a network name or null if ambiguous.
+export function detectNetworkFromKey(text) {
+  const s = (text || '').trim();
+  // Testnet prefixes: tpub/tprv, upub/uprv, vpub/vprv
+  // Check raw key prefix or key embedded inside a descriptor.
+  if (/^[tuv](pub|prv)/i.test(s) || /[[( ][tuv](pub|prv)/i.test(s)) {
+    return 'testnet';
+  }
+  return null;
 }
 
 // --- BIP-329 label export/import ------------------------------------------
@@ -1866,19 +1893,42 @@ export function importLabelsBIP329(data) {
   return txLabels;
 }
 
-// Watch-only: accept a native-segwit account xpub or zpub and normalize it to
-// xpub version bytes (the key material is identical; only the prefix differs),
-// so HDKey can load it. Throws on anything else (private keys, wrong type).
+// Watch-only: accept account-level extended keys (xpub/zpub/tpub/vpub/upub,
+// or xprv/zprv/tprv/vprv/uprv for private) and normalize to xpub/xprv version
+// bytes so HDKey can load them. The key material is identical; only the prefix
+// differs. Throws on anything else.
 const _b58c = base58check(sha256);
-const _XPUB_VER = Uint8Array.from([0x04, 0x88, 0xb2, 0x1e]);
-const _ZPUB_VER = Uint8Array.from([0x04, 0xb2, 0x47, 0x46]);
-const _XPRV_VER = Uint8Array.from([0x04, 0x88, 0xad, 0xe4]);
-const _ZPRV_VER = Uint8Array.from([0x04, 0xb2, 0x43, 0x0c]);
+const _XPUB_VER = Uint8Array.from([0x04, 0x88, 0xb2, 0x1e]); // xpub mainnet
+const _ZPUB_VER = Uint8Array.from([0x04, 0xb2, 0x47, 0x46]); // zpub mainnet native segwit
+const _TPUB_VER = Uint8Array.from([0x04, 0x35, 0x87, 0xcf]); // tpub testnet
+const _VPUB_VER = Uint8Array.from([0x04, 0x5f, 0x1c, 0xf6]); // vpub testnet native segwit
+const _UPUB_VER = Uint8Array.from([0x04, 0x4a, 0x52, 0x62]); // upub testnet wrapped segwit
+const _YPUB_VER = Uint8Array.from([0x04, 0x9d, 0x7c, 0xb2]); // ypub mainnet wrapped segwit
+const _XPRV_VER = Uint8Array.from([0x04, 0x88, 0xad, 0xe4]); // xprv mainnet
+const _ZPRV_VER = Uint8Array.from([0x04, 0xb2, 0x43, 0x0c]); // zprv mainnet native segwit
+const _TPRV_VER = Uint8Array.from([0x04, 0x35, 0x83, 0x94]); // tprv testnet
+const _VPRV_VER = Uint8Array.from([0x04, 0x5f, 0x18, 0xbc]); // vprv testnet native segwit
+const _UPRV_VER = Uint8Array.from([0x04, 0x44, 0xa6, 0xf2]); // uprv testnet wrapped segwit
+const _YPRV_VER = Uint8Array.from([0x04, 0x49, 0x5e, 0xd3]); // yprv mainnet wrapped segwit
 
-// Classify a pasted extended key. xpub/zpub → public (watch-only); xprv/zprv →
-// private (spending). Version bytes are normalized to the standard xpub/xprv set
-// (key material is identical; only the prefix differs) so HDKey can load it.
-// Returns { kind: 'xpub' | 'xprv', key } or throws.
+const _PUB_VER_BYTES = new Map([
+  [hex.encode(_XPUB_VER), { kind: 'xpub', norm: _XPUB_VER }],
+  [hex.encode(_ZPUB_VER), { kind: 'xpub', norm: _XPUB_VER }],
+  [hex.encode(_TPUB_VER), { kind: 'xpub', norm: _XPUB_VER }],
+  [hex.encode(_VPUB_VER), { kind: 'xpub', norm: _XPUB_VER }],
+  [hex.encode(_UPUB_VER), { kind: 'xpub', norm: _XPUB_VER }],
+  [hex.encode(_YPUB_VER), { kind: 'xpub', norm: _XPUB_VER }],
+]);
+const _PRV_VER_BYTES = new Map([
+  [hex.encode(_XPRV_VER), { kind: 'xprv', norm: _XPRV_VER }],
+  [hex.encode(_ZPRV_VER), { kind: 'xprv', norm: _XPRV_VER }],
+  [hex.encode(_TPRV_VER), { kind: 'xprv', norm: _XPRV_VER }],
+  [hex.encode(_VPRV_VER), { kind: 'xprv', norm: _XPRV_VER }],
+  [hex.encode(_UPRV_VER), { kind: 'xprv', norm: _XPRV_VER }],
+  [hex.encode(_YPRV_VER), { kind: 'xprv', norm: _XPRV_VER }],
+]);
+
+// Classify a pasted extended key. Returns { kind: 'xpub' | 'xprv', key } or throws.
 export function parseExtendedKey(s) {
   let data;
   try {
@@ -1888,19 +1938,23 @@ export function parseExtendedKey(s) {
   }
   if (data.length !== 78) throw new Error('Not a valid recovery phrase or key.');
   const ver = hex.encode(data.slice(0, 4));
-  let kind, norm;
-  if (ver === hex.encode(_XPUB_VER) || ver === hex.encode(_ZPUB_VER)) { kind = 'xpub'; norm = _XPUB_VER; }
-  else if (ver === hex.encode(_XPRV_VER) || ver === hex.encode(_ZPRV_VER)) { kind = 'xprv'; norm = _XPRV_VER; }
-  else throw new Error('Unrecognized key type — use a native-segwit xpub/zpub or xprv/zprv.');
-  const out = new Uint8Array(data);
-  out.set(norm, 0);
-  const key = _b58c.encode(out);
-  try {
-    HDKey.fromExtendedKey(key);
-  } catch {
-    throw new Error('Not a valid extended key.');
+  const pubEntry = _PUB_VER_BYTES.get(ver);
+  if (pubEntry) {
+    const out = new Uint8Array(data);
+    out.set(pubEntry.norm, 0);
+    const key = _b58c.encode(out);
+    try { HDKey.fromExtendedKey(key); } catch { throw new Error('Not a valid extended key.'); }
+    return { kind: 'xpub', key };
   }
-  return { kind, key };
+  const prvEntry = _PRV_VER_BYTES.get(ver);
+  if (prvEntry) {
+    const out = new Uint8Array(data);
+    out.set(prvEntry.norm, 0);
+    const key = _b58c.encode(out);
+    try { HDKey.fromExtendedKey(key); } catch { throw new Error('Not a valid extended key.'); }
+    return { kind: 'xprv', key };
+  }
+  throw new Error('Unrecognized key type — use an xpub/zpub/tpub/vpub/upub or xprv/zprv.');
 }
 
 // Encrypted vault for persisting seed-bearing accounts on this device. Key is

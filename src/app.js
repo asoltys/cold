@@ -4,7 +4,7 @@
 // which rebuilds the active screen. Text inputs write back into `ui` on `input`
 // (without re-rendering) so their values survive structural re-renders.
 
-import { Wallet, newMnemonic, isValidMnemonic, utxoId, previewGift, giftOutpoints, buildClaimTx, giftMinimum, parseExtendedKey, xpubToZpub, encryptVault, decryptVault, NETS, parseDescriptor, exportLabelsBIP329, importLabelsBIP329 } from './wallet.js';
+import { Wallet, newMnemonic, isValidMnemonic, utxoId, previewGift, giftOutpoints, buildClaimTx, giftMinimum, parseExtendedKey, xpubToZpub, encryptVault, decryptVault, NETS, parseDescriptor, exportLabelsBIP329, importLabelsBIP329, detectNetworkFromKey } from './wallet.js';
 import { qrSvg } from './qr.js';
 import { scanQr } from './scan.js';
 import { getSyncConfig, setSyncConfig } from './nostr.js';
@@ -46,6 +46,10 @@ const ui = {
   importText: '',
   passphrase: '',
   showPass: false,
+  importNet: '',
+  scanGapLimit: 20,
+  scanFromDate: '',
+  showAdvanced: false,
   revealShown: false, // recovery phrase unmasked on the Backup tab (after the warning)
   pubkeyShown: false, // account public key revealed in Settings
   giftMode: false, // gift sub-view active on the Send page
@@ -550,7 +554,12 @@ function importPane() {
         autocomplete: 'off',
         spellcheck: 'false',
         value: ui.importText,
-        onInput: (e) => (ui.importText = e.target.value),
+        onInput: (e) => {
+          ui.importText = e.target.value;
+          // Auto-detect network from pasted key/descriptor.
+          const detected = detectNetworkFromKey(ui.importText);
+          if (detected) ui.importNet = detected;
+        },
       })
     ),
     optionsPanel(),
@@ -559,22 +568,65 @@ function importPane() {
 }
 
 function optionsPanel() {
+  const netNames = Object.keys(NETS);
   return h(
-    'label',
-    { class: 'field' },
-    h('span', { class: 'lab' }, t('passphrase')),
+    'div',
+    { class: 'col', style: 'gap:8px' },
     h(
-      'div',
-      { class: 'input-group' },
-      h('input', {
-        type: ui.showPass ? 'text' : 'password',
+      'label',
+      { class: 'field' },
+      h('span', { class: 'lab' }, t('network')),
+      h('select', {
         class: 'mono-input',
-        autocomplete: 'off',
-        value: ui.passphrase,
-        onInput: (e) => (ui.passphrase = e.target.value),
-      }),
-      h('button', { class: 'btn-sm', type: 'button', onClick: () => { ui.showPass = !ui.showPass; render(); } }, ui.showPass ? t('hide') : t('show'))
-    )
+        value: ui.importNet || getPreferredNet(),
+        onChange: (e) => { ui.importNet = e.target.value; },
+      }, netNames.map((n) => h('option', { value: n }, t('net_' + n))))
+    ),
+    h(
+      'label',
+      { class: 'field' },
+      h('span', { class: 'lab' }, t('passphrase')),
+      h(
+        'div',
+        { class: 'input-group' },
+        h('input', {
+          type: ui.showPass ? 'text' : 'password',
+          class: 'mono-input',
+          autocomplete: 'off',
+          value: ui.passphrase,
+          onInput: (e) => (ui.passphrase = e.target.value),
+        }),
+        h('button', { class: 'btn-sm', type: 'button', onClick: () => { ui.showPass = !ui.showPass; render(); } }, ui.showPass ? t('hide') : t('show'))
+      )
+    ),
+    h('label', { class: 'btn btn-ghost btn-block', style: 'cursor:pointer', onClick: () => { ui.showAdvanced = !ui.showAdvanced; render(); } },
+      (ui.showAdvanced ? '▾ ' : '▸ ') + t('advancedOptions')
+    ),
+    ui.showAdvanced ? h('div', { class: 'col', style: 'gap:8px;padding:8px 0' },
+      h(
+        'label',
+        { class: 'field' },
+        h('span', { class: 'lab' }, t('scanGapLimit')),
+        h('input', {
+          type: 'number', min: 1, max: 200,
+          class: 'mono-input',
+          value: ui.scanGapLimit,
+          onInput: (e) => { ui.scanGapLimit = parseInt(e.target.value) || 20; },
+        }),
+        h('span', { class: 'small muted', style: 'margin-top:2px' }, t('scanGapLimitDesc'))
+      ),
+      h(
+        'label',
+        { class: 'field' },
+        h('span', { class: 'lab' }, t('scanFromDate')),
+        h('input', {
+          type: 'date',
+          value: ui.scanFromDate,
+          onInput: (e) => { ui.scanFromDate = e.target.value; },
+        }),
+        h('span', { class: 'small muted', style: 'margin-top:2px' }, t('scanFromDateDesc'))
+      )
+    ) : null
   );
 }
 
@@ -585,15 +637,18 @@ async function openWallet(input) {
   ui.unlockError = '';
   const raw = (input || '').trim();
   const m = raw.replace(/\s+/g, ' ');
-  if (isValidMnemonic(m)) { await enterWallet(m, ui.passphrase); return; }
-  const netName = getPreferredNet();
+  const scanOpts = scanOptions();
+  // Use the import-tab network if set, otherwise the saved preference.
+  const netName = ui.importNet || getPreferredNet();
+  if (ui.importNet && ui.importNet !== getPreferredNet()) setPreferredNet(ui.importNet);
+  if (isValidMnemonic(m)) { await enterWallet(m, ui.passphrase, { ...scanOpts, netName }); return; }
   // Try descriptor first (wpkh(...), tr(...), sh(wpkh(...)), etc.)
   if (/^(wpkh|tr|pkh|sh|wsh)\s*\(/i.test(raw)) {
     try {
       const pk = parseDescriptor(raw);
       const acc = pk.kind === 'xpub'
-        ? addOrGetAccount({ type: 'watch', label: defaultLabel('watch'), xpub: pk.key, netName })
-        : addOrGetAccount({ type: 'full', label: defaultLabel('full'), xprv: pk.key, netName });
+        ? addOrGetAccount({ type: 'watch', label: defaultLabel('watch'), xpub: pk.key, netName, ...scanOpts })
+        : addOrGetAccount({ type: 'full', label: defaultLabel('full'), xprv: pk.key, netName, ...scanOpts });
       ui.fromWallet = false;
       await activateAccount(acc, { fresh: true });
       return;
@@ -606,20 +661,34 @@ async function openWallet(input) {
   let pk;
   try { pk = parseExtendedKey(raw); } catch { ui.unlockError = t('invalidImport'); render(); return; }
   const acc = pk.kind === 'xpub'
-    ? addOrGetAccount({ type: 'watch', label: defaultLabel('watch'), xpub: pk.key, netName })
-    : addOrGetAccount({ type: 'full', label: defaultLabel('full'), xprv: pk.key, netName });
+    ? addOrGetAccount({ type: 'watch', label: defaultLabel('watch'), xpub: pk.key, netName, ...scanOpts })
+    : addOrGetAccount({ type: 'full', label: defaultLabel('full'), xprv: pk.key, netName, ...scanOpts });
   ui.fromWallet = false;
   await activateAccount(acc, { fresh: true });
 }
 
+function scanOptions() {
+  const opts = {};
+  if (ui.scanGapLimit && ui.scanGapLimit !== 20) opts.gapLimit = ui.scanGapLimit;
+  if (ui.scanFromDate) {
+    const ts = new Date(ui.scanFromDate).getTime() / 1000;
+    if (ts > 0) opts.minTimestamp = ts;
+  }
+  return opts;
+}
+
 // Register a full (seed) wallet as an account and open it.
 async function enterWallet(mnemonic, passphrase, opts = {}) {
+  const scanOpts = {};
+  if (opts.gapLimit) scanOpts.gapLimit = opts.gapLimit;
+  if (opts.minTimestamp) scanOpts.minTimestamp = opts.minTimestamp;
   const acc = addOrGetAccount({
     type: 'full',
     label: defaultLabel('full'),
     mnemonic: (mnemonic || '').trim().replace(/\s+/g, ' '),
     passphrase: passphrase || '',
-    netName: getPreferredNet(),
+    netName: opts.netName || getPreferredNet(),
+    ...scanOpts,
   });
   await activateAccount(acc, { ...opts, fresh: true });
 }
@@ -641,9 +710,9 @@ async function activateAccount(acc, opts = {}) {
   // until the user commits (claims, or chooses to keep it / enters the wallet),
   // so bailing from an already-claimed gift doesn't leave an empty account.
   if (opts.gift) acc.provisional = true;
-  if (acc.type === 'watch') wallet.load({ xpub: acc.xpub, netName, offline: false });
-  else if (acc.xprv) wallet.load({ xprv: acc.xprv, netName, offline: false });
-  else wallet.load({ mnemonic: acc.mnemonic, passphrase: acc.passphrase || '', netName, offline: false });
+  if (acc.type === 'watch') wallet.load({ xpub: acc.xpub, netName, offline: false, gapLimit: acc.gapLimit, minTimestamp: acc.minTimestamp });
+  else if (acc.xprv) wallet.load({ xprv: acc.xprv, netName, offline: false, gapLimit: acc.gapLimit, minTimestamp: acc.minTimestamp });
+  else wallet.load({ mnemonic: acc.mnemonic, passphrase: acc.passphrase || '', netName, offline: false, gapLimit: acc.gapLimit, minTimestamp: acc.minTimestamp });
   persistAccounts();
   const hadCache = wallet.restoreCache(); // show last-known balance/history instantly
   // An opened gift link starts on a claim/back-up screen instead of the wallet.
@@ -956,6 +1025,10 @@ function lock() {
   ui.draftMnemonic = '';
   ui.importText = '';
   ui.passphrase = '';
+  ui.importNet = '';
+  ui.scanGapLimit = 20;
+  ui.scanFromDate = '';
+  ui.showAdvanced = false;
   ui.confirm = [];
   ui.revealShown = false;
   ui.pubkeyShown = false;
