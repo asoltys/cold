@@ -103,6 +103,7 @@ const STR = {
     reenterPassphrase: 'Re-enter passphrase',
     back: '← Back',
     cancel: 'Cancel',
+    paste: 'Paste',
     openWallet: 'Open wallet',
     wordsMismatch: 'Those words don’t match your phrase. Check your backup.',
     passphraseMismatch: 'That passphrase doesn’t match the one you entered.',

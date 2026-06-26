@@ -299,6 +299,18 @@ function copyBtn(text, label = t('copy')) {
   return h('button', { class: 'btn-sm', onClick: () => copy(text) }, label);
 }
 
+// A small "paste from clipboard" button; apply(text) receives the trimmed text.
+// Returns null where the Clipboard read API isn't available (the catch keeps it
+// silent if a browser blocks the read).
+function pasteBtn(apply) {
+  if (typeof navigator === 'undefined' || !navigator.clipboard || !navigator.clipboard.readText) return null;
+  return h('button', {
+    type: 'button', class: 'btn-sm', title: t('paste'),
+    onClick: async () => { try { const txt = await navigator.clipboard.readText(); if (txt) apply(txt.trim()); } catch {} },
+    html: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/></svg>',
+  });
+}
+
 // ---------------------------------------------------------------- display unit
 // Global BTC/sats preference, persisted in localStorage across refreshes and
 // logouts. Every unit label on the site is clickable to toggle it.
@@ -537,21 +549,25 @@ function pickConfirm(words) {
 }
 
 function importPane() {
+  const ta = h('textarea', {
+    placeholder: t('importPlaceholder'),
+    autocapitalize: 'none',
+    autocomplete: 'off',
+    spellcheck: 'false',
+    value: ui.importText,
+    onInput: (e) => (ui.importText = e.target.value),
+  });
   return h(
     'div',
     { class: 'col' },
     h(
       'label',
       { class: 'field' },
-      h('span', { class: 'lab' }, t('importLabel')),
-      h('textarea', {
-        placeholder: t('importPlaceholder'),
-        autocapitalize: 'none',
-        autocomplete: 'off',
-        spellcheck: 'false',
-        value: ui.importText,
-        onInput: (e) => (ui.importText = e.target.value),
-      })
+      h('div', { class: 'row between' },
+        h('span', { class: 'lab' }, t('importLabel')),
+        pasteBtn((text) => { ta.value = text; ui.importText = text; })
+      ),
+      ta
     ),
     optionsPanel(),
     h('button', { class: 'btn-primary btn-block', onClick: () => openWallet(ui.importText) }, t('openWallet'))
@@ -1681,14 +1697,15 @@ function goHome() {
     persistAccounts();
     activeId = accounts[0] ? accounts[0].id : null;
   }
-  if (ui.screen === 'howItWorks') {
-    ui.screen = ui.returnScreen === 'wallet' ? 'wallet' : 'unlock';
-  }
-  if (ui.screen === 'wallet') {
+  // A wallet is open → home is its Receive page (not the create/import screen),
+  // so the logo is always a way back to your wallet.
+  if (activeAccount()) {
+    ui.screen = 'wallet';
     ui.tab = wallet.offline ? 'settings' : 'receive';
     ui.draft = null;
     ui.sendResult = null;
     ui.sendError = '';
+    ui.fromWallet = false;
   } else {
     ui.screen = 'unlock';
     ui.unlockTab = 'create';
@@ -2153,16 +2170,20 @@ function receiveTab() {
 // account's xpub — you can't load the wrong wallet's seed.
 function loadSeedCard() {
   const ls = ui.loadSeed;
+  const seedTa = h('textarea', {
+    class: 'mono-input', rows: '3', placeholder: t('seedPlaceholder'),
+    autocapitalize: 'none', autocomplete: 'off', spellcheck: 'false', value: ls.value,
+    onInput: (e) => { ls.value = e.target.value; },
+  });
   return h(
     'div',
     { class: 'card col' },
-    h('h3', {}, t('loadSeedTitle')),
+    h('div', { class: 'row between' },
+      h('h3', { style: 'margin:0' }, t('loadSeedTitle')),
+      pasteBtn((text) => { seedTa.value = text; ls.value = text; })
+    ),
     h('p', { class: 'small muted', style: 'margin:0' }, t('loadSeedDesc')),
-    h('textarea', {
-      class: 'mono-input', rows: '3', placeholder: t('seedPlaceholder'),
-      autocapitalize: 'none', autocomplete: 'off', spellcheck: 'false', value: ls.value,
-      onInput: (e) => { ls.value = e.target.value; },
-    }),
+    seedTa,
     h('input', {
       type: 'password', class: 'mono-input', placeholder: t('bip39PassphraseOpt'),
       autocapitalize: 'none', autocomplete: 'off', value: ls.passphrase,
@@ -2458,15 +2479,17 @@ function recipientRow(s, r, i) {
     check.style.display = a ? '' : 'none';
   };
 
+  const addrInput = h('input', {
+    type: 'text', class: 'mono-input grow', placeholder: 'bc1q…',
+    autocapitalize: 'none', autocomplete: 'off', spellcheck: 'false', value: r.address,
+    onInput: (e) => { r.address = e.target.value; syncCheck(); },
+  });
   const row = h(
     'div',
     { class: 'col gap6' },
     h('div', { class: 'input-group' },
-      h('input', {
-        type: 'text', class: 'mono-input grow', placeholder: 'bc1q…',
-        autocapitalize: 'none', autocomplete: 'off', spellcheck: 'false', value: r.address,
-        onInput: (e) => { r.address = e.target.value; syncCheck(); },
-      }),
+      addrInput,
+      pasteBtn((text) => { addrInput.value = text; r.address = text; syncCheck(); }),
       i === 0 && canScan() && h('button', {
         type: 'button', class: 'btn-sm', title: t('scanQr'), onClick: scanIntoSend,
         html: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3"/></svg>',
