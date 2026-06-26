@@ -60,26 +60,31 @@ export function getElectrumWsUrl() {
   return 'wss://coinos.io/electrum';
 }
 
-// Privacy opt-out: turning this off means the app never connects to coinos's
-// watcher (so it can't see your addresses) and relies on polling your explorer
-// instead. On by default.
-const REALTIME_KEY = 'btc-wallet-realtime';
-export function getRealtimeEnabled() {
-  try { return localStorage.getItem(REALTIME_KEY) !== 'off'; } catch { return true; }
+// One "data source" setting drives both where chain data comes from and whether
+// coinos sees your addresses for instant push:
+//   coinos   — block-explorer data + coinos instant-payment notifications (default)
+//   explorer — block-explorer data only; polls for payments, nothing sent to coinos
+//   electrum — a single Electrum-over-WS server for both data and push (your node)
+// getBackend()/getRealtimeEnabled() derive from it, so the rest of the code (and
+// the wsUrl logic) is unchanged. Existing per-feature settings migrate in.
+const DATA_MODE_KEY = 'btc-wallet-mode';
+const BACKEND_KEY = 'btc-wallet-backend'; // legacy (migration only)
+const REALTIME_KEY = 'btc-wallet-realtime'; // legacy (migration only)
+export function getDataMode() {
+  try {
+    const m = localStorage.getItem(DATA_MODE_KEY);
+    if (m === 'coinos' || m === 'explorer' || m === 'electrum') return m;
+    if (localStorage.getItem(BACKEND_KEY) === 'electrum') return 'electrum';
+    if (localStorage.getItem(REALTIME_KEY) === 'off') return 'explorer';
+  } catch {}
+  return 'coinos';
 }
-export function setRealtimeEnabled(on) {
-  try { localStorage.setItem(REALTIME_KEY, on ? 'on' : 'off'); } catch {}
+export function setDataMode(m) {
+  try { localStorage.setItem(DATA_MODE_KEY, m === 'electrum' || m === 'explorer' ? m : 'coinos'); } catch {}
 }
-
-// Data backend: the default Esplora REST (`Api`) or a full Electrum-over-WS
-// server (`ElectrumApi`) that serves data AND notifications over one connection.
-const BACKEND_KEY = 'btc-wallet-backend';
-export function getBackend() {
-  try { return localStorage.getItem(BACKEND_KEY) === 'electrum' ? 'electrum' : 'esplora'; } catch { return 'esplora'; }
-}
-export function setBackend(b) {
-  try { localStorage.setItem(BACKEND_KEY, b === 'electrum' ? 'electrum' : 'esplora'); } catch {}
-}
+export function getBackend() { return getDataMode() === 'electrum' ? 'electrum' : 'esplora'; }
+// The coinos watcher is used only in 'coinos' mode; 'explorer' polls instead.
+export function getRealtimeEnabled() { return getDataMode() === 'coinos'; }
 
 // Electrum servers that accept WebSocket connections. blockstream.info is
 // electrs (validated); the point, though, is pointing at your own Fulcrum/electrs.
