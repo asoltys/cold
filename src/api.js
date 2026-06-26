@@ -82,9 +82,22 @@ export function getDataMode() {
 export function setDataMode(m) {
   try { localStorage.setItem(DATA_MODE_KEY, m === 'electrum' || m === 'explorer' ? m : 'coinos'); } catch {}
 }
-export function getBackend() { return getDataMode() === 'electrum' ? 'electrum' : 'esplora'; }
-// The coinos watcher is used only in 'coinos' mode; 'explorer' polls instead.
-export function getRealtimeEnabled() { return getDataMode() === 'coinos'; }
+// Cutover switch: flip to true once coinos runs a real Electrum server (Fulcrum)
+// behind the /electrum endpoint. Until then 'coinos' mode = explorer REST data +
+// coinos watcher push (the shim can't serve data). When true, 'coinos' becomes a
+// full Electrum backend pointed at coinos, with public servers as failover.
+export const COINOS_ELECTRUM = false;
+const COINOS_ELECTRUM_URL = 'wss://coinos.io/electrum';
+
+export function getBackend() {
+  const m = getDataMode();
+  if (m === 'electrum') return 'electrum';
+  if (m === 'coinos' && COINOS_ELECTRUM) return 'electrum';
+  return 'esplora';
+}
+// The coinos watcher is only used in 'coinos' mode AND only while coinos serves
+// notifications via the shim (pre-Fulcrum); 'explorer' mode polls instead.
+export function getRealtimeEnabled() { return getDataMode() === 'coinos' && !COINOS_ELECTRUM; }
 
 // Electrum servers that accept WebSocket connections. blockstream.info is
 // electrs (validated); the point, though, is pointing at your own Fulcrum/electrs.
@@ -107,18 +120,28 @@ export function getElectrumServerConfig() {
 export function setElectrumServerConfig({ server, url }) {
   try { localStorage.setItem(ELECTRUM_SERVER_KEY, JSON.stringify({ server, url: url || '' })); } catch {}
 }
-export function resolveElectrumUrl() {
+// Ordered Electrum WS candidates for the current selection — the wallet tries
+// them in turn, advancing when one fails to connect. A named public preset (and
+// coinos, post-Fulcrum) falls over to the other public servers for resilience;
+// a custom your-node URL does NOT fall over — we won't silently leak your
+// addresses to a public server you didn't pick.
+const PUBLIC_ELECTRUM = () => ELECTRUM_PRESETS.filter((x) => x.url).map((x) => x.url);
+export function electrumCandidates() {
+  if (getDataMode() === 'coinos' && COINOS_ELECTRUM) return [COINOS_ELECTRUM_URL, ...PUBLIC_ELECTRUM()];
   const cfg = getElectrumServerConfig();
-  if (cfg.server === 'custom') return cfg.url.trim() || null;
-  const p = ELECTRUM_PRESETS.find((x) => x.id === cfg.server);
-  return (p && p.url) || ELECTRUM_PRESETS[0].url;
+  if (cfg.server === 'custom') return cfg.url.trim() ? [cfg.url.trim()] : [];
+  const primary = (ELECTRUM_PRESETS.find((x) => x.id === cfg.server) || ELECTRUM_PRESETS[0]).url;
+  return [primary, ...PUBLIC_ELECTRUM().filter((u) => u !== primary)];
+}
+export function resolveElectrumUrl() {
+  return electrumCandidates()[0] || null;
 }
 
 export function wsUrl(net) {
   if (net === 'testnet') return null;
-  // Electrum backend: the socket IS the data source, so it's always wanted
-  // (independent of the coinos-notification opt-out, which only governs Esplora).
-  if (getBackend() === 'electrum') return resolveElectrumUrl();
+  // Electrum backend selects/rotates candidates in the wallet; here we only
+  // resolve the coinos watcher (esplora 'coinos' mode) or null (esplora 'explorer').
+  if (getBackend() === 'electrum') return null;
   if (!getRealtimeEnabled()) return null;
   return getElectrumWsUrl();
 }

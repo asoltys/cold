@@ -21,7 +21,7 @@ import * as btc from '@scure/btc-signer';
 import { p2wpkh } from '@scure/btc-signer/payment';
 import { concatBytes } from '@scure/btc-signer/utils.js';
 
-import { Api, pool, wsUrl, getBackend, explorerWeb } from './api.js';
+import { Api, pool, wsUrl, getBackend, explorerWeb, electrumCandidates } from './api.js';
 import { ElectrumApi } from './electrum.js';
 import { NostrSync, getSyncConfig } from './nostr.js';
 import { isSilentPaymentAddress, decodeSilentPaymentAddress, silentPaymentScripts, silentPaymentPlaceholder } from './silentpay.js';
@@ -1235,7 +1235,13 @@ export class Wallet {
   // Pushes us new mempool/confirmed transactions for our addresses so history
   // and balances update with no polling.
   wsUrl() {
-    return wsUrl(this.netName);
+    // Electrum backend: pick the current failover candidate (rotated on failure).
+    if (getBackend() === 'electrum' && this.netName !== 'testnet') {
+      if (!this._wsCandidates || !this._wsCandidates.length) { this._wsCandidates = electrumCandidates(); this._wsCandIdx = 0; }
+      const list = this._wsCandidates;
+      return list.length ? list[(this._wsCandIdx || 0) % list.length] : null;
+    }
+    return wsUrl(this.netName); // coinos watcher, or null
   }
 
   // What realtime watches: the fresh frontier (next receive + next change), plus
@@ -1353,6 +1359,8 @@ export class Wallet {
   startRealtime() {
     if (this.offline) return;
     this.stopRealtime();
+    this._wsCandidates = null; // rebuild the failover list fresh (picks up config), prefer primary
+    this._wsCandIdx = 0;
     // Frontier poll — now purely a safety net. The watcher pushes incoming
     // payments AND confirmations instantly with full data (credited via the WS
     // with no REST), so when the socket is live we poll rarely (~30s) just in
@@ -1437,9 +1445,11 @@ export class Wallet {
     this._ws = ws;
     this._wsBuf = '';            // partial-line accumulator (newline-delimited JSON-RPC)
     this._subscribed = new Set(); // scripthashes subscribed on this connection
+    this._wsOpenedAt = 0;        // set on open; used to judge a healthy connection for failover
     if (this._rpcId == null) this._rpcId = 0; // monotonic across reconnects (don't alias pending ids)
     ws.onopen = () => {
       this.live = true;
+      this._wsOpenedAt = Date.now();
       this._wsBackoff = 0; // healthy again — reset the reconnect backoff
       this._lastMsg = Date.now();
       // Electrum handshake, then subscribe our watched scripthashes.
@@ -1566,6 +1576,11 @@ export class Wallet {
 
   _scheduleReconnect() {
     if (!this._wsWant) return;
+    // Electrum failover: if this connection never became healthy (failed to open,
+    // or died within a few seconds), advance to the next candidate server.
+    if (getBackend() === 'electrum' && this._wsCandidates && this._wsCandidates.length > 1) {
+      if (!this._wsOpenedAt || Date.now() - this._wsOpenedAt < 5000) this._wsCandIdx = (this._wsCandIdx || 0) + 1;
+    }
     clearTimeout(this._wsRetry);
     // Exponential backoff starting small, so a first attempt that's transiently
     // rejected (e.g. a stale rate-limit) retries in ~0.6s instead of a flat 4s —
