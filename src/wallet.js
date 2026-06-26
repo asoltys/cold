@@ -1583,16 +1583,35 @@ export class Wallet {
   // when the matching id comes back; queues until the socket is open, and times
   // out so a wedged call can't hang a scan. ids are monotonic for the session so
   // they never alias a fire-and-forget _rpcSend id.
-  _rpcCall(method, params, attempt = 0) {
+  // Public Electrum entry point. Throttled so a scan doesn't fire a burst that a
+  // rate-limited public server would drop — Electrum pipelines requests, so a few
+  // in flight is plenty (and fast). Excess calls queue for a free slot.
+  _rpcCall(method, params) {
+    return new Promise((resolve, reject) => {
+      (this._rpcQueue || (this._rpcQueue = [])).push({ method, params, resolve, reject });
+      this._rpcPump();
+    });
+  }
+  _rpcPump() {
+    if (this._rpcActive == null) this._rpcActive = 0;
+    const MAX = 4;
+    while (this._rpcActive < MAX && this._rpcQueue && this._rpcQueue.length) {
+      const job = this._rpcQueue.shift();
+      this._rpcActive++;
+      this._rpcSendCall(job.method, job.params).then(job.resolve, job.reject).finally(() => { this._rpcActive--; this._rpcPump(); });
+    }
+  }
+  // The actual request: send, await the matching response, time out, and retry a
+  // couple of times on a fresh id (a public server can drop a response or the
+  // socket can flap mid-call).
+  _rpcSendCall(method, params, attempt = 0) {
     return new Promise((resolve, reject) => {
       if (this.offline) { reject(new Error('offline')); return; }
       const id = ++this._rpcId;
       if (!this._pending) this._pending = new Map();
       const timer = setTimeout(() => {
         if (!this._pending.delete(id)) return;
-        // A public Electrum server can drop a response, or the socket can flap
-        // mid-call — retry a couple of times on a fresh id before giving up.
-        if (attempt < 2 && !this.offline) this._rpcCall(method, params, attempt + 1).then(resolve, reject);
+        if (attempt < 2 && !this.offline) this._rpcSendCall(method, params, attempt + 1).then(resolve, reject);
         else reject(new Error('electrum timeout: ' + method));
       }, 12000);
       this._pending.set(id, { resolve, reject, timer });
@@ -1606,9 +1625,15 @@ export class Wallet {
   }
 
   _rejectPending(reason) {
-    if (!this._pending) return;
-    for (const { reject, timer } of this._pending.values()) { clearTimeout(timer); try { reject(new Error(reason)); } catch {} }
-    this._pending.clear();
+    if (this._pending) {
+      for (const { reject, timer } of this._pending.values()) { clearTimeout(timer); try { reject(new Error(reason)); } catch {} }
+      this._pending.clear();
+    }
+    if (this._rpcQueue) {
+      for (const job of this._rpcQueue) { try { job.reject(new Error(reason)); } catch {} }
+      this._rpcQueue = [];
+    }
+    this._rpcActive = 0;
   }
 
   // A notification means a tx touched one of our addresses (a deposit, or a
