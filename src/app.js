@@ -8,7 +8,7 @@ import { Wallet, newMnemonic, isValidMnemonic, utxoId, previewGift, giftOutpoint
 import { qrSvg } from './qr.js';
 import { scanQr } from './scan.js';
 import { getSyncConfig, setSyncConfig } from './nostr.js';
-import { getExplorerConfig, setExplorerConfig, EXPLORER_PRESETS, getRealtimeEnabled, setRealtimeEnabled } from './api.js';
+import { getExplorerConfig, setExplorerConfig, EXPLORER_PRESETS, getRealtimeEnabled, setRealtimeEnabled, getBackend, setBackend, ELECTRUM_PRESETS, getElectrumServerConfig, setElectrumServerConfig } from './api.js';
 import { isSilentPaymentAddress } from './silentpay.js';
 import { t, LANGS, getLang, setLang, isRTL, loadLocale } from './i18n.js';
 import {
@@ -1298,7 +1298,9 @@ async function doRevoke(id) {
 // Block explorer / server selection: a preset (mempool.space, blockstream.info)
 // or a custom Esplora/electrs REST URL (e.g. your own node).
 function explorerCard() {
+  const backend = getBackend();
   const cfg = getExplorerConfig();
+  const ecfg = getElectrumServerConfig();
   const rt = getRealtimeEnabled();
   const setRealtime = (on) => {
     if (on === getRealtimeEnabled()) return;
@@ -1306,49 +1308,69 @@ function explorerCard() {
     render();
     if (!wallet.offline) wallet.startRealtime(); // reconnect or drop the watcher
   };
+  const setBackendTo = (b) => {
+    if (b === getBackend()) return;
+    setBackend(b);
+    render();
+    if (!wallet.offline) wallet.reloadExplorer(); // rebuild api + reconnect
+  };
   return h(
     'div',
     { class: 'card col' },
     h('h3', {}, t('explorer')),
     h('p', { class: 'small muted', style: 'margin:0' }, t('explorerDesc')),
-    h(
-      'select',
-      {
-        onChange: (e) => {
-          const server = e.target.value;
-          setExplorerConfig({ server, url: cfg.url });
-          render();
-          if (server !== 'custom' || cfg.url) wallet.reloadExplorer();
-        },
-      },
-      EXPLORER_PRESETS.map((o) => h('option', { value: o.id, selected: o.id === cfg.server }, o.label))
-    ),
-    cfg.server === 'custom'
-      ? h('label', { class: 'field' },
-          h('span', { class: 'lab' }, t('explorerUrl')),
-          h('input', {
-            type: 'text', class: 'mono-input', placeholder: 'https://mempool.space/api',
-            autocapitalize: 'none', autocomplete: 'off', spellcheck: 'false',
-            value: cfg.url,
-            // Apply on blur/Enter, not every keystroke (each change rescans).
-            onChange: (e) => {
-              setExplorerConfig({ server: 'custom', url: e.target.value.trim() });
-              wallet.reloadExplorer();
-            },
-          }),
-          h('div', { class: 'small faint' }, t('explorerUrlHint'))
-        )
-      : null,
-    // Realtime via coinos — the one place addresses are shared off-device. Opt
-    // out to poll the explorer above instead (a bit slower, nothing told to coinos).
-    h('div', { class: 'row between', style: 'margin-top:8px' },
-      h('span', { class: 'lab', style: 'margin:0' }, t('instantNotif')),
+    // Data source: Esplora REST, or a full Electrum-over-WS server (data + push).
+    h('div', { class: 'row between', style: 'margin-top:2px' },
+      h('span', { class: 'lab', style: 'margin:0' }, t('dataSource')),
       h('div', { class: 'seg' },
-        h('button', { type: 'button', class: rt ? 'active' : '', onClick: () => setRealtime(true) }, t('syncOn')),
-        h('button', { type: 'button', class: !rt ? 'active' : '', onClick: () => setRealtime(false) }, t('syncOff'))
+        h('button', { type: 'button', class: backend === 'esplora' ? 'active' : '', onClick: () => setBackendTo('esplora') }, t('backendEsplora')),
+        h('button', { type: 'button', class: backend === 'electrum' ? 'active' : '', onClick: () => setBackendTo('electrum') }, t('backendElectrum'))
       )
     ),
-    h('div', { class: 'small faint' }, t('instantNotifDesc'))
+    backend === 'electrum'
+      ? h('div', { class: 'col', style: 'gap:8px' },
+          h('div', { class: 'small faint' }, t('backendElectrumDesc')),
+          h('select', {
+            onChange: (e) => { setElectrumServerConfig({ server: e.target.value, url: ecfg.url }); render(); if (e.target.value !== 'custom' || ecfg.url) wallet.reloadExplorer(); },
+          }, ELECTRUM_PRESETS.map((o) => h('option', { value: o.id, selected: o.id === ecfg.server }, o.label))),
+          ecfg.server === 'custom'
+            ? h('label', { class: 'field' },
+                h('span', { class: 'lab' }, t('electrumUrl')),
+                h('input', {
+                  type: 'text', class: 'mono-input', placeholder: 'wss://your-node:50004',
+                  autocapitalize: 'none', autocomplete: 'off', spellcheck: 'false', value: ecfg.url,
+                  onChange: (e) => { setElectrumServerConfig({ server: 'custom', url: e.target.value.trim() }); wallet.reloadExplorer(); },
+                }),
+                h('div', { class: 'small faint' }, t('electrumUrlHint'))
+              )
+            : null
+        )
+      : h('div', { class: 'col', style: 'gap:8px' },
+          h('select', {
+            onChange: (e) => { setExplorerConfig({ server: e.target.value, url: cfg.url }); render(); if (e.target.value !== 'custom' || cfg.url) wallet.reloadExplorer(); },
+          }, EXPLORER_PRESETS.map((o) => h('option', { value: o.id, selected: o.id === cfg.server }, o.label))),
+          cfg.server === 'custom'
+            ? h('label', { class: 'field' },
+                h('span', { class: 'lab' }, t('explorerUrl')),
+                h('input', {
+                  type: 'text', class: 'mono-input', placeholder: 'https://mempool.space/api',
+                  autocapitalize: 'none', autocomplete: 'off', spellcheck: 'false', value: cfg.url,
+                  onChange: (e) => { setExplorerConfig({ server: 'custom', url: e.target.value.trim() }); wallet.reloadExplorer(); },
+                }),
+                h('div', { class: 'small faint' }, t('explorerUrlHint'))
+              )
+            : null,
+          // Realtime via coinos — the one place addresses are shared off-device.
+          // (Electrum already serves its own push, so this only applies to REST.)
+          h('div', { class: 'row between', style: 'margin-top:8px' },
+            h('span', { class: 'lab', style: 'margin:0' }, t('instantNotif')),
+            h('div', { class: 'seg' },
+              h('button', { type: 'button', class: rt ? 'active' : '', onClick: () => setRealtime(true) }, t('syncOn')),
+              h('button', { type: 'button', class: !rt ? 'active' : '', onClick: () => setRealtime(false) }, t('syncOff'))
+            )
+          ),
+          h('div', { class: 'small faint' }, t('instantNotifDesc'))
+        )
   );
 }
 

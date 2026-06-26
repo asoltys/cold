@@ -71,9 +71,54 @@ export function setRealtimeEnabled(on) {
   try { localStorage.setItem(REALTIME_KEY, on ? 'on' : 'off'); } catch {}
 }
 
+// Data backend: the default Esplora REST (`Api`) or a full Electrum-over-WS
+// server (`ElectrumApi`) that serves data AND notifications over one connection.
+const BACKEND_KEY = 'btc-wallet-backend';
+export function getBackend() {
+  try { return localStorage.getItem(BACKEND_KEY) === 'electrum' ? 'electrum' : 'esplora'; } catch { return 'esplora'; }
+}
+export function setBackend(b) {
+  try { localStorage.setItem(BACKEND_KEY, b === 'electrum' ? 'electrum' : 'esplora'); } catch {}
+}
+
+// Electrum servers that accept WebSocket connections. blockstream.info is
+// electrs (validated); the point, though, is pointing at your own Fulcrum/electrs.
+export const ELECTRUM_PRESETS = [
+  { id: 'blockstream', label: 'blockstream.info', url: 'wss://blockstream.info/electrum-websocket/' },
+  { id: 'jochen', label: 'electrum.jochen-hoenicke.de', url: 'wss://electrum.jochen-hoenicke.de:50010' },
+  { id: 'custom', label: 'Custom (your node)', url: '' },
+];
+const ELECTRUM_SERVER_KEY = 'btc-wallet-electrum-server';
+export function getElectrumServerConfig() {
+  try {
+    const c = JSON.parse(localStorage.getItem(ELECTRUM_SERVER_KEY) || 'null');
+    if (c && c.server) return { server: c.server, url: c.url || '' };
+  } catch {}
+  return { server: 'blockstream', url: '' };
+}
+export function setElectrumServerConfig({ server, url }) {
+  try { localStorage.setItem(ELECTRUM_SERVER_KEY, JSON.stringify({ server, url: url || '' })); } catch {}
+}
+export function resolveElectrumUrl() {
+  const cfg = getElectrumServerConfig();
+  if (cfg.server === 'custom') return cfg.url.trim() || null;
+  const p = ELECTRUM_PRESETS.find((x) => x.id === cfg.server);
+  return (p && p.url) || ELECTRUM_PRESETS[0].url;
+}
+
 export function wsUrl(net) {
-  if (net === 'testnet' || !getRealtimeEnabled()) return null;
+  if (net === 'testnet') return null;
+  // Electrum backend: the socket IS the data source, so it's always wanted
+  // (independent of the coinos-notification opt-out, which only governs Esplora).
+  if (getBackend() === 'electrum') return resolveElectrumUrl();
+  if (!getRealtimeEnabled()) return null;
   return getElectrumWsUrl();
+}
+
+// Web base for tx links (Electrum has no web UI — reuse the chosen explorer host).
+export function explorerWeb() {
+  const hosts = resolveHosts('mainnet');
+  return (hosts[0] && hosts[0].web) || 'https://mempool.space';
 }
 
 const REQUEST_TIMEOUT_MS = 10000;

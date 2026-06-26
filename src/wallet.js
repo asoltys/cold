@@ -21,7 +21,8 @@ import * as btc from '@scure/btc-signer';
 import { p2wpkh } from '@scure/btc-signer/payment';
 import { concatBytes } from '@scure/btc-signer/utils.js';
 
-import { Api, pool, wsUrl } from './api.js';
+import { Api, pool, wsUrl, getBackend, explorerWeb } from './api.js';
+import { ElectrumApi } from './electrum.js';
 import { NostrSync, getSyncConfig } from './nostr.js';
 import { isSilentPaymentAddress, decodeSilentPaymentAddress, silentPaymentScripts, silentPaymentPlaceholder } from './silentpay.js';
 
@@ -126,7 +127,7 @@ export class Wallet {
     this.watchOnly = !!this.xpub && !this.mnemonic && !this.xprv; // view/receive only
     this.netName = netName;
     this.offline = offline;
-    this.api = new Api(netName);
+    this._buildApi();
     this.api.offline = offline;
     this._account = null;
     this._accountKey = null;
@@ -161,17 +162,35 @@ export class Wallet {
     this.emit();
   }
 
-  // Rebuild the Api against the currently-configured explorer, then rescan and
-  // reconnect realtime (called when the user switches explorer in Settings).
+  // Build the data backend for the current setting: Esplora REST (`Api`) or a
+  // full Electrum-over-WS server (`ElectrumApi`), which routes its data calls
+  // over this wallet's realtime socket via _rpcCall.
+  _buildApi() {
+    if (getBackend() === 'electrum') {
+      this.api = new ElectrumApi({
+        call: (m, p) => this._rpcCall(m, p),
+        network: this.netCfg.net,
+        testnet: this.netName === 'testnet',
+        explorerWeb: explorerWeb(),
+      });
+    } else {
+      this.api = new Api(this.netName);
+    }
+    this.api.offline = this.offline;
+  }
+
+  // Rebuild the backend against the current settings, then rescan and reconnect
+  // realtime (called when the user switches explorer/backend in Settings).
   async reloadExplorer() {
     this.stopRealtime();
-    this.api = new Api(this.netName);
-    this.api.offline = this.offline;
+    this._buildApi();
     if (this.offline) return;
+    // Electrum's data rides the socket, so connect first, then scan.
+    if (getBackend() === 'electrum') this.startRealtime();
     try {
       await this.scan();
     } catch {}
-    this.startRealtime();
+    if (getBackend() !== 'electrum') this.startRealtime();
   }
 
   get netCfg() {
@@ -1418,13 +1437,18 @@ export class Wallet {
     this._ws = ws;
     this._wsBuf = '';            // partial-line accumulator (newline-delimited JSON-RPC)
     this._subscribed = new Set(); // scripthashes subscribed on this connection
-    this._rpcId = 0;
+    if (this._rpcId == null) this._rpcId = 0; // monotonic across reconnects (don't alias pending ids)
     ws.onopen = () => {
       this.live = true;
       this._wsBackoff = 0; // healthy again — reset the reconnect backoff
       this._lastMsg = Date.now();
       // Electrum handshake, then subscribe our watched scripthashes.
       this._rpcSend('server.version', ['halwallet', '1.4']);
+      // Flush any data calls queued while the socket was down.
+      if (this._callQueue && this._callQueue.length) {
+        for (const payload of this._callQueue) { try { ws.send(payload); } catch {} }
+        this._callQueue = [];
+      }
       this.retrack();
       this.emit();
       // The server only pushes activity AFTER we subscribe, so reconcile once on
@@ -1433,20 +1457,22 @@ export class Wallet {
     };
     ws.onmessage = (ev) => {
       this._lastMsg = Date.now();
-      this._wsBuf += (typeof ev.data === 'string' ? ev.data : '');
-      // Electrum frames are newline-delimited JSON-RPC; parse each complete line.
-      let nl;
-      while ((nl = this._wsBuf.indexOf('\n')) >= 0) {
-        const line = this._wsBuf.slice(0, nl).trim();
-        this._wsBuf = this._wsBuf.slice(nl + 1);
-        if (line) this._handleRpc(line);
+      this._wsBuf += (typeof ev.data === 'string' ? ev.data : new TextDecoder().decode(ev.data));
+      // Robustly extract every complete top-level JSON object from the buffer,
+      // regardless of framing: newline-delimited (coinos watcher), one-per-frame
+      // without a newline (electrs), several concatenated in one frame, or a
+      // single object split across frames. Brace-depth scan, string-aware.
+      const s = this._wsBuf;
+      let depth = 0, inStr = false, esc = false, start = -1, consumed = 0;
+      for (let i = 0; i < s.length; i++) {
+        const ch = s[i];
+        if (inStr) { if (esc) esc = false; else if (ch === '\\') esc = true; else if (ch === '"') inStr = false; continue; }
+        if (ch === '"') inStr = true;
+        else if (ch === '{') { if (depth === 0) start = i; depth++; }
+        else if (ch === '}' && depth > 0) { if (--depth === 0 && start >= 0) { this._handleRpc(s.slice(start, i + 1)); consumed = i + 1; start = -1; } }
       }
-      // Fallback: a server that sends one complete JSON per frame without a
-      // trailing newline. Only consume the buffer if it parses cleanly.
-      const rest = this._wsBuf.trim();
-      if (rest) {
-        try { JSON.parse(rest); this._handleRpc(rest); this._wsBuf = ''; } catch {}
-      }
+      this._wsBuf = s.slice(consumed);
+      if (this._wsBuf.length > 1 << 20) this._wsBuf = ''; // runaway guard
     };
     ws.onerror = () => {
       try {
@@ -1472,13 +1498,54 @@ export class Wallet {
     return id;
   }
 
+  // Electrum request/response (used by the ElectrumApi data backend). Resolves
+  // when the matching id comes back; queues until the socket is open, and times
+  // out so a wedged call can't hang a scan. ids are monotonic for the session so
+  // they never alias a fire-and-forget _rpcSend id.
+  _rpcCall(method, params) {
+    return new Promise((resolve, reject) => {
+      if (this.offline) { reject(new Error('offline')); return; }
+      const id = ++this._rpcId;
+      if (!this._pending) this._pending = new Map();
+      const timer = setTimeout(() => {
+        if (this._pending.delete(id)) reject(new Error('electrum timeout: ' + method));
+      }, 20000);
+      this._pending.set(id, { resolve, reject, timer });
+      const payload = JSON.stringify({ id, method, params }) + '\n';
+      if (this._ws && this._ws.readyState === 1) {
+        try { this._ws.send(payload); } catch {}
+      } else {
+        (this._callQueue = this._callQueue || []).push(payload);
+      }
+    });
+  }
+
+  _rejectPending(reason) {
+    if (!this._pending) return;
+    for (const { reject, timer } of this._pending.values()) { clearTimeout(timer); try { reject(new Error(reason)); } catch {} }
+    this._pending.clear();
+  }
+
   // A notification means a tx touched one of our addresses (a deposit, or a
   // confirmation). If it carries the tx data (our watcher does), credit it
   // instantly with no REST on the critical path; otherwise just trigger a scan.
   _handleRpc(line) {
     let msg;
     try { msg = JSON.parse(line); } catch { return; }
-    if (!msg || msg.method !== 'blockchain.scripthash.subscribe') return;
+    if (!msg) return;
+    // Response to a data call (ElectrumApi backend)?
+    if (msg.id != null && this._pending && this._pending.has(msg.id)) {
+      const p = this._pending.get(msg.id);
+      this._pending.delete(msg.id);
+      clearTimeout(p.timer);
+      if (msg.error) p.reject(new Error(typeof msg.error === 'string' ? msg.error : (msg.error.message || JSON.stringify(msg.error))));
+      else p.resolve(msg.result);
+      return;
+    }
+    // Subscription notification: a tx touched a watched address. Our coinos
+    // watcher carries the tx data (credit instantly); a real Electrum server
+    // sends only [scripthash, status], so reconcile via the data backend.
+    if (msg.method !== 'blockchain.scripthash.subscribe') return;
     const sh = msg.params && msg.params[0];
     if (msg.data && sh && this._applyTxNotification(sh, msg.data)) return;
     this._scheduleRefresh();
@@ -1523,6 +1590,8 @@ export class Wallet {
   stopRealtime() {
     this._wsWant = false;
     this.live = false;
+    this._rejectPending('realtime stopped'); // fail any in-flight Electrum data calls
+    this._callQueue = [];
     clearTimeout(this._wsRetry);
     clearTimeout(this._refreshTimer);
     clearInterval(this._pollTimer);
