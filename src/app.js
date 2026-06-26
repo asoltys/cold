@@ -796,7 +796,11 @@ function restoreAccountsState() {
     activateAccount(active);
     return true;
   }
-  if (hasVault()) { ui.screen = 'vault'; render(); return true; }
+  if (hasVault()) {
+    // A blank (optional) vault password unlocks seamlessly with no prompt.
+    if (attemptVaultUnlock('')) { activateAccount(accounts[0], { fresh: true }); return true; }
+    ui.screen = 'vault'; render(); return true;
+  }
   const watch = loadWatchAccounts();
   if (watch.length) {
     accounts = watch.slice();
@@ -910,9 +914,9 @@ function cancelPw() { ui.pw = null; render(); }
 function submitPw() {
   const p = ui.pw;
   if (p.mode === 'set') {
-    if ((p.v1 || '').length < 8) { p.error = t('pwTooShort'); render(); return; }
+    // Password is optional — a blank one just persists without protection.
     if (p.v1 !== p.v2) { p.error = t('pwMismatch'); render(); return; }
-    vaultPassword = p.v1;
+    vaultPassword = p.v1 || '';
   } else {
     let list;
     try { list = decryptVault(loadVaultBlob(), p.v1); } catch { p.error = t('pwWrong'); render(); return; }
@@ -927,16 +931,23 @@ function submitPw() {
   render();
 }
 
-// On-open vault unlock.
-function unlockVault() {
+// Try to decrypt the vault with the given password; on success, seed the
+// accounts (watch-only directory + the unlocked full wallets). Returns success.
+function attemptVaultUnlock(password) {
   let list;
-  try { list = decryptVault(loadVaultBlob(), ui.vaultPw); } catch { ui.vaultError = t('pwWrong'); render(); return; }
-  vaultPassword = ui.vaultPw;
+  try { list = decryptVault(loadVaultBlob(), password); } catch { return false; }
+  vaultPassword = password;
   // Start from the durable directory (watch-only views of every known wallet),
   // then upgrade the vault-saved ones to spendable — so non-saved wallets still
   // appear (watch-only) instead of vanishing.
   accounts = loadWatchAccounts();
   mergeVaultList(list);
+  return true;
+}
+
+// On-open vault unlock (password prompt).
+function unlockVault() {
+  if (!attemptVaultUnlock(ui.vaultPw)) { ui.vaultError = t('pwWrong'); render(); return; }
   ui.vaultPw = '';
   ui.vaultError = '';
   activateAccount(accounts[0], { fresh: true });
@@ -969,6 +980,71 @@ async function retryOnline() {
   } catch {
     enterOfflineFallback();
   }
+}
+
+// --- auto log-out (drop to watch-only after the app is left in the background) -
+// Options in ms; 0 = never. The countdown only runs while the app is hidden /
+// unfocused — never while you're actively looking at it.
+const AUTOLOCK_KEY = 'btc-wallet-autolock';
+const AUTOLOCK_OPTIONS = [
+  { ms: 0, label: 'autolockNever' },
+  { ms: 60_000, label: 'autolock1m' },
+  { ms: 300_000, label: 'autolock5m' },
+  { ms: 3_600_000, label: 'autolock1h' },
+  { ms: 86_400_000, label: 'autolock1d' },
+];
+function getAutoLock() { try { return Number(localStorage.getItem(AUTOLOCK_KEY)) || 0; } catch { return 0; } }
+function setAutoLock(ms) { try { localStorage.setItem(AUTOLOCK_KEY, String(ms)); } catch {} }
+
+const AWAY_AT_KEY = 'btc-wallet-bg-at';
+let _awayTimer = null;
+// Going to the background: record when, and arm a timer. The timestamp is the
+// reliable signal (background timers get throttled, and a discarded tab never
+// fires) — on return/boot we compare elapsed time and log out if it's overdue.
+function onAppHidden() {
+  try { localStorage.setItem(AWAY_AT_KEY, String(Date.now())); } catch {}
+  clearTimeout(_awayTimer);
+  const ms = getAutoLock();
+  if (ms > 0) _awayTimer = setTimeout(autoLogout, ms);
+}
+function _awayElapsed() {
+  try { const t = Number(localStorage.getItem(AWAY_AT_KEY)) || 0; localStorage.removeItem(AWAY_AT_KEY); return t ? Date.now() - t : 0; } catch { return 0; }
+}
+function onAppVisible() {
+  clearTimeout(_awayTimer); _awayTimer = null;
+  const ms = getAutoLock();
+  const away = _awayElapsed();
+  if (ms > 0 && away >= ms) autoLogout(); // overdue while we were away (same session)
+}
+// At boot the in-memory timer is gone (reload / discarded tab), so if we were
+// away past the limit, clear the session + watch-only directory + cached state
+// before anything is restored (vault wallets still come back via the password).
+function applyBootAutoLogout() {
+  const ms = getAutoLock();
+  const away = _awayElapsed();
+  if (!(ms > 0 && away >= ms)) return;
+  try { sessionStorage.removeItem(ACCOUNTS_KEY); } catch {}
+  try { localStorage.removeItem(WATCH_KEY); } catch {}
+  clearWalletCaches();
+}
+
+// Remove every trace of the open wallet from this device: the session, the
+// durable watch-only directory, and the cached balance/history. Only wallets
+// explicitly saved to the device (encrypted vault) remain — behind the password.
+function clearWalletCaches() {
+  try {
+    const keys = [];
+    for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k && k.startsWith('btc-wallet-cache:')) keys.push(k); }
+    keys.forEach((k) => localStorage.removeItem(k));
+  } catch {}
+}
+
+// Full sign-out after the app's been backgrounded past the limit.
+function autoLogout() {
+  if (ui.screen !== 'wallet') return; // don't interrupt unlock / claim flows
+  try { localStorage.removeItem(WATCH_KEY); } catch {}
+  clearWalletCaches();
+  lock(); // wipes the session + vault password and shows the unlock / vault screen
 }
 
 function lock() {
@@ -1153,6 +1229,7 @@ function settingsTab() {
         ? null
         : h('button', { onClick: () => { ui.addrScan = true; ui.addrScanPage = 0; render(); } }, t('rescanAddresses'))
     ),
+    autoLockCard(),
     explorerCard(),
     wallet.watchOnly || !wallet.mnemonic ? null : syncCard()
   );
@@ -1367,6 +1444,21 @@ async function doRevoke(id) {
 
 // Block explorer / server selection: a preset (mempool.space, blockstream.info)
 // or a custom Esplora/electrs REST URL (e.g. your own node).
+// Auto log-out after the app has been in the background for the chosen time —
+// drops to watch-only (re-enter the seed to spend). Never counts while focused.
+function autoLockCard() {
+  const cur = getAutoLock();
+  return h(
+    'div',
+    { class: 'card col' },
+    h('h3', {}, t('autolockTitle')),
+    h('p', { class: 'small muted', style: 'margin:0' }, t('autolockDesc')),
+    h('select', { onChange: (e) => { setAutoLock(Number(e.target.value)); render(); } },
+      AUTOLOCK_OPTIONS.map((o) => h('option', { value: String(o.ms), selected: o.ms === cur }, t(o.label)))
+    )
+  );
+}
+
 function explorerCard() {
   const mode = getDataMode();
   const cfg = getExplorerConfig();
@@ -1816,7 +1908,7 @@ function pwPromptCard() {
   return h('div', { class: 'card col' },
     h('h3', {}, p.mode === 'set' ? t('setPassword') : t('enterPassword')),
     h('p', { class: 'small muted', style: 'margin:0' }, p.mode === 'set' ? t('setPasswordDesc') : t('enterPasswordDesc')),
-    h('input', { type: 'password', placeholder: t('password'), value: p.v1, onInput: (e) => (p.v1 = e.target.value) }),
+    h('input', { type: 'password', placeholder: p.mode === 'set' ? t('passwordOptional') : t('password'), value: p.v1, onInput: (e) => (p.v1 = e.target.value) }),
     p.mode === 'set' ? h('input', { type: 'password', placeholder: t('confirmPassword'), value: p.v2, onInput: (e) => (p.v2 = e.target.value) }) : null,
     p.error && h('div', { class: 'notice err' }, p.error),
     h('div', { class: 'row gap6' },
@@ -2862,9 +2954,18 @@ async function importSnapshotFile(e) {
 // apply text direction, then restore a wallet left open in this tab — otherwise
 // show the unlock screen.
 applyDir();
+// Auto log-out: start the countdown only when the app loses focus / is hidden,
+// and cancel it the moment it's focused again. So it never logs out mid-use.
+window.addEventListener('blur', onAppHidden);
+window.addEventListener('focus', onAppVisible);
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') onAppHidden();
+  else onAppVisible();
+});
 loadLocale(getLang()).finally(() => {
   const code = readGiftHash();
   if (code) { enterWallet(newMnemonic(), '', { gift: code }); return; }
+  applyBootAutoLogout(); // clear an overdue session before it's restored
   if (!restoreAccountsState()) render();
 });
 
