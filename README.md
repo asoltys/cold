@@ -10,13 +10,36 @@ from the filesystem with no server).
 
 The name is a nod to [Hal Finney](https://en.wikipedia.org/wiki/Hal_Finney_(computer_scientist)).
 
+## Installation
+
+Download the latest `Halwallet.zip` from the [releases page](https://github.com/asoltys/halwallet/releases), unzip it, and open `dist/index.html` in your browser. No server, no build tools, no internet needed.
+
+Hal Wallet also makes an excellent air-gapped (offline) signing device. See **[INSTALL.md](INSTALL.md)** for a step-by-step guide to set it up on an old phone or single-board computer.
+
 ## Features
 
 - **BIP84 / native SegWit (p2wpkh)** HD wallet from a 12-word BIP39 seed
-  (imports any valid BIP39 phrase; optional passphrase). Mainnet.
+  (imports any valid BIP39 phrase; optional passphrase).
+- **Silent Payments (BIP-352)** — **send** to any `sp1…` / `tsp1…` address
+  (ECDH-derived one-time taproot outputs) and **receive** by sharing your
+  reusable silent payment address. Block scanning detects incoming silent
+  payments from any sender.
+- **Descriptor import** — paste a descriptor such as `wpkh(xpub…)`,
+  `tr(xpub…)`, `sh(wpkh(xpub…))`, etc. with optional multi-derivation
+  (`<0;1>/*`) and checksum suffix.
+- **Extended key import** — `xpub`/`zpub`/`tpub`/`vpub`/`upub` (watch-only)
+  and `xprv`/`zprv`/`tprv`/`vprv`/`uprv` (full spending), with auto-detection
+  of the target network from the key prefix.
+- **Network selector on import** — override the default network when pasting
+  a seed phrase, key, or descriptor. Network is auto-detected when pasting a
+  testnet-prefixed key.
+- **Multi-network support** — switch between **Mainnet**, **Testnet**,
+  **Testnet4**, **Signet**, and **Regtest** in Settings. Each network has a
+  default block explorer and supports custom Esplora/electrs URLs.
 - **One fresh address at a time** — a new receive address is only handed out
   after the current one is paid, so used addresses stay contiguous and scans
-  stay tiny (no 20-address gap probing).
+  stay tiny (no 20-address gap probing). A manual **"New address"** button
+  lets you advance early when you need a fresh address.
 - **Choose your own block explorer** — mempool.space by default (with
   blockstream.info as a silent failover), blockstream.info only, or a **custom
   Esplora / electrs REST URL** (e.g. your own node) in Settings.
@@ -31,6 +54,16 @@ The name is a nod to [Hal Finney](https://en.wikipedia.org/wiki/Hal_Finney_(comp
 - **QR scanner** on the send page — scan a Bitcoin address, a BIP21 URI (fills
   the amount too), or a signed transaction to broadcast it. Uses the native
   `BarcodeDetector` where available and lazy-loads jsQR otherwise.
+- **Transaction labeling** — add a label (e.g. "coffee with Alice") to any
+  transaction in the History detail view. Labels persist across sessions
+  on the device.
+- **Label export/import (BIP-329)** — export labels as a standard JSON file
+  and re-import on another device. Labels are also embedded in wallet snapshots.
+- **Per-address rescan** — targeted re-check of a single reused address (no
+  full wallet rescan). Paginated list with individual **Rescan** buttons and a
+  **"Scan X more"** bulk option to extend the address pool.
+- **Scan from date & gap limit** — configure the start date and gap limit in
+  the import pane's advanced options for deep recovery from a past date.
 - **Optional encrypted cross-device sync over Nostr** — wallet state is
   NIP-44-encrypted to yourself and stored as a replaceable event (kind 30078) on
   the relay(s) you choose (default relay.coinos.io). The Nostr identity is
@@ -66,8 +99,10 @@ bun run build    # → dist/  (index.html + PWA sidecars)
 
 `dist/index.html` inlines all code, the crypto/QR/Nostr libraries, and the CSS —
 save that one file and open it directly in a browser, no server or internet
-needed. The build also emits PWA extras (`manifest.webmanifest`, `sw.js`,
-icons, and a lazy-loaded `jsqr.js`) for the hosted site; they're optional and
+needed. The build also creates `Halwallet.zip` (the entire `dist/` folder) for
+download.
+The PWA extras (`manifest.webmanifest`, `sw.js`,
+icons, and a lazy-loaded `jsqr.js`) are for the hosted site; they're optional and
 simply 404 when `index.html` is opened on its own.
 
 ## How state is kept
@@ -90,7 +125,8 @@ coins. A manual **Settings → Rescan** forces a full re-scan on demand.
 1. **Online device:** open the wallet, let it scan, then **Settings → Export
    snapshot** (a keyless JSON of your UTXOs + fee rates).
 2. Move the file to an **offline device** running the saved `index.html`.
-3. There, enter your **seed phrase** (it auto-detects no network), then
+3. On the offline device, enter your **seed phrase** and select the correct
+   **network** in Settings (mainnet/testnet/signet/etc.), then
    **Settings → Import snapshot**.
 4. Build and **sign** a transaction; copy/download the signed hex (or scan the
    QR) and broadcast it from any online device.
@@ -101,6 +137,7 @@ coins. A manual **Settings → Rescan** forces a full re-scan on demand.
 | --- | --- |
 | `src/wallet.js` | BIP84 derivation, scanning, coin selection, signing, realtime, cache, sync |
 | `src/api.js` | Esplora wrapper + explorer selection (mempool / blockstream / custom) with throttle/cooldown/timeout |
+| `src/silentpay.js` | BIP-352 silent payments — send (ECDH taproot output derivation) and receive (key derivation, address generation, block scanning) |
 | `src/nostr.js` | Optional encrypted cross-device state sync over Nostr (configurable relays) |
 | `src/scan.js` | Camera QR scanner (native BarcodeDetector / lazy jsQR) |
 | `src/app.js` | UI controller (vanilla DOM) |
@@ -108,7 +145,8 @@ coins. A manual **Settings → Rescan** forces a full re-scan on demand.
 | `src/format.js` | sat/BTC formatting helpers |
 | `src/i18n.js` | UI strings + translations |
 | `src/style.css` | Hand-rolled styles |
-| `build.js` / `dev.js` | Bun bundler → inlined `index.html` + PWA sidecars, and dev server |
+| `build.js` / `dev.js` | Bun bundler → inlined `index.html` + zip package + PWA sidecars, and dev server |
+| `INSTALL.md` | Step-by-step air-gapped installation guide (non-technical) |
 
 ## Security notes
 

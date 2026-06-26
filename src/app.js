@@ -4,7 +4,7 @@
 // which rebuilds the active screen. Text inputs write back into `ui` on `input`
 // (without re-rendering) so their values survive structural re-renders.
 
-import { Wallet, newMnemonic, isValidMnemonic, utxoId, previewGift, giftOutpoints, buildClaimTx, giftMinimum, parseExtendedKey, xpubToZpub, encryptVault, decryptVault } from './wallet.js';
+import { Wallet, newMnemonic, isValidMnemonic, utxoId, previewGift, giftOutpoints, buildClaimTx, giftMinimum, parseExtendedKey, xpubToZpub, encryptVault, decryptVault, NETS, parseDescriptor, exportLabelsBIP329, importLabelsBIP329, detectNetworkFromKey } from './wallet.js';
 import { qrSvg } from './qr.js';
 import { scanQr } from './scan.js';
 import { getSyncConfig, setSyncConfig } from './nostr.js';
@@ -46,6 +46,10 @@ const ui = {
   importText: '',
   passphrase: '',
   showPass: false,
+  importNet: '',
+  scanGapLimit: 20,
+  scanFromDate: '',
+  showAdvanced: false,
   revealShown: false, // recovery phrase unmasked on the Backup tab (after the warning)
   pubkeyShown: false, // account public key revealed in Settings
   giftMode: false, // gift sub-view active on the Send page
@@ -70,6 +74,15 @@ const ui = {
   addrScan: false, // Settings: showing the per-address rescan list
   addrScanPage: 0, // Settings: current page within the address list
   rescanning: new Set(), // 'chain/index' ids queued/in-flight for rescan
+  scanMoreCount: 10,
+  scanMoreBusy: false,
+  showSilentPayment: false, // Receive: show silent payment address
+  spScanBusy: false, // Settings: SP block scan in progress
+  spScanProgress: 0, // Settings: SP scan progress percent
+  spScanTotal: 0,
+  spScanDone: 0,
+  spScanStarted: 0,
+  spScanFromHeight: 709632,
   send: blankSend(),
   draft: null, // built tx summary awaiting review
   broadcastTx: null, // scanned signed tx awaiting broadcast confirmation
@@ -550,7 +563,12 @@ function importPane() {
         autocomplete: 'off',
         spellcheck: 'false',
         value: ui.importText,
-        onInput: (e) => (ui.importText = e.target.value),
+        onInput: (e) => {
+          ui.importText = e.target.value;
+          // Auto-detect network from pasted key/descriptor.
+          const detected = detectNetworkFromKey(ui.importText);
+          if (detected) ui.importNet = detected;
+        },
       })
     ),
     optionsPanel(),
@@ -559,63 +577,151 @@ function importPane() {
 }
 
 function optionsPanel() {
+  const netNames = Object.keys(NETS);
   return h(
-    'label',
-    { class: 'field' },
-    h('span', { class: 'lab' }, t('passphrase')),
+    'div',
+    { class: 'col', style: 'gap:8px' },
     h(
-      'div',
-      { class: 'input-group' },
-      h('input', {
-        type: ui.showPass ? 'text' : 'password',
+      'label',
+      { class: 'field' },
+      h('span', { class: 'lab' }, t('network')),
+      h('select', {
         class: 'mono-input',
-        autocomplete: 'off',
-        value: ui.passphrase,
-        onInput: (e) => (ui.passphrase = e.target.value),
-      }),
-      h('button', { class: 'btn-sm', type: 'button', onClick: () => { ui.showPass = !ui.showPass; render(); } }, ui.showPass ? t('hide') : t('show'))
-    )
+        value: ui.importNet || getPreferredNet(),
+        onChange: (e) => { ui.importNet = e.target.value; },
+      }, netNames.map((n) => h('option', { value: n }, t('net_' + n))))
+    ),
+    h(
+      'label',
+      { class: 'field' },
+      h('span', { class: 'lab' }, t('passphrase')),
+      h(
+        'div',
+        { class: 'input-group' },
+        h('input', {
+          type: ui.showPass ? 'text' : 'password',
+          class: 'mono-input',
+          autocomplete: 'off',
+          value: ui.passphrase,
+          onInput: (e) => (ui.passphrase = e.target.value),
+        }),
+        h('button', { class: 'btn-sm', type: 'button', onClick: () => { ui.showPass = !ui.showPass; render(); } }, ui.showPass ? t('hide') : t('show'))
+      )
+    ),
+    h('label', { class: 'btn btn-ghost btn-block', style: 'cursor:pointer', onClick: () => { ui.showAdvanced = !ui.showAdvanced; render(); } },
+      (ui.showAdvanced ? '▾ ' : '▸ ') + t('advancedOptions')
+    ),
+    ui.showAdvanced ? h('div', { class: 'col', style: 'gap:8px;padding:8px 0' },
+      h(
+        'label',
+        { class: 'field' },
+        h('span', { class: 'lab' }, t('scanGapLimit')),
+        h('input', {
+          type: 'number', min: 1, max: 200,
+          class: 'mono-input',
+          value: ui.scanGapLimit,
+          onInput: (e) => { ui.scanGapLimit = parseInt(e.target.value) || 20; },
+        }),
+        h('span', { class: 'small muted', style: 'margin-top:2px' }, t('scanGapLimitDesc'))
+      ),
+      h(
+        'label',
+        { class: 'field' },
+        h('span', { class: 'lab' }, t('scanFromDate')),
+        h('input', {
+          type: 'date',
+          value: ui.scanFromDate,
+          onInput: (e) => { ui.scanFromDate = e.target.value; },
+        }),
+        h('span', { class: 'small muted', style: 'margin-top:2px' }, t('scanFromDateDesc'))
+      )
+    ) : null
   );
 }
 
-// Import accepts a recovery phrase, an xpub/zpub (watch-only), or an xprv/zprv
-// (full spending). Classify the pasted text and open the right kind of wallet.
+// Import accepts a recovery phrase, a descriptor (e.g. wpkh(...)), an xpub/zpub
+// (watch-only), or an xprv/zprv (full spending). Classify the pasted text and
+// open the right kind of wallet.
 async function openWallet(input) {
   ui.unlockError = '';
   const raw = (input || '').trim();
   const m = raw.replace(/\s+/g, ' ');
-  if (isValidMnemonic(m)) { await enterWallet(m, ui.passphrase); return; }
+  const scanOpts = scanOptions();
+  // Use the import-tab network if set, otherwise the saved preference.
+  const netName = ui.importNet || getPreferredNet();
+  if (ui.importNet && ui.importNet !== getPreferredNet()) setPreferredNet(ui.importNet);
+  if (isValidMnemonic(m)) { await enterWallet(m, ui.passphrase, { ...scanOpts, netName }); return; }
+  // Try descriptor first (wpkh(...), tr(...), sh(wpkh(...)), etc.)
+  if (/^(wpkh|tr|pkh|sh|wsh)\s*\(/i.test(raw)) {
+    try {
+      const pk = parseDescriptor(raw);
+      const acc = pk.kind === 'xpub'
+        ? addOrGetAccount({ type: 'watch', label: defaultLabel('watch'), xpub: pk.key, netName, ...scanOpts })
+        : addOrGetAccount({ type: 'full', label: defaultLabel('full'), xprv: pk.key, netName, ...scanOpts });
+      ui.fromWallet = false;
+      await activateAccount(acc, { fresh: true });
+      return;
+    } catch (e) {
+      ui.unlockError = e.message;
+      render();
+      return;
+    }
+  }
   let pk;
   try { pk = parseExtendedKey(raw); } catch { ui.unlockError = t('invalidImport'); render(); return; }
   const acc = pk.kind === 'xpub'
-    ? addOrGetAccount({ type: 'watch', label: defaultLabel('watch'), xpub: pk.key })
-    : addOrGetAccount({ type: 'full', label: defaultLabel('full'), xprv: pk.key });
+    ? addOrGetAccount({ type: 'watch', label: defaultLabel('watch'), xpub: pk.key, netName, ...scanOpts })
+    : addOrGetAccount({ type: 'full', label: defaultLabel('full'), xprv: pk.key, netName, ...scanOpts });
   ui.fromWallet = false;
   await activateAccount(acc, { fresh: true });
 }
 
+function scanOptions() {
+  const opts = {};
+  if (ui.scanGapLimit && ui.scanGapLimit !== 20) opts.gapLimit = ui.scanGapLimit;
+  if (ui.scanFromDate) {
+    const ts = new Date(ui.scanFromDate).getTime() / 1000;
+    if (ts > 0) opts.minTimestamp = ts;
+  }
+  return opts;
+}
+
 // Register a full (seed) wallet as an account and open it.
 async function enterWallet(mnemonic, passphrase, opts = {}) {
+  const scanOpts = {};
+  if (opts.gapLimit) scanOpts.gapLimit = opts.gapLimit;
+  if (opts.minTimestamp) scanOpts.minTimestamp = opts.minTimestamp;
   const acc = addOrGetAccount({
     type: 'full',
     label: defaultLabel('full'),
     mnemonic: (mnemonic || '').trim().replace(/\s+/g, ' '),
     passphrase: passphrase || '',
+    netName: opts.netName || getPreferredNet(),
+    ...scanOpts,
   });
   await activateAccount(acc, { ...opts, fresh: true });
+}
+
+const NET_PREF_KEY = 'btc-wallet-preferred-net';
+function getPreferredNet() {
+  try { return localStorage.getItem(NET_PREF_KEY) || 'mainnet'; } catch { return 'mainnet'; }
+}
+function setPreferredNet(net) {
+  try { localStorage.setItem(NET_PREF_KEY, net); } catch {}
 }
 
 // Load an account into the wallet and start scanning. Full-account seeds are
 // kept in sessionStorage (ephemeral); a refresh restores the open account.
 async function activateAccount(acc, opts = {}) {
   activeId = acc.id;
+  const netName = acc.netName || (opts.netName) || getPreferredNet();
   // A gift link generates this wallet only to claim into. Keep it provisional
   // until the user commits (claims, or chooses to keep it / enters the wallet),
   // so bailing from an already-claimed gift doesn't leave an empty account.
   if (opts.gift) acc.provisional = true;
-  if (acc.type === 'watch') wallet.load({ xpub: acc.xpub, netName: 'mainnet', offline: false });
-  else if (acc.xprv) wallet.load({ xprv: acc.xprv, netName: 'mainnet', offline: false });
-  else wallet.load({ mnemonic: acc.mnemonic, passphrase: acc.passphrase || '', netName: 'mainnet', offline: false });
+  if (acc.type === 'watch') wallet.load({ xpub: acc.xpub, netName, offline: false, gapLimit: acc.gapLimit, minTimestamp: acc.minTimestamp });
+  else if (acc.xprv) wallet.load({ xprv: acc.xprv, netName, offline: false, gapLimit: acc.gapLimit, minTimestamp: acc.minTimestamp });
+  else wallet.load({ mnemonic: acc.mnemonic, passphrase: acc.passphrase || '', netName, offline: false, gapLimit: acc.gapLimit, minTimestamp: acc.minTimestamp });
   persistAccounts();
   const hadCache = wallet.restoreCache(); // show last-known balance/history instantly
   // An opened gift link starts on a claim/back-up screen instead of the wallet.
@@ -817,8 +923,8 @@ function mergeVaultList(list) {
   for (const v of list) {
     const acc = addOrGetAccount(
       v.xprv
-        ? { type: 'full', label: v.label || defaultLabel('full'), xprv: v.xprv }
-        : { type: 'full', label: v.label || defaultLabel('full'), mnemonic: v.mnemonic, passphrase: v.passphrase || '' }
+        ? { type: 'full', label: v.label || defaultLabel('full'), xprv: v.xprv, netName: getPreferredNet() }
+        : { type: 'full', label: v.label || defaultLabel('full'), mnemonic: v.mnemonic, passphrase: v.passphrase || '', netName: getPreferredNet() }
     );
     acc.persisted = true;
   }
@@ -869,8 +975,9 @@ function unlockVault() {
   let list;
   try { list = decryptVault(loadVaultBlob(), ui.vaultPw); } catch { ui.vaultError = t('pwWrong'); render(); return; }
   vaultPassword = ui.vaultPw;
+  const netName = getPreferredNet();
   accounts = list
-    .map((v) => ({ id: genId(), type: 'full', label: v.label || defaultLabel('full'), mnemonic: v.mnemonic || '', passphrase: v.passphrase || '', xprv: v.xprv || '', persisted: true }))
+    .map((v) => ({ id: genId(), type: 'full', label: v.label || defaultLabel('full'), mnemonic: v.mnemonic || '', passphrase: v.passphrase || '', xprv: v.xprv || '', netName, persisted: true }))
     .concat(loadWatchAccounts());
   ui.vaultPw = '';
   ui.vaultError = '';
@@ -910,7 +1017,7 @@ function lock() {
   wallet.stopRealtime();
   clearAccounts();
   vaultPassword = null;
-  wallet.load({ mnemonic: '', passphrase: '', netName: 'mainnet', offline: false });
+  wallet.load({ mnemonic: '', passphrase: '', netName: getPreferredNet(), offline: false });
   wallet.mnemonic = '';
   ui.screen = hasVault() ? 'vault' : 'unlock';
   ui.unlockTab = 'create';
@@ -927,9 +1034,16 @@ function lock() {
   ui.draftMnemonic = '';
   ui.importText = '';
   ui.passphrase = '';
+  ui.importNet = '';
+  ui.scanGapLimit = 20;
+  ui.scanFromDate = '';
+  ui.showAdvanced = false;
   ui.confirm = [];
   ui.revealShown = false;
   ui.pubkeyShown = false;
+  ui.scanMoreBusy = false;
+  ui.showSilentPayment = false;
+  ui.spScanBusy = false;
   ui.giftMode = false;
   ui.giftAmount = '';
   ui.giftCode = null;
@@ -985,6 +1099,52 @@ async function doRescanAddress(chain, index) {
   render();
 }
 
+// Bulk-scan N additional addresses on both chains.
+async function doScanMore(count) {
+  if (wallet.offline) { toast(t('scanOffline')); return; }
+  ui.scanMoreBusy = true;
+  render();
+  try {
+    await wallet.scanNextAddresses(count);
+    ui.tab = 'settings'; // force re-render after scan
+    toast(t('scanMoreDone', { n: count * 2 }));
+  } catch (e) {
+    toast(e.message || t('rescanFailed'));
+  }
+  ui.scanMoreBusy = false;
+  render();
+}
+
+// Scan blocks for silent payments.
+async function doSPScan() {
+  if (wallet.offline) { toast(t('scanOffline')); return; }
+  ui.spScanBusy = true;
+  ui.spScanTotal = 0;
+  ui.spScanDone = 0;
+  ui.spScanStarted = Date.now();
+  render();
+  try {
+    const from = ui.spScanFromHeight || 709632;
+    const results = await wallet.scanBlocksForSilentPayments(from, (total, done) => {
+      ui.spScanTotal = total;
+      ui.spScanDone = done;
+      render();
+    });
+    if (results.length) {
+      toast(t('spScanFound', { n: results.length }));
+    } else {
+      toast(t('spScanNone'));
+    }
+    render();
+  } catch (e) {
+    toast(e.message || t('spScanError'));
+  }
+  ui.spScanBusy = false;
+  ui.spScanTotal = 0;
+  ui.spScanDone = 0;
+  render();
+}
+
 // Paginated list of every known address, each with its own rescan button.
 function addressScanView() {
   const addrs = wallet.knownAddresses();
@@ -1000,6 +1160,20 @@ function addressScanView() {
         h('button', { class: 'btn-sm', onClick: () => { ui.addrScan = false; render(); } }, t('back'))
       ),
       h('p', { class: 'small muted', style: 'margin:0' }, t('rescanAddrDesc')),
+      h('div', { class: 'row between', style: 'align-items:center;gap:8px' },
+        h('label', { class: 'field', style: 'margin:0;flex:1' },
+          h('span', { class: 'lab' }, t('scanMoreAddrLabel')),
+          h('input', {
+            type: 'number', min: 1, max: 1000,
+            class: 'mono-input',
+            value: ui.scanMoreCount,
+            onInput: (e) => { ui.scanMoreCount = Math.max(1, parseInt(e.target.value) || 10); },
+          })
+        ),
+        ui.scanMoreBusy
+          ? h('button', { class: 'btn-sm', disabled: true }, h('span', { class: 'spinner sm' }))
+          : h('button', { class: 'btn-sm', onClick: () => doScanMore(ui.scanMoreCount) }, t('scanMoreAddrBtn', { n: ui.scanMoreCount }))
+      ),
       h('div', { class: 'list' },
         ...slice.map((a) => {
           const id = a.chain + '/' + a.index;
@@ -1071,9 +1245,21 @@ function settingsTab() {
       : h(
           'div',
           { class: 'card col' },
-          h('h3', {}, t('offlineTransfer')),
-          snapshotActions()
-        ),
+        h('h3', {}, t('offlineTransfer')),
+        snapshotActions()
+    ),
+    h(
+      'div',
+      { class: 'card col' },
+      h('h3', {}, t('labels')),
+      h('p', { class: 'small muted', style: 'margin:0' }, t('labelsDesc')),
+      h('div', { class: 'row gap6 wrap' },
+        h('button', { class: 'btn-sm', onClick: exportLabels }, t('exportLabels')),
+        h('label', { class: 'btn btn-sm', style: 'cursor:pointer' }, t('importLabels'),
+          h('input', { type: 'file', accept: 'application/json,.json', style: 'display:none', onChange: importLabelsFile })
+        )
+      )
+    ),
     h(
       'div',
       { class: 'card col' },
@@ -1083,8 +1269,62 @@ function settingsTab() {
         ? null
         : h('button', { onClick: () => { ui.addrScan = true; ui.addrScanPage = 0; render(); } }, t('rescanAddresses'))
     ),
+    wallet.canReceiveSilentPayments ? silentPaymentCard() : null,
     explorerCard(),
+    networkCard(),
     wallet.watchOnly || !wallet.mnemonic ? null : syncCard()
+  );
+}
+
+// Estimated time remaining for the silent payment block scan.
+function spScanETA() {
+  const elapsed = Date.now() - (ui.spScanStarted || Date.now());
+  const pct = ui.spScanDone / ui.spScanTotal;
+  if (!pct || elapsed < 1000) return '';
+  const remaining = Math.round(elapsed / pct * (1 - pct) / 1000);
+  if (remaining < 5) return t('spScanMoment');
+  if (remaining < 60) return t('spScanSeconds', { n: remaining });
+  const min = Math.floor(remaining / 60);
+  const sec = remaining % 60;
+  return `${min}m ${sec}s`;
+}
+
+// Silent payment card — address info and block scanning.
+function silentPaymentCard() {
+  const spAddr = wallet.silentPaymentAddress();
+  return h(
+    'div',
+    { class: 'card col' },
+    h('h3', {}, t('silentPayments')),
+    h('p', { class: 'small muted', style: 'margin:0' }, t('spSettingsDesc')),
+    h('div', { class: 'addr-box break mono small', style: 'font-size:12px' }, spAddr),
+    h('div', { class: 'row gap6 wrap' },
+      copyBtn(spAddr, t('copyAddress'))
+    ),
+    wallet.offline ? null : h('div', { class: 'col', style: 'gap:8px;margin-top:8px' },
+      h('label', { class: 'field', style: 'margin:0' },
+        h('span', { class: 'lab' }, t('spScanFromHeight')),
+        h('input', {
+          type: 'number', min: 1, class: 'mono-input',
+          value: ui.spScanFromHeight || 709632,
+          onInput: (e) => { ui.spScanFromHeight = parseInt(e.target.value) || 709632; },
+        })
+      ),
+      ui.spScanBusy
+        ? h('div', { class: 'col gap4' },
+            h('div', { class: 'row between' },
+              h('span', { class: 'small muted' }, t('spScanning')),
+              ui.spScanTotal ? h('span', { class: 'small faint' }, spScanETA()) : null
+            ),
+            ui.spScanTotal ? h('div', { class: 'progress-bar', style: 'width:100%;height:6px;border-radius:3px;overflow:hidden;background:var(--muted-bg)' },
+              h('div', { style: `width:${Math.round(ui.spScanDone/ui.spScanTotal*100)}%;height:100%;background:var(--accent);transition:width 0.3s` })
+            ) : null
+          )
+        : h('button', { class: 'btn-block', onClick: () => doSPScan() }, t('spScanBtn')),
+      wallet.silentPaymentHits().length
+        ? h('div', { class: 'small muted', style: 'margin-top:4px' }, t('spDetectedCount', { n: wallet.silentPaymentHits().length }))
+        : null
+    )
   );
 }
 
@@ -1295,10 +1535,43 @@ async function doRevoke(id) {
   render();
 }
 
+// Network selector: switch between mainnet, testnet, testnet4, signet, regtest.
+function networkCard() {
+  return h(
+    'div',
+    { class: 'card col' },
+    h('h3', {}, t('network')),
+    h('p', { class: 'small muted', style: 'margin:0' }, t('networkDesc')),
+    h(
+      'select',
+      {
+        value: wallet.netName,
+        onChange: (e) => {
+          const net = e.target.value;
+          setPreferredNet(net);
+          wallet.load({
+            mnemonic: wallet.mnemonic,
+            passphrase: wallet.passphrase,
+            xpub: wallet.xpub || '',
+            xprv: wallet.xprv || '',
+            netName: net,
+            offline: wallet.offline,
+          });
+          render();
+          if (!wallet.offline) wallet.reloadExplorer();
+        },
+      },
+      Object.keys(NETS).map((n) =>
+        h('option', { value: n, selected: n === wallet.netName }, t('net_' + n))
+      )
+    )
+  );
+}
+
 // Block explorer / server selection: a preset (mempool.space, blockstream.info)
 // or a custom Esplora/electrs REST URL (e.g. your own node).
 function explorerCard() {
-  const cfg = getExplorerConfig();
+  const cfg = getExplorerConfig(wallet.netName);
   const rt = getRealtimeEnabled();
   const setRealtime = (on) => {
     if (on === getRealtimeEnabled()) return;
@@ -1316,7 +1589,7 @@ function explorerCard() {
       {
         onChange: (e) => {
           const server = e.target.value;
-          setExplorerConfig({ server, url: cfg.url });
+          setExplorerConfig({ server, url: cfg.url, net: wallet.netName });
           render();
           if (server !== 'custom' || cfg.url) wallet.reloadExplorer();
         },
@@ -1332,7 +1605,7 @@ function explorerCard() {
             value: cfg.url,
             // Apply on blur/Enter, not every keystroke (each change rescans).
             onChange: (e) => {
-              setExplorerConfig({ server: 'custom', url: e.target.value.trim() });
+              setExplorerConfig({ server: 'custom', url: e.target.value.trim(), net: wallet.netName });
               wallet.reloadExplorer();
             },
           }),
@@ -1884,12 +2157,40 @@ function receiveTab() {
   }
 
   const fresh = wallet.freshReceive();
+  // Silent payment address toggle (only for seed wallets).
+  const showSP = ui.showSilentPayment && wallet.canReceiveSilentPayments;
+  const displayAddr = showSP ? wallet.silentPaymentAddress() : fresh.address;
   return h(
     'div',
-    { class: 'card col', style: 'align-items:center;gap:14px' },
-    h('div', { html: qrSvg(fresh.address) }),
-    h('div', { class: 'addr-box', style: 'width:100%' }, fresh.address),
-    copyBtn(fresh.address, t('copyAddress'))
+    { class: 'col', style: 'gap:12px' },
+    wallet.canReceiveSilentPayments
+      ? h('div', { class: 'row between', style: 'align-items:center;gap:8px' },
+          h('label', { class: 'small muted' }, t('addressMode')),
+          h('div', { class: 'row gap4' },
+            h('button', {
+              class: 'btn-sm' + (showSP ? '' : ' active'),
+              onClick: () => { ui.showSilentPayment = false; render(); },
+            }, t('addrModeNormal')),
+            h('button', {
+              class: 'btn-sm' + (showSP ? ' active' : ''),
+              onClick: () => { ui.showSilentPayment = true; render(); },
+            }, t('addrModeSP'))
+          )
+        )
+      : null,
+    h('div', { class: 'card col', style: 'align-items:center;gap:14px' },
+      showSP ? h('span', { class: 'badge', style: 'margin-bottom:4px' }, 'Silent Payment') : null,
+      h('div', { html: qrSvg(displayAddr) }),
+      h('div', { class: 'addr-box', style: 'width:100%' }, displayAddr),
+      h('div', { class: 'row gap6 wrap', style: 'width:100%' },
+        copyBtn(displayAddr, t('copyAddress')),
+        showSP ? null : h('button', { class: 'btn-sm', onClick: () => { wallet.advanceReceive(); render(); } }, t('newAddress'))
+      ),
+      showSP ? h('p', { class: 'small muted', style: 'text-align:center;margin:4px 0 0' }, t('spReceiveDesc')) : null,
+      showSP && wallet.silentPaymentHits().length
+        ? h('p', { class: 'small faint', style: 'text-align:center;margin:4px 0 0' }, t('spReceiveDetected', { n: wallet.silentPaymentHits().length }))
+        : null
+    )
   );
 }
 
@@ -2388,7 +2689,8 @@ function reviewView() {
           o.silent
             ? h('span', { class: 'k col', style: 'gap:2px;align-items:flex-start' },
                 h('span', { class: 'mono break' }, shortAddr(o.silent, 12, 8)),
-                h('span', { class: 'small faint' }, t('silentPaymentNote'))
+                h('span', { class: 'small faint' }, t('silentPaymentNote')),
+                h('span', { class: 'small muted', style: 'font-size:11px' }, t('spDerivedOutput'))
               )
             : h('span', { class: 'k mono break' }, shortAddr(o.address, 14, 8)),
           h('span', { class: 'v' }, fmtAmount(o.amount), ' ', unitTag())
@@ -2525,6 +2827,7 @@ function giftHistoryItem(g) {
 function txHistoryItem(tx) {
   const incoming = tx.net >= 0;
   const stuck = !tx.confirmed && wallet.isStuck(tx);
+  const label = wallet.getTxLabel(tx.txid);
   return h(
     'div',
     { class: 'item', style: 'cursor:pointer', onClick: () => openTx(tx.txid) },
@@ -2536,6 +2839,7 @@ function txHistoryItem(tx) {
           : stuck ? h('span', { class: 'tag', style: 'background:var(--red-soft);color:var(--red)' }, t('stuckTag'))
           : h('span', { class: 'tag pending' }, t('pendingTag'))
       ),
+      label ? h('div', { class: 'small', style: 'color:var(--ink)' }, label) : null,
       h('div', { class: 'small faint' }, tx.confirmed ? timeAgo(tx.blockTime) : stuck ? t('stuckNote') : t('awaitingConfirmation'))
     ),
     h('div', { style: 'text-align:right' },
@@ -2681,6 +2985,14 @@ function txDetailView(tx) {
       copyBtn(tx.txid, t('copyId')),
       h('a', { class: 'btn btn-sm', href: wallet.api.explorerTx(tx.txid), target: '_blank', rel: 'noopener', onClick: (e) => { e.preventDefault(); openExternal(wallet.api.explorerTx(tx.txid)); } }, t('viewOnMempool'))
     ),
+    h('label', { class: 'field' },
+      h('span', { class: 'lab' }, t('txLabel')),
+      h('input', {
+        type: 'text', placeholder: t('txLabelPlaceholder'),
+        value: wallet.getTxLabel(tx.txid),
+        onInput: (e) => { wallet.setTxLabel(tx.txid, e.target.value); },
+      })
+    ),
     // RBF: an unconfirmed send can be rebroadcast at a higher fee.
     !tx.confirmed && !incoming && !wallet.offline
       ? (ui.busy
@@ -2725,6 +3037,32 @@ async function importSnapshotFile(e) {
     if (res.unmatched.length) msg += t('unmatchedSuffix', { n: res.unmatched.length });
     toast(msg);
     ui.tab = 'settings';
+    render();
+  } catch (err) {
+    toast(t('importFailed', { msg: err.message }));
+  }
+  e.target.value = '';
+}
+
+// --- BIP-329 label export/import ------------------------------------------
+function exportLabels() {
+  const labels = wallet.getAllTxLabels();
+  const bip329 = exportLabelsBIP329(labels);
+  const stamp = new Date().toISOString().slice(0, 10);
+  download(`wallet-labels-${stamp}.json`, JSON.stringify(bip329, null, 2));
+  toast(t('labelsExported'));
+}
+
+async function importLabelsFile(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  try {
+    const data = JSON.parse(await file.text());
+    const labels = importLabelsBIP329(data);
+    const existing = wallet.getAllTxLabels();
+    Object.assign(existing, labels);
+    wallet.setAllTxLabels(existing);
+    toast(t('importedNLabels', { n: Object.keys(labels).length }));
     render();
   } catch (err) {
     toast(t('importFailed', { msg: err.message }));

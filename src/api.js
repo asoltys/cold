@@ -6,11 +6,19 @@
 //   - a 429 from ANY request immediately backs off ALL subsequent requests
 //     (global exponential pause), easing back as requests succeed.
 
-// Block explorer selection (global, persisted in localStorage). Defaults to
-// mempool.space, with blockstream.info as a silent failover for reliability.
-// Users can pick blockstream.info only, or a custom Esplora/electrs REST URL
-// (e.g. their own node) in Settings.
-const EXPLORER_KEY = 'btc-wallet-explorer';
+// Default block explorer URLs per network (mempool.space paths).
+const NETWORK_EXPLORERS = {
+  mainnet:  { default: 'https://mempool.space',        apiPath: '/api' },
+  testnet:  { default: 'https://mempool.space',        apiPath: '/testnet/api' },
+  testnet4: { default: 'https://mempool.space',        apiPath: '/testnet4/api' },
+  signet:   { default: 'https://mempool.space',        apiPath: '/signet/api' },
+  regtest:  { default: 'http://localhost:3002',        apiPath: '/api' },
+};
+
+// Block explorer selection (per-network, persisted in localStorage). Users can
+// pick a preset (mempool.space with the correct sub-path per network) or a
+// custom Esplora/electrs REST URL (e.g. their own node) in Settings.
+const EXPLORER_KEY = 'btc-wallet-explorer2';
 
 export const EXPLORER_PRESETS = [
   { id: 'mempool', label: 'mempool.space' },
@@ -18,31 +26,52 @@ export const EXPLORER_PRESETS = [
   { id: 'custom', label: 'Custom' },
 ];
 
-export function getExplorerConfig() {
+function explorerKey(net) {
+  return EXPLORER_KEY + ':' + (net || 'mainnet');
+}
+
+export function getExplorerConfig(net) {
+  net = net || 'mainnet';
   try {
-    const c = JSON.parse(localStorage.getItem(EXPLORER_KEY) || 'null');
+    const c = JSON.parse(localStorage.getItem(explorerKey(net)) || 'null');
     if (c && c.server) return { server: c.server, url: c.url || '' };
   } catch {}
   return { server: 'mempool', url: '' };
 }
 
-export function setExplorerConfig({ server, url }) {
+export function setExplorerConfig({ server, url, net }) {
+  net = net || 'mainnet';
   try {
-    localStorage.setItem(EXPLORER_KEY, JSON.stringify({ server, url: url || '' }));
+    localStorage.setItem(explorerKey(net), JSON.stringify({ server, url: url || '' }));
   } catch {}
+}
+
+function apiPathFor(net) {
+  return (NETWORK_EXPLORERS[net] || NETWORK_EXPLORERS.mainnet).apiPath;
+}
+
+function defaultHostFor(net) {
+  return (NETWORK_EXPLORERS[net] || NETWORK_EXPLORERS.mainnet).default;
 }
 
 // Resolve the configured explorer to the host list the Api tries in order.
 function resolveHosts(net) {
-  const cfg = getExplorerConfig();
-  const apiPath = net === 'testnet' ? '/testnet/api' : '/api';
-  const host = (web, kind) => ({ base: web + apiPath, kind, web, cooldownUntil: 0 });
+  const cfg = getExplorerConfig(net);
+  const host = (web, kind) => ({ base: web + apiPathFor(net), kind, web, cooldownUntil: 0 });
   if (cfg.server === 'custom' && cfg.url) {
     const base = cfg.url.trim().replace(/\/+$/, '');
     return [{ base, kind: 'esplora', web: base.replace(/\/api$/, ''), cooldownUntil: 0 }];
   }
-  if (cfg.server === 'blockstream') return [host('https://blockstream.info', 'esplora')];
-  return [host('https://mempool.space', 'mempool'), host('https://blockstream.info', 'esplora')];
+  // Only mempool.space reliably serves testnet4, signet, and regtest paths.
+  const hasBlockstream = net === 'mainnet' || net === 'testnet';
+  if (cfg.server === 'blockstream') {
+    if (hasBlockstream) return [host('https://blockstream.info', 'esplora')];
+    return [host('https://mempool.space', 'mempool')];
+  }
+  if (hasBlockstream) {
+    return [host('https://mempool.space', 'mempool'), host('https://blockstream.info', 'esplora')];
+  }
+  return [host('https://mempool.space', 'mempool')];
 }
 
 // Realtime notifications come from coinos's WebSocket watcher: it pushes the
@@ -72,7 +101,8 @@ export function setRealtimeEnabled(on) {
 }
 
 export function wsUrl(net) {
-  if (net === 'testnet' || !getRealtimeEnabled()) return null;
+  if (net !== 'mainnet' && net !== 'testnet') return null;
+  if (!getRealtimeEnabled()) return null;
   return getElectrumWsUrl();
 }
 
@@ -102,8 +132,10 @@ export class Api {
   }
 
   explorerTx(txid) {
-    const web = (this._hosts[0] && this._hosts[0].web) || 'https://mempool.space';
-    return web + (this.net === 'testnet' ? '/testnet/tx/' : '/tx/') + txid;
+    const web = (this._hosts[0] && this._hosts[0].web) || defaultHostFor(this.net);
+    const base = NETWORK_EXPLORERS[this.net] || NETWORK_EXPLORERS.mainnet;
+    const txPath = base.apiPath.replace('/api', '/tx/');
+    return web + txPath + txid;
   }
 
   // ---- rate-aware global scheduler --------------------------------------
@@ -230,9 +262,25 @@ export class Api {
     return this.#get(`/address/${address}/txs`);
   }
 
-  // Full transaction (vin with prevouts, vout, status) — used for fee bumping.
+  // Full transaction (vin with witnesses, vout, status) — used for fee bumping
+  // and silent-payment scanning.
   getTx(txid) {
     return this.#get(`/tx/${txid}`);
+  }
+
+  // Current chain-tip block height.
+  blockHeight() {
+    return this.#get('/blocks/tip/height');
+  }
+
+  // Block hash at a given height.
+  blockHash(height) {
+    return this.#get(`/block-height/${height}`, true);
+  }
+
+  // Transactions in a block, starting from index (0-based, up to 25 entries).
+  blockTxs(hash, startIndex = 0) {
+    return this.#get(`/block/${hash}/txs/${startIndex}`);
   }
 
   async feeRates() {

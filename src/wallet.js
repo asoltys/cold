@@ -21,15 +21,22 @@ import * as btc from '@scure/btc-signer';
 import { p2wpkh } from '@scure/btc-signer/payment';
 import { concatBytes } from '@scure/btc-signer/utils.js';
 
+import { secp256k1 } from '@noble/curves/secp256k1';
+const Point = secp256k1.ProjectivePoint;
+
 import { Api, pool, wsUrl } from './api.js';
 import { NostrSync, getSyncConfig } from './nostr.js';
-import { isSilentPaymentAddress, decodeSilentPaymentAddress, silentPaymentScripts, silentPaymentPlaceholder } from './silentpay.js';
+import {
+  isSilentPaymentAddress, decodeSilentPaymentAddress, encodeSilentPaymentAddress,
+  silentPaymentScripts, silentPaymentPlaceholder,
+  deriveSilentPaymentKeys,
+  detectSilentPaymentInTx, privKeyToBigInt,
+} from './silentpay.js';
 
-// No look-ahead: stop scanning a chain at the first unused address. This wallet
-// only ever exposes ONE unused address at a time (freshReceive = first unused;
-// there is no "generate another address" button), so used addresses stay
-// contiguous and there is never a gap to look past. Keeps scans tiny.
-const GAP_LIMIT = 1;
+// Default gap limit when scanning (how many unused addresses to check before
+// concluding the wallet has no more activity).  Standard BIP44 value; override
+// per wallet for deep recovery scans.
+const DEFAULT_GAP_LIMIT = 20;
 
 // Extra pause after finding a used address, before querying the next index —
 // keeps us gentle on the explorers' rate limits when a wallet has activity.
@@ -37,9 +44,14 @@ const USED_HIT_DELAY_MS = 500;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+const REGTEST_NET = { bech32: 'bcrt', pubKeyHash: 0x6f, scriptHash: 0xc4, wif: 0xef };
+
 const NETS = {
-  mainnet: { net: btc.NETWORK, coin: 0 },
-  testnet: { net: btc.TEST_NETWORK, coin: 1 },
+  mainnet:  { net: btc.NETWORK,       coin: 0 },
+  testnet:  { net: btc.TEST_NETWORK,  coin: 1 },
+  testnet4: { net: btc.TEST_NETWORK,  coin: 1 },
+  signet:   { net: btc.TEST_NETWORK,  coin: 1 },
+  regtest:  { net: REGTEST_NET,       coin: 1 },
 };
 
 export function newMnemonic(strengthBits = 128) {
@@ -80,6 +92,8 @@ export class Wallet {
     this._refreshing = false; // a scan/refresh is in flight
     this.nextReceiveIndex = 0;
     this.nextChangeIndex = 0;
+    this.gapLimit = DEFAULT_GAP_LIMIT; // override for deep recovery scans
+    this.minTimestamp = 0; // only include txs after this UNIX timestamp (0 = all)
 
     this._account = null;
     this._accountKey = '';
@@ -105,6 +119,9 @@ export class Wallet {
     this._nostrPubTimer = null;
 
     this._subs = new Set();
+
+    // Transaction labels, keyed by txid, persisted in localStorage.
+    this._labels = null;
   }
 
   // --- reactive glue (tiny pub/sub; the UI re-renders on change) ----------
@@ -117,7 +134,7 @@ export class Wallet {
   }
 
   // --- setup --------------------------------------------------------------
-  load({ mnemonic = '', passphrase = '', xpub = '', xprv = '', netName = 'mainnet', offline = false }) {
+  load({ mnemonic = '', passphrase = '', xpub = '', xprv = '', netName = 'mainnet', offline = false, gapLimit, minTimestamp }) {
     this.stopRealtime();
     this.mnemonic = (mnemonic || '').trim().replace(/\s+/g, ' ');
     this.passphrase = passphrase;
@@ -134,6 +151,10 @@ export class Wallet {
     this._reserved = null; // gift coins set aside from spending (lazy-loaded)
     this._reclaimed = null; // gift coins freed for spending but link still live
     this._savedAt = 0;
+    if (gapLimit !== undefined) this.gapLimit = gapLimit;
+    else this.gapLimit = DEFAULT_GAP_LIMIT;
+    if (minTimestamp !== undefined) this.minTimestamp = minTimestamp;
+    else this.minTimestamp = 0;
     try {
       if (this.mnemonic) this.nostr.load(this.mnemonic, this.passphrase);
       else this.nostr.unload();
@@ -244,7 +265,7 @@ export class Wallet {
     const found = [];
     let gap = 0;
     let i = 0;
-    while (gap < GAP_LIMIT) {
+    while (gap < this.gapLimit) {
       const { address } = this.derive(chain, i);
       const info = await this.api.addressInfo(address);
       const cs = info.chain_stats || {};
@@ -350,6 +371,8 @@ export class Wallet {
         }
         const list = await this.api.addressTxs(a.address);
         for (const tx of list) {
+          const txTime = tx.status && tx.status.block_time;
+          if (this.minTimestamp && txTime && txTime < this.minTimestamp) continue;
           const summary = this._txSummary(tx);
           const at = this.txs.findIndex((t) => t.txid === tx.txid);
           // Refresh in place so a tx that has since confirmed loses its pending
@@ -515,6 +538,19 @@ export class Wallet {
     return used;
   }
 
+  // Bulk-scan N additional addresses on both chains, extending the known set.
+  async scanNextAddresses(count) {
+    const addrs = [];
+    for (const chain of [0, 1]) {
+      const arr = chain === 0 ? this.receive : this.change;
+      const start = arr.length;
+      for (let i = 0; i < count; i++) addrs.push({ chain, index: start + i });
+    }
+    for (const { chain, index } of addrs) {
+      await this.rescanAddress(chain, index);
+    }
+  }
+
   // silent=false: foreground load (shows loading state, always re-renders).
   // silent=true:  background refresh (poll / WS) — no spinner, and only emits
   //               if the visible state changed, so it never disrupts typing.
@@ -667,6 +703,9 @@ export class Wallet {
         let added = false;
         for (const tx of list) {
           if (seen.has(tx.txid)) continue;
+          // Respect minTimestamp: skip txs confirmed or first-seen earlier.
+          const txTime = tx.status && tx.status.block_time;
+          if (this.minTimestamp && txTime && txTime < this.minTimestamp) continue;
           seen.add(tx.txid);
           const summary = this._txSummary(tx);
           const at = this.txs.findIndex((t) => t.txid === tx.txid);
@@ -741,6 +780,23 @@ export class Wallet {
   }
   freshChange() {
     return this.derive(1, this.nextChangeIndex);
+  }
+
+  advanceReceive() {
+    const addr = this.derive(0, this.nextReceiveIndex);
+    if (!this.receive.find((a) => a.index === this.nextReceiveIndex)) {
+      this.receive.push({
+        chain: 0,
+        index: this.nextReceiveIndex,
+        address: addr.address,
+        used: false,
+        confirmed: 0,
+        pending: 0,
+      });
+      this.addrMap.set(addr.address, { chain: 0, index: this.nextReceiveIndex });
+    }
+    this.nextReceiveIndex++;
+    this.emit();
   }
 
   // --- spending -----------------------------------------------------------
@@ -860,7 +916,82 @@ export class Wallet {
     });
   }
 
-  // True if a built tx spends any of our still-unconfirmed coins — meaning it
+  // ── Silent Payment (receiving) ──────────────────────────────────────────
+
+  // Derive the silent payment scan+spend keys from the wallet's seed.
+  _spKeys() {
+    if (!this.mnemonic) throw new Error('Silent payments need a mnemonic wallet.');
+    const seed = mnemonicToSeedSync(this.mnemonic, this.passphrase || '');
+    return deriveSilentPaymentKeys(seed, this.netCfg.coin);
+  }
+
+  // The wallet's reusable silent payment address (sp1… / tsp1…).
+  silentPaymentAddress() {
+    const keys = this._spKeys();
+    return encodeSilentPaymentAddress(keys.scanPublicKey, keys.spendPublicKey, this.netCfg.coin !== 0);
+  }
+
+  // Scan a single transaction for incoming silent payments.
+  // Returns an array of { txid, vout, value, tweak } hits.
+  async scanTxForSilentPayment(txid) {
+    const tx = await this.api.getTx(txid);
+    const keys = this._spKeys();
+    const a = privKeyToBigInt(keys.scanPrivateKey);
+    const Bspend = Point.fromHex(keys.spendPublicKey);
+    return detectSilentPaymentInTx(tx, a, Bspend);
+  }
+
+  // Scan a set of blocks (fromBlock to tip) for incoming silent payments.
+  // Calls progress(total, done) after each block.
+  // Returns an array of { txid, vout, value, tweak, blockHeight }.
+  async scanBlocksForSilentPayments(fromBlock, progress) {
+    if (this.watchOnly) throw new Error('Silent payment receiving requires a seed wallet.');
+    const keys = this._spKeys();
+    const a = privKeyToBigInt(keys.scanPrivateKey);
+    const Bspend = Point.fromHex(keys.spendPublicKey);
+    const results = [];
+    const tip = await this.api.blockHeight();
+    const total = Math.max(0, tip - fromBlock + 1);
+    for (let height = fromBlock; height <= tip; height++) {
+      const hash = await this.api.blockHash(height);
+      let index = 0;
+      while (true) {
+        const txs = await this.api.blockTxs(hash, index);
+        for (const tx of txs) {
+          const hits = detectSilentPaymentInTx(tx, a, Bspend);
+          for (const h of hits) {
+            h.blockHeight = height;
+            results.push(h);
+            this._recordSilentPayment(h);
+          }
+        }
+        if (txs.length < 25) break;
+        index += 25;
+      }
+      if (progress) progress(total, height - fromBlock + 1);
+    }
+    this.saveCache();
+    return results;
+  }
+
+  // Track a detected silent payment in the wallet state.
+  _recordSilentPayment(hit) {
+    if (!this._spPayments) this._spPayments = [];
+    const key = hit.txid + ':' + hit.vout;
+    if (this._spPayments.some((p) => (p.txid + ':' + p.vout) === key)) return;
+    // Store tweak as hex string for JSON-safe serialization.
+    this._spPayments.push({ ...hit, tweak: '0x' + hit.tweak.toString(16) });
+  }
+
+  // Stored silent payments detected so far.
+  silentPaymentHits() {
+    return this._spPayments || [];
+  }
+
+  // True if the wallet has a mnemonic seed (can receive silent payments).
+  get canReceiveSilentPayments() {
+    return !this.watchOnly && !!this.mnemonic;
+  }
   // can't confirm until that parent (ancestor) transaction confirms first.
   spendsUnconfirmed(tx) {
     const pending = new Set(this.utxos.filter((u) => !u.confirmed).map((u) => utxoId(u)));
@@ -1538,6 +1669,34 @@ export class Wallet {
     }
   }
 
+  // --- transaction labels -------------------------------------------------
+  _loadLabels() {
+    if (this._labels) return this._labels;
+    try {
+      const raw = localStorage.getItem(this._cacheKey() + LABELS_KEY_SUFFIX);
+      this._labels = raw ? JSON.parse(raw) : {};
+    } catch { this._labels = {}; }
+    return this._labels;
+  }
+  _saveLabels() {
+    if (!this._labels) return;
+    try { localStorage.setItem(this._cacheKey() + LABELS_KEY_SUFFIX, JSON.stringify(this._labels)); } catch {}
+  }
+  getAllTxLabels() {
+    return { ...this._loadLabels() };
+  }
+  setAllTxLabels(labels) {
+    this._labels = { ...labels };
+    this._saveLabels();
+  }
+  getTxLabel(txid) {
+    return this._loadLabels()[txid] || '';
+  }
+  setTxLabel(txid, label) {
+    this._loadLabels()[txid] = label;
+    this._saveLabels();
+  }
+
   // --- local history cache ------------------------------------------------
   // Cache the scanned state in localStorage, keyed by a hash of the seed (the
   // seed itself is never stored). Re-importing the same seed in this browser
@@ -1571,7 +1730,7 @@ export class Wallet {
   // Nostr sync. savedAt lets us pick the newest copy across devices.
   _snapshot() {
     return {
-      v: 1,
+      v: 2,
       savedAt: Date.now(),
       receive: this.receive,
       change: this.change,
@@ -1580,6 +1739,7 @@ export class Wallet {
       nextReceiveIndex: this.nextReceiveIndex,
       nextChangeIndex: this.nextChangeIndex,
       feeRates: this.feeRates,
+      spPayments: this._spPayments || [],
     };
   }
 
@@ -1591,6 +1751,7 @@ export class Wallet {
     this.nextReceiveIndex = d.nextReceiveIndex || 0;
     this.nextChangeIndex = d.nextChangeIndex || 0;
     this.feeRates = d.feeRates || this.feeRates;
+    this._spPayments = d.spPayments || [];
     this.addrMap = new Map();
     for (const a of [...this.receive, ...this.change]) {
       this.addrMap.set(a.address, { chain: a.chain, index: a.index });
@@ -1656,9 +1817,9 @@ export class Wallet {
   // Exported on the ONLINE device. Contains no secrets — just what an offline
   // signer needs: coins, fee rates, and which addresses are next/fresh.
   exportSnapshot() {
-    return {
+    const snap = {
       app: 'bitcoin-wallet',
-      version: 1,
+      version: 2,
       netName: this.netName,
       exportedAt: new Date().toISOString(),
       feeRates: this.feeRates,
@@ -1672,6 +1833,13 @@ export class Wallet {
         confirmed: u.confirmed,
       })),
     };
+    // Include labels in BIP-329 format if any exist.
+    const txLabels = this._loadLabels();
+    const labelEntries = Object.entries(txLabels).filter(([, v]) => v);
+    if (labelEntries.length) {
+      snap.labels = exportLabelsBIP329(txLabels);
+    }
+    return snap;
   }
 
   // Imported on the OFFLINE device (which already has the seed loaded).
@@ -1715,6 +1883,13 @@ export class Wallet {
     this._recomputeBalanceFromUtxos();
     this.loaded = true;
     this.emit();
+    // Restore labels from snapshot (BIP-329 format in v2 snapshots).
+    if (snap.labels) {
+      try {
+        const labels = importLabelsBIP329(snap.labels);
+        this.setAllTxLabels(labels);
+      } catch {}
+    }
     return { imported: utxos.length, unmatched };
   }
 }
@@ -1723,19 +1898,135 @@ export function utxoId(u) {
   return `${u.txid}:${u.vout}`;
 }
 
-// Watch-only: accept a native-segwit account xpub or zpub and normalize it to
-// xpub version bytes (the key material is identical; only the prefix differs),
-// so HDKey can load it. Throws on anything else (private keys, wrong type).
-const _b58c = base58check(sha256);
-const _XPUB_VER = Uint8Array.from([0x04, 0x88, 0xb2, 0x1e]);
-const _ZPUB_VER = Uint8Array.from([0x04, 0xb2, 0x47, 0x46]);
-const _XPRV_VER = Uint8Array.from([0x04, 0x88, 0xad, 0xe4]);
-const _ZPRV_VER = Uint8Array.from([0x04, 0xb2, 0x43, 0x0c]);
+// --- descriptor import ----------------------------------------------------
+// Parse a Bitcoin output descriptor and extract the embedded extended key.
+// Handles:
+//   wpkh(<key>/0/*)           — BIP84 native segwit
+//   tr(<key>/0/*)             — BIP86 taproot
+//   sh(wpkh(<key>/0/*))       — BIP49 wrapped segwit
+//   pkh(<key>/0/*)            — BIP44 legacy
+//   wsh(multi(...)/0/*)       — multisig (first key)
+// Keys may include origin: [fingerprint/84'/0'/0']xpub...
+// Derivation may use <0;1> for receive/change ranges.
+// Trailing checksum (#xxxxxx) is stripped.
+// Returns { kind: 'xpub'|'xprv', key } or throws.
+export function parseDescriptor(text) {
+  let inner = (text || '').trim();
 
-// Classify a pasted extended key. xpub/zpub → public (watch-only); xprv/zprv →
-// private (spending). Version bytes are normalized to the standard xpub/xprv set
-// (key material is identical; only the prefix differs) so HDKey can load it.
-// Returns { kind: 'xpub' | 'xprv', key } or throws.
+  // Strip descriptor checksum: #xxxxxx at end
+  inner = inner.replace(/#[0-9a-z]{4,12}$/i, '');
+
+  // Strip outer function wrappers, keeping innermost key.
+  while (/^(wpkh|tr|pkh|sh|wsh|multi)\s*\(/.test(inner)) {
+    inner = inner.replace(/^(wpkh|tr|pkh|sh|wsh|multi)\s*\(/, '');
+    let depth = 1;
+    for (let i = 0; i < inner.length; i++) {
+      if (inner[i] === '(') depth++;
+      else if (inner[i] === ')') { depth--; if (depth === 0) { inner = inner.slice(0, i); break; } }
+    }
+  }
+
+  // Strip key origin [fingerprint/path]
+  inner = inner.replace(/^\[[^\]]*\]/, '');
+
+  // Strip trailing derivation path: /0/*, /<0;1>/*, /<0;0>, /0/0, /*
+  inner = inner.replace(/\/<\d+;\d+>(\/\*)?$/, '');
+  inner = inner.replace(/\/\d+(\/\*)?(\/\d+)?$/, '');
+  inner = inner.replace(/\/\*$/, '');
+
+  // Now inner should be an extended key (xpub/zpub/xprv/zprv/tpub/vpub/etc.) or hex pubkey.
+  // Try extended key first.
+  try {
+    const pk = parseExtendedKey(inner);
+    return pk;
+  } catch {}
+
+  // Maybe it's a raw hex public key — 66 hex chars (compressed, 33 bytes).
+  if (/^[0-9a-f]{66}$/i.test(inner)) {
+    throw new Error('Descriptor contains a raw public key, not an HD wallet key. Use an xpub or a seed phrase to create a wallet.');
+  }
+
+  throw new Error('Could not extract an extended key from the descriptor.');
+}
+
+// Detect the target network from a key prefix in a descriptor or raw key.
+// Returns a network name or null if ambiguous.
+export function detectNetworkFromKey(text) {
+  const s = (text || '').trim();
+  // Testnet prefixes: tpub/tprv, upub/uprv, vpub/vprv
+  // Check raw key prefix or key embedded inside a descriptor.
+  if (/^[tuv](pub|prv)/i.test(s) || /[[( ][tuv](pub|prv)/i.test(s)) {
+    return 'testnet';
+  }
+  return null;
+}
+
+// --- BIP-329 label export/import ------------------------------------------
+// BIP-329: Wallet Labels Export/Import format.
+// https://github.com/bitcoin/bips/blob/master/bip-0329.mediawiki
+const LABELS_KEY_SUFFIX = ':labels';
+
+export function exportLabelsBIP329(txLabels) {
+  const labels = [];
+  for (const [txid, label] of Object.entries(txLabels || {})) {
+    if (label) labels.push({ type: 'tx', ref: txid, label });
+  }
+  return {
+    app: 'halwallet',
+    version: 1,
+    labels,
+  };
+}
+
+export function importLabelsBIP329(data) {
+  if (!data || data.app !== 'halwallet' || !Array.isArray(data.labels)) {
+    throw new Error('Not a valid BIP-329 labels file.');
+  }
+  const txLabels = {};
+  for (const entry of data.labels) {
+    if (entry.type === 'tx' && entry.ref && entry.label) {
+      txLabels[entry.ref] = entry.label;
+    }
+  }
+  return txLabels;
+}
+
+// Watch-only: accept account-level extended keys (xpub/zpub/tpub/vpub/upub,
+// or xprv/zprv/tprv/vprv/uprv for private) and normalize to xpub/xprv version
+// bytes so HDKey can load them. The key material is identical; only the prefix
+// differs. Throws on anything else.
+const _b58c = base58check(sha256);
+const _XPUB_VER = Uint8Array.from([0x04, 0x88, 0xb2, 0x1e]); // xpub mainnet
+const _ZPUB_VER = Uint8Array.from([0x04, 0xb2, 0x47, 0x46]); // zpub mainnet native segwit
+const _TPUB_VER = Uint8Array.from([0x04, 0x35, 0x87, 0xcf]); // tpub testnet
+const _VPUB_VER = Uint8Array.from([0x04, 0x5f, 0x1c, 0xf6]); // vpub testnet native segwit
+const _UPUB_VER = Uint8Array.from([0x04, 0x4a, 0x52, 0x62]); // upub testnet wrapped segwit
+const _YPUB_VER = Uint8Array.from([0x04, 0x9d, 0x7c, 0xb2]); // ypub mainnet wrapped segwit
+const _XPRV_VER = Uint8Array.from([0x04, 0x88, 0xad, 0xe4]); // xprv mainnet
+const _ZPRV_VER = Uint8Array.from([0x04, 0xb2, 0x43, 0x0c]); // zprv mainnet native segwit
+const _TPRV_VER = Uint8Array.from([0x04, 0x35, 0x83, 0x94]); // tprv testnet
+const _VPRV_VER = Uint8Array.from([0x04, 0x5f, 0x18, 0xbc]); // vprv testnet native segwit
+const _UPRV_VER = Uint8Array.from([0x04, 0x44, 0xa6, 0xf2]); // uprv testnet wrapped segwit
+const _YPRV_VER = Uint8Array.from([0x04, 0x49, 0x5e, 0xd3]); // yprv mainnet wrapped segwit
+
+const _PUB_VER_BYTES = new Map([
+  [hex.encode(_XPUB_VER), { kind: 'xpub', norm: _XPUB_VER }],
+  [hex.encode(_ZPUB_VER), { kind: 'xpub', norm: _XPUB_VER }],
+  [hex.encode(_TPUB_VER), { kind: 'xpub', norm: _XPUB_VER }],
+  [hex.encode(_VPUB_VER), { kind: 'xpub', norm: _XPUB_VER }],
+  [hex.encode(_UPUB_VER), { kind: 'xpub', norm: _XPUB_VER }],
+  [hex.encode(_YPUB_VER), { kind: 'xpub', norm: _XPUB_VER }],
+]);
+const _PRV_VER_BYTES = new Map([
+  [hex.encode(_XPRV_VER), { kind: 'xprv', norm: _XPRV_VER }],
+  [hex.encode(_ZPRV_VER), { kind: 'xprv', norm: _XPRV_VER }],
+  [hex.encode(_TPRV_VER), { kind: 'xprv', norm: _XPRV_VER }],
+  [hex.encode(_VPRV_VER), { kind: 'xprv', norm: _XPRV_VER }],
+  [hex.encode(_UPRV_VER), { kind: 'xprv', norm: _XPRV_VER }],
+  [hex.encode(_YPRV_VER), { kind: 'xprv', norm: _XPRV_VER }],
+]);
+
+// Classify a pasted extended key. Returns { kind: 'xpub' | 'xprv', key } or throws.
 export function parseExtendedKey(s) {
   let data;
   try {
@@ -1745,19 +2036,23 @@ export function parseExtendedKey(s) {
   }
   if (data.length !== 78) throw new Error('Not a valid recovery phrase or key.');
   const ver = hex.encode(data.slice(0, 4));
-  let kind, norm;
-  if (ver === hex.encode(_XPUB_VER) || ver === hex.encode(_ZPUB_VER)) { kind = 'xpub'; norm = _XPUB_VER; }
-  else if (ver === hex.encode(_XPRV_VER) || ver === hex.encode(_ZPRV_VER)) { kind = 'xprv'; norm = _XPRV_VER; }
-  else throw new Error('Unrecognized key type — use a native-segwit xpub/zpub or xprv/zprv.');
-  const out = new Uint8Array(data);
-  out.set(norm, 0);
-  const key = _b58c.encode(out);
-  try {
-    HDKey.fromExtendedKey(key);
-  } catch {
-    throw new Error('Not a valid extended key.');
+  const pubEntry = _PUB_VER_BYTES.get(ver);
+  if (pubEntry) {
+    const out = new Uint8Array(data);
+    out.set(pubEntry.norm, 0);
+    const key = _b58c.encode(out);
+    try { HDKey.fromExtendedKey(key); } catch { throw new Error('Not a valid extended key.'); }
+    return { kind: 'xpub', key };
   }
-  return { kind, key };
+  const prvEntry = _PRV_VER_BYTES.get(ver);
+  if (prvEntry) {
+    const out = new Uint8Array(data);
+    out.set(prvEntry.norm, 0);
+    const key = _b58c.encode(out);
+    try { HDKey.fromExtendedKey(key); } catch { throw new Error('Not a valid extended key.'); }
+    return { kind: 'xprv', key };
+  }
+  throw new Error('Unrecognized key type — use an xpub/zpub/tpub/vpub/upub or xprv/zprv.');
 }
 
 // Encrypted vault for persisting seed-bearing accounts on this device. Key is
@@ -1780,6 +2075,8 @@ export function decryptVault(blob, password) {
 }
 
 // Convert a standard account xpub to a BIP84 zpub for export/interop.
+export { NETS };
+
 export function xpubToZpub(xpub) {
   const data = new Uint8Array(_b58c.decode(xpub));
   data.set(_ZPUB_VER, 0);
