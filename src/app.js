@@ -241,8 +241,9 @@ function render() {
   // Fast-poll the receive address only while the user is actually watching for a
   // payment (wallet screen, Receive tab, online). Idempotent — safe each render.
   wallet.setWatchReceive(ui.screen === 'wallet' && ui.tab === 'receive' && !wallet.offline);
-  // Remember where we are so a refresh restores it (only meaningful on the wallet).
   if (ui.screen === 'wallet') {
+    commitAccount(); // entering the wallet (any path) keeps a provisional gift account
+    // Remember where we are so a refresh restores it (only meaningful on the wallet).
     try { sessionStorage.setItem(NAV_KEY, JSON.stringify({ tab: ui.tab, txDetail: ui.txDetail })); } catch {}
   }
 }
@@ -600,6 +601,10 @@ async function enterWallet(mnemonic, passphrase, opts = {}) {
 // kept in sessionStorage (ephemeral); a refresh restores the open account.
 async function activateAccount(acc, opts = {}) {
   activeId = acc.id;
+  // A gift link generates this wallet only to claim into. Keep it provisional
+  // until the user commits (claims, or chooses to keep it / enters the wallet),
+  // so bailing from an already-claimed gift doesn't leave an empty account.
+  if (opts.gift) acc.provisional = true;
   if (acc.type === 'watch') wallet.load({ xpub: acc.xpub, netName: 'mainnet', offline: false });
   else if (acc.xprv) wallet.load({ xprv: acc.xprv, netName: 'mainnet', offline: false });
   else wallet.load({ mnemonic: acc.mnemonic, passphrase: acc.passphrase || '', netName: 'mainnet', offline: false });
@@ -729,6 +734,13 @@ function addOrGetAccount(partial) {
     persistAccounts();
   }
   return acc;
+}
+
+// Commit the active account — clear the "provisional" gift flag so it's no
+// longer discarded on bail. Called once the user claims, keeps, or enters it.
+function commitAccount() {
+  const a = accounts.find((x) => x.id === activeId);
+  if (a && a.provisional) { delete a.provisional; persistAccounts(); }
 }
 
 function removeAccount(id) {
@@ -1386,6 +1398,13 @@ function applyDir() {
 }
 
 function goHome() {
+  // Bailing from an unclaimed gift — discard the provisional wallet it generated.
+  const active = accounts.find((a) => a.id === activeId);
+  if (active && active.provisional) {
+    accounts = accounts.filter((a) => a.id !== active.id);
+    persistAccounts();
+    activeId = accounts[0] ? accounts[0].id : null;
+  }
   if (ui.screen === 'howItWorks') {
     ui.screen = ui.returnScreen === 'wallet' ? 'wallet' : 'unlock';
   }
@@ -1458,6 +1477,7 @@ async function doClaim() {
     await wallet.broadcast(claim.hex);
     ui.claimedAmount = claim.amount;
     ui.claimStep = 'backup';
+    commitAccount(); // claimed — this wallet now holds funds, keep it
     wallet.scan().catch(() => {});
   } catch (e) {
     // Broadcast failed — most likely someone claimed it in the race window.
@@ -1571,7 +1591,7 @@ function claimScreen() {
       ),
       // A fresh wallet was already generated for the claim — offer to keep it,
       // or head back to the home screen.
-      h('button', { class: 'btn-primary btn-block', onClick: () => { ui.claimTaken = null; ui.claimedAmount = 0; ui.claimStep = 'backup'; render(); } }, t('createWalletAnyway')),
+      h('button', { class: 'btn-primary btn-block', onClick: () => { ui.claimTaken = null; ui.claimedAmount = 0; ui.claimStep = 'backup'; commitAccount(); render(); } }, t('createWalletAnyway')),
       h('button', { class: 'btn-ghost btn-block', onClick: goHome }, t('goToHome'))
     );
   }
