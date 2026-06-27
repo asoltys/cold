@@ -1587,7 +1587,10 @@ export class Wallet {
   // not responses). Newline-terminated per the protocol.
   _rpcSend(method, params) {
     if (!this._ws || this._ws.readyState !== 1) return;
-    const id = ++this._rpcId;
+    // Coerce to a number defensively: a non-numeric _rpcId serializes id as
+    // null, which the response matcher (msg.id != null) drops — silently
+    // breaking every data call (and thus reconciles).
+    const id = (this._rpcId = (this._rpcId || 0) + 1);
     try {
       this._ws.send(JSON.stringify({ id, method, params }) + '\n');
     } catch {}
@@ -1622,7 +1625,7 @@ export class Wallet {
   _rpcSendCall(method, params, attempt = 0) {
     return new Promise((resolve, reject) => {
       if (this.offline) { reject(new Error('offline')); return; }
-      const id = ++this._rpcId;
+      const id = (this._rpcId = (this._rpcId || 0) + 1);
       if (!this._pending) this._pending = new Map();
       const timer = setTimeout(() => {
         if (!this._pending.delete(id)) return;
