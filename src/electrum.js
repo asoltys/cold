@@ -52,7 +52,8 @@ export class ElectrumApi {
   }
 
   explorerTx(txid) {
-    return this._explorerWeb + (this.testnet ? '/testnet/tx/' : '/tx/') + txid;
+    // explorerWeb already carries any network path prefix (e.g. .../testnet).
+    return this._explorerWeb + '/tx/' + txid;
   }
 
   _sh(address) {

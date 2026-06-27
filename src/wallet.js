@@ -21,7 +21,7 @@ import * as btc from '@scure/btc-signer';
 import { p2wpkh } from '@scure/btc-signer/payment';
 import { concatBytes } from '@scure/btc-signer/utils.js';
 
-import { Api, pool, wsUrl, getBackend, explorerWeb, electrumCandidates } from './api.js';
+import { Api, pool, getBackend, explorerWeb, electrumCandidates } from './api.js';
 import { ElectrumApi } from './electrum.js';
 import { NostrSync, getSyncConfig } from './nostr.js';
 import { isSilentPaymentAddress, decodeSilentPaymentAddress, silentPaymentScripts, silentPaymentPlaceholder } from './silentpay.js';
@@ -41,6 +41,9 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const NETS = {
   mainnet: { net: btc.NETWORK, coin: 0 },
   testnet: { net: btc.TEST_NETWORK, coin: 1 },
+  // mutinynet is a signet — same address format / version bytes / coin type as
+  // testnet (`tb` HRP); only the chain + servers differ.
+  mutinynet: { net: btc.TEST_NETWORK, coin: 1 },
   // Regtest shares testnet's version bytes / coin type; only the bech32 HRP
   // differs (`bcrt`). @scure/btc-signer derives addresses + validates from this.
   regtest: { net: { ...btc.TEST_NETWORK, bech32: 'bcrt' }, coin: 1 },
@@ -703,6 +706,9 @@ export class Wallet {
   _sortTxs() {
     this.txs.sort((a, b) => {
       if (a.confirmed !== b.confirmed) return a.confirmed ? 1 : -1; // pending first
+      // Pending txs share blockTime 0, so order them by when we first saw them
+      // (newest on top); confirmed txs go by block time (newest on top).
+      if (!a.confirmed) return (b.firstSeen || 0) - (a.firstSeen || 0);
       return (b.blockTime || 0) - (a.blockTime || 0);
     });
   }
@@ -1288,14 +1294,14 @@ export class Wallet {
   // Pushes us new mempool/confirmed transactions for our addresses so history
   // and balances update with no polling.
   wsUrl() {
-    // Electrum backend: pick the current failover candidate (rotated on failure).
-    // Mainnet (when cut over to Fulcrum) and regtest (local Fulcrum) use Electrum.
-    if (getBackend() === 'electrum' && (this.netName === 'mainnet' || this.netName === 'regtest')) {
-      if (!this._wsCandidates || !this._wsCandidates.length) { this._wsCandidates = electrumCandidates(); this._wsCandIdx = 0; }
+    // Electrum backend (any network): pick the current failover candidate for the
+    // active network (rotated on failure). Esplora backend has no push → poll.
+    if (getBackend() === 'electrum') {
+      if (!this._wsCandidates || !this._wsCandidates.length) { this._wsCandidates = electrumCandidates(this.netName); this._wsCandIdx = 0; }
       const list = this._wsCandidates;
       return list.length ? list[(this._wsCandIdx || 0) % list.length] : null;
     }
-    return wsUrl(this.netName); // coinos watcher, or null
+    return null;
   }
 
   // What realtime watches: the fresh frontier (next receive + next change), plus
@@ -1498,16 +1504,18 @@ export class Wallet {
     if (typeof WebSocket === 'undefined' || !this.wsUrl()) return;
     this._wsWant = true;
 
-    // Heartbeat: ping every 15s; if no message (incl. pong) for 45s the socket
-    // is half-open (died without firing onclose) — force a reconnect.
+    // Heartbeat: ping every 10s; if nothing comes back (incl. our own pong) for
+    // 21s the socket is half-open (died without firing onclose) — recycle it.
+    // The trigger is two unanswered pings, so one slow round-trip won't churn,
+    // but a silently-dead socket now recovers in ~20s instead of ~45s.
     this._hbTimer = setInterval(() => {
       if (this.offline || !this._ws || this._ws.readyState !== 1) return;
-      if (Date.now() - this._lastMsg > 45000) {
+      if (Date.now() - this._lastMsg > 21000) {
         this._reconnectNow();
       } else {
         this._rpcSend('server.ping', []);
       }
-    }, 15000);
+    }, 10000);
 
     // Reconnect + refresh when the tab refocuses or the network returns.
     if (!this._wakeHooked && typeof document !== 'undefined') {
@@ -1535,6 +1543,8 @@ export class Wallet {
       } catch {}
       this._ws = null;
     }
+    // onclose was nulled above so it won't fire — fail in-flight calls here too.
+    this._rejectPending('socket recycled');
     this.live = false;
     this._connectWs();
   }
@@ -1598,6 +1608,10 @@ export class Wallet {
     ws.onclose = () => {
       this.live = false;
       this._ws = null;
+      // Fail any in-flight data calls so the _rpcCall pump frees its slots
+      // immediately; otherwise dead calls hold the pump until they time out and
+      // the post-reconnect refresh stalls behind them (~10s of stale UI).
+      this._rejectPending('socket closed');
       this.emit();
       this._scheduleReconnect();
     };
@@ -1810,6 +1824,7 @@ export class Wallet {
     this.change = d.change || [];
     this.utxos = d.utxos || [];
     this.txs = d.txs || [];
+    this._sortTxs(); // a cache saved before the firstSeen-ordering fix may be stale
     this.nextReceiveIndex = d.nextReceiveIndex || 0;
     this.nextChangeIndex = d.nextChangeIndex || 0;
     this.feeRates = d.feeRates || this.feeRates;

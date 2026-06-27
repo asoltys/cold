@@ -8,7 +8,7 @@ import { Wallet, newMnemonic, isValidMnemonic, accountXpubFor, cacheKeyFor, utxo
 import { qrSvg } from './qr.js';
 import { scanQr } from './scan.js';
 import { getSyncConfig, setSyncConfig } from './nostr.js';
-import { getExplorerConfig, setExplorerConfig, EXPLORER_PRESETS, getDataMode, setDataMode, ELECTRUM_PRESETS, getElectrumServerConfig, setElectrumServerConfig, getNetwork, setNetwork, getRegtestEsplora, setRegtestEsplora, getRegtestElectrumWs, setRegtestElectrumWs, getBoltzApi, BOLTZ_PRESETS, getBoltzProviderId, setBoltzProviderId, getBoltzCustom, setBoltzCustom } from './api.js';
+import { getExplorerConfig, setExplorerConfig, explorerPresets, getDataMode, setDataMode, electrumPresets, getElectrumServerConfig, setElectrumServerConfig, getNetwork, setNetwork, NETWORKS, getBoltzApi, BOLTZ_PRESETS, getBoltzProviderId, setBoltzProviderId, getBoltzCustom, setBoltzCustom } from './api.js';
 import { SwapManager } from './swap.js';
 import { isSilentPaymentAddress } from './silentpay.js';
 import { t, LANGS, getLang, setLang, isRTL, loadLocale } from './i18n.js';
@@ -237,6 +237,8 @@ function render() {
       ? walletScreen()
       : ui.screen === 'accounts'
         ? accountsScreen()
+        : ui.screen === 'accountSettings'
+          ? accountSettingsScreen()
         : ui.screen === 'vault'
           ? vaultScreen()
           : ui.screen === 'claim'
@@ -895,13 +897,15 @@ function startSave(id) {
 }
 // --- load a seed into a watch-only account (make it spendable) --------------
 function startLoadSeed(opts = {}) {
-  ui.loadSeed = { value: '', passphrase: '', save: !!opts.save, error: '' };
+  // accId lets the per-wallet settings page import a seed for a specific
+  // (possibly non-active) watch-only wallet; defaults to the active one.
+  ui.loadSeed = { value: '', passphrase: '', save: !!opts.save, error: '', accId: opts.accId || activeId };
   render();
 }
 function cancelLoadSeed() { ui.loadSeed = null; render(); }
 async function doLoadSeed() {
   const ls = ui.loadSeed;
-  const acc = activeAccount();
+  const acc = (ls && accounts.find((a) => a.id === ls.accId)) || activeAccount();
   if (!ls || !acc || !acc.xpub) return;
   const raw = (ls.value || '').trim().replace(/\s+/g, ' ');
   if (!raw) { ls.error = t('enterSeedToSpend'); render(); return; }
@@ -1263,18 +1267,19 @@ function addressScanView() {
 
 function settingsTab() {
   if (ui.addrScan && !wallet.offline) return addressScanView();
-  const shown = ui.revealShown;
-  const words = wallet.mnemonic.split(' ');
-  const cells = words.map((w, i) =>
-    h('div', { class: 'w' + (shown ? '' : ' masked') },
-      h('span', { class: 'n' }, i + 1),
-      h('span', { class: 't' }, shown ? w : '••••••')
-    )
-  );
-
   return h(
     'div',
     { class: 'col', style: 'gap:16px' },
+    // Quick link to the active wallet's own settings (name, seed, pubkey, auto-logout).
+    activeAccount()
+      ? h('div', { class: 'card col' },
+          h('h3', {}, activeAccount().label),
+          h('p', { class: 'small muted', style: 'margin:0' }, t('walletSettingsDesc')),
+          h('button', { class: 'btn-primary btn-block', onClick: () => openAccountSettings(activeId) }, '⚙ ' + t('walletSettings'))
+        )
+      : null,
+    // Recovery phrase + public key live on each wallet's own settings page now
+    // (Accounts → ⚙). Watch-only wallets can still add their seed here.
     wallet.watchOnly
       ? (ui.loadSeed
           ? loadSeedCard()
@@ -1285,32 +1290,7 @@ function settingsTab() {
                 ? h('button', { class: 'btn-primary btn-block', style: 'margin-top:4px', onClick: () => startLoadSeed() }, t('loadSeedBtn'))
                 : null
             ))
-      : !wallet.mnemonic
-      ? h('div', { class: 'card col' },
-          h('h3', {}, t('importedKey')),
-          h('p', { class: 'small muted', style: 'margin:0' }, t('importedKeyNote'))
-        )
-      : h(
-          'div',
-          { class: 'card col' },
-          h('h3', {}, t('recoveryPhrase')),
-          h('div', { class: 'warn-box' }, t('recoveryWarn')),
-          h('div', { class: 'words' }, cells),
-          shown && wallet.passphrase
-            ? h('div', { class: 'col gap6' },
-                h('span', { class: 'lab' }, t('bip39Passphrase')),
-                h('div', { class: 'addr-box' }, wallet.passphrase)
-              )
-            : null,
-          shown
-            ? h('div', { class: 'row gap6 wrap' },
-                copyBtn(wallet.mnemonic, t('copyPhrase')),
-                wallet.passphrase ? copyBtn(wallet.passphrase, t('copyPassphrase')) : null,
-                h('button', { class: 'btn-sm grow', onClick: () => { ui.revealShown = false; render(); } }, t('hide'))
-              )
-            : h('button', { class: 'btn-primary btn-block', onClick: () => { ui.revealShown = true; render(); } }, t('revealRecovery'))
-        ),
-    pubkeyCard(),
+      : null,
     wallet.watchOnly
       ? null
       : h(
@@ -1328,7 +1308,6 @@ function settingsTab() {
         ? null
         : h('button', { onClick: () => { ui.addrScan = true; ui.addrScanPage = 0; render(); } }, t('rescanAddresses'))
     ),
-    autoLockCard(),
     networkCard(),
     boltzProviderCard(),
     explorerCard(),
@@ -1336,27 +1315,6 @@ function settingsTab() {
   );
 }
 
-// Public key export: the account zpub, for watching this wallet elsewhere
-// (read-only). Gated behind a reveal since it exposes all your addresses.
-function pubkeyCard() {
-  let zpub = '';
-  try { zpub = xpubToZpub(wallet.accountXpub()); } catch {}
-  return h(
-    'div',
-    { class: 'card col' },
-    h('h3', {}, t('publicKey')),
-    h('p', { class: 'small muted', style: 'margin:0' }, t('publicKeyDesc')),
-    ui.pubkeyShown
-      ? h('div', { class: 'col gap6' },
-          h('div', { class: 'addr-box break', style: 'font-size:12px' }, zpub),
-          h('div', { class: 'row gap6 wrap' },
-            copyBtn(zpub, t('copyKey')),
-            h('button', { class: 'btn-sm grow', onClick: () => { ui.pubkeyShown = false; render(); } }, t('hide'))
-          )
-        )
-      : h('button', { class: 'btn-block', onClick: () => { ui.pubkeyShown = true; render(); } }, t('showPublicKey'))
-  );
-}
 
 // Gift link: presign a chosen amount as a #gift= PSBT that whoever opens claims
 // into a fresh wallet only they control. The coin is reserved until claimed.
@@ -1543,25 +1501,6 @@ async function doRevoke(id) {
   render();
 }
 
-// Block explorer / server selection: a preset (mempool.space, blockstream.info)
-// or a custom Esplora/electrs REST URL (e.g. your own node).
-// Auto log-out after the app has been in the background for the chosen time —
-// drops to watch-only (re-enter the seed to spend). Never counts while focused.
-function autoLockCard() {
-  const acc = activeAccount();
-  if (!acc) return null;
-  const cur = accAutoLock(acc);
-  return h(
-    'div',
-    { class: 'card col' },
-    h('h3', {}, t('autolockTitle')),
-    h('p', { class: 'small muted', style: 'margin:0' }, t('autolockDesc')),
-    h('select', { onChange: (e) => { acc.autoLock = Number(e.target.value) || 0; persistAccounts(); render(); } },
-      AUTOLOCK_OPTIONS.map((o) => h('option', { value: String(o.ms), selected: o.ms === cur }, t(o.label)))
-    )
-  );
-}
-
 // Switch the active Bitcoin network. Changes addresses/balances entirely, so we
 // persist the choice and reload the active account (or empty wallet) under it.
 function changeNetwork(net) {
@@ -1605,56 +1544,31 @@ function boltzProviderCard() {
   );
 }
 
-// Network selector (mainnet / testnet / regtest). Regtest also exposes the
-// Esplora base URL (default coinos chopsticks at http://localhost:3000).
+// Network selector. Per-network endpoints (Electrum server / block explorer) are
+// configured in the Data source card below — no duplicate URL fields here.
 function networkCard() {
   const net = getNetwork();
   return h(
     'div',
     { class: 'card col' },
     h('h3', {}, 'Network'),
-    h('p', { class: 'small muted', style: 'margin:0' }, 'Bitcoin network this wallet operates on.'),
+    h('p', { class: 'small muted', style: 'margin:0' }, 'Bitcoin network this wallet operates on. Pick its servers under Data source.'),
     h('select', { onChange: (e) => changeNetwork(e.target.value) },
-      h('option', { value: 'mainnet', selected: net === 'mainnet' }, 'Mainnet'),
-      h('option', { value: 'testnet', selected: net === 'testnet' }, 'Testnet'),
-      h('option', { value: 'regtest', selected: net === 'regtest' }, 'Regtest')
-    ),
-    net === 'regtest'
-      ? h('div', { class: 'col', style: 'gap:10px' },
-          h('label', { class: 'field' },
-            h('span', { class: 'lab' }, 'Regtest Esplora URL'),
-            h('input', {
-              type: 'text', class: 'mono-input', placeholder: 'http://localhost:3000',
-              autocapitalize: 'none', autocomplete: 'off', spellcheck: 'false', value: getRegtestEsplora(),
-              onChange: (e) => { setRegtestEsplora(e.target.value.trim()); wallet.reloadExplorer(); },
-            }),
-            h('div', { class: 'small faint' }, 'Esplora-compatible REST endpoint (coinos chopsticks/electrs).')),
-          h('label', { class: 'field' },
-            h('span', { class: 'lab' }, 'Regtest realtime (Electrum WS)'),
-            h('input', {
-              type: 'text', class: 'mono-input', placeholder: 'ws://localhost:50003',
-              autocapitalize: 'none', autocomplete: 'off', spellcheck: 'false', value: getRegtestElectrumWs(),
-              onChange: (e) => { setRegtestElectrumWs(e.target.value.trim()); wallet.reloadExplorer(); },
-            }),
-            h('div', { class: 'small faint' }, 'Electrum-over-WebSocket bridge (ews) for instant updates; falls back to polling if unreachable.')))
-      : null
+      NETWORKS.map((n) => h('option', { value: n.id, selected: net === n.id }, n.label)))
   );
 }
 
 function explorerCard() {
+  const net = getNetwork();
   const mode = getDataMode();
   const cfg = getExplorerConfig();
   const ecfg = getElectrumServerConfig();
   const setMode = (m) => {
-    const prev = getDataMode();
-    if (m === prev) return;
+    if (m === getDataMode()) return;
     setDataMode(m);
     render();
-    if (wallet.offline) return;
-    // coinos⇄explorer only flips the watcher (same REST data); to/from electrum
-    // swaps the whole backend, so rebuild + rescan there.
-    if ((m === 'electrum') !== (prev === 'electrum')) wallet.reloadExplorer();
-    else wallet.startRealtime();
+    // electrum⇄explorer swaps the whole backend, so rebuild + rescan.
+    if (!wallet.offline) wallet.reloadExplorer();
   };
   return h(
     'div',
@@ -1662,19 +1576,15 @@ function explorerCard() {
     h('h3', {}, t('dataSource')),
     h('p', { class: 'small muted', style: 'margin:0' }, t('dataSourceDesc')),
     h('select', { onChange: (e) => setMode(e.target.value) },
-      h('option', { value: 'coinos', selected: mode === 'coinos' }, t('modeCoinos')),
-      h('option', { value: 'explorer', selected: mode === 'explorer' }, t('modeExplorer')),
-      h('option', { value: 'electrum', selected: mode === 'electrum' }, t('modeElectrum'))
+      h('option', { value: 'electrum', selected: mode === 'electrum' }, t('modeElectrum')),
+      h('option', { value: 'explorer', selected: mode === 'explorer' }, t('modeExplorer'))
     ),
-    mode === 'coinos'
-      ? h('div', { class: 'small faint' }, t('modeCoinosDesc'))
-      : null,
     mode === 'electrum'
       ? h('div', { class: 'col', style: 'gap:8px' },
           h('div', { class: 'small faint' }, t('backendElectrumDesc')),
           h('select', {
             onChange: (e) => { setElectrumServerConfig({ server: e.target.value, url: ecfg.url }); render(); if (e.target.value !== 'custom' || ecfg.url) wallet.reloadExplorer(); },
-          }, ELECTRUM_PRESETS.map((o) => h('option', { value: o.id, selected: o.id === ecfg.server }, o.label))),
+          }, electrumPresets(net).map((o) => h('option', { value: o.id, selected: o.id === ecfg.server }, o.label))),
           ecfg.server === 'custom'
             ? h('label', { class: 'field' },
                 h('span', { class: 'lab' }, t('electrumUrl')),
@@ -1693,7 +1603,7 @@ function explorerCard() {
           h('div', { class: 'small faint' }, t('modeExplorerDesc')),
           h('select', {
             onChange: (e) => { setExplorerConfig({ server: e.target.value, url: cfg.url }); render(); if (e.target.value !== 'custom' || cfg.url) wallet.reloadExplorer(); },
-          }, EXPLORER_PRESETS.map((o) => h('option', { value: o.id, selected: o.id === cfg.server }, o.label))),
+          }, explorerPresets(net).map((o) => h('option', { value: o.id, selected: o.id === cfg.server }, o.label))),
           cfg.server === 'custom'
             ? h('label', { class: 'field' },
                 h('span', { class: 'lab' }, t('explorerUrl')),
@@ -2062,7 +1972,7 @@ function accountsScreen() {
                 class: 'linklike', style: 'text-align:left;flex:1;font-size:15px;' + (isActive ? 'font-weight:600' : ''),
                 onClick: () => { if (isActive) { ui.screen = 'wallet'; render(); } else switchAccount(a.id); },
               }, (isActive ? '● ' : '○ ') + a.label + tag),
-              h('button', { class: 'btn-sm', title: t('rename'), onClick: () => { ui.editId = a.id; ui.editLabel = a.label; render(); } }, '✎'),
+              h('button', { class: 'btn-sm', title: t('walletSettings'), onClick: () => openAccountSettings(a.id) }, '⚙'),
               h('button', { class: 'btn-sm', title: t('remove'), onClick: () => { ui.confirmRemove = a.id; render(); } }, '✕')
             ),
             a.type === 'full'
@@ -2090,6 +2000,98 @@ function renameAccount(id) {
   }
   ui.editId = null;
   render();
+}
+
+// Open the per-wallet settings page for an account.
+function openAccountSettings(id) {
+  ui.settingsId = id;
+  ui.editLabel = null;
+  ui.revealShown = false;
+  ui.pubkeyShown = false;
+  ui.loadSeed = null;
+  ui.screen = 'accountSettings';
+  render();
+}
+
+// Per-wallet settings: name, auto-logout, recovery phrase, and public key — for
+// any account (not just the active one; full accounts keep their seed in memory).
+function accountSettingsScreen() {
+  const a = accounts.find((x) => x.id === ui.settingsId) || activeAccount();
+  if (!a) { ui.screen = 'accounts'; return accountsScreen(); }
+  const isWatch = a.type === 'watch' || (!a.mnemonic && !a.xprv);
+  const shown = ui.revealShown;
+  const words = a.mnemonic ? a.mnemonic.split(' ') : [];
+  let zpub = '';
+  try { if (a.xpub) zpub = xpubToZpub(a.xpub); } catch {}
+  const saveName = () => {
+    const v = (ui.editLabel || '').trim();
+    if (v && v !== a.label) { a.label = v; persistAccounts(); if (a.persisted) writeVault(); }
+    ui.editLabel = null;
+    render();
+  };
+  return h(
+    'div',
+    { class: 'col', style: 'gap:16px' },
+    brandHeader(false),
+    // Recovery phrase (top)
+    isWatch
+      ? (ui.loadSeed && ui.loadSeed.accId === a.id
+          ? loadSeedCard()
+          : h('div', { class: 'card col' },
+              h('h3', {}, t('recoveryPhrase')),
+              h('p', { class: 'small muted', style: 'margin:0' }, t('watchOnlyNote')),
+              a.xpub
+                ? h('button', { class: 'btn-primary btn-block', style: 'margin-top:4px', onClick: () => startLoadSeed({ accId: a.id }) }, t('loadSeedBtn'))
+                : null
+            ))
+      : !a.mnemonic
+        ? h('div', { class: 'card col' }, h('h3', {}, t('importedKey')), h('p', { class: 'small muted', style: 'margin:0' }, t('importedKeyNote')))
+        : h('div', { class: 'card col' },
+            h('h3', {}, t('recoveryPhrase')),
+            h('div', { class: 'warn-box' }, t('recoveryWarn')),
+            h('div', { class: 'words' }, words.map((w, i) =>
+              h('div', { class: 'w' + (shown ? '' : ' masked') }, h('span', { class: 'n' }, i + 1), h('span', { class: 't' }, shown ? w : '••••••')))),
+            shown && a.passphrase
+              ? h('div', { class: 'col gap6' }, h('span', { class: 'lab' }, t('bip39Passphrase')), h('div', { class: 'addr-box' }, a.passphrase))
+              : null,
+            shown
+              ? h('div', { class: 'row gap6 wrap' },
+                  copyBtn(a.mnemonic, t('copyPhrase')),
+                  a.passphrase ? copyBtn(a.passphrase, t('copyPassphrase')) : null,
+                  h('button', { class: 'btn-sm grow', onClick: () => { ui.revealShown = false; render(); } }, t('hide')))
+              : h('button', { class: 'btn-primary btn-block', onClick: () => { ui.revealShown = true; render(); } }, t('revealRecovery'))
+          ),
+    // Name
+    h('div', { class: 'card col' },
+      h('h3', {}, t('walletName')),
+      h('div', { class: 'row gap6' },
+        h('input', { type: 'text', style: 'flex:1', value: ui.editLabel != null ? ui.editLabel : a.label,
+          onInput: (e) => { ui.editLabel = e.target.value; },
+          onKeyDown: (e) => { if (e.key === 'Enter') saveName(); } }),
+        h('button', { class: 'btn-sm', onClick: saveName }, t('save'))
+      )
+    ),
+    // Public key (zpub)
+    h('div', { class: 'card col' },
+      h('h3', {}, t('publicKey')),
+      h('p', { class: 'small muted', style: 'margin:0' }, t('publicKeyDesc')),
+      ui.pubkeyShown
+        ? h('div', { class: 'col gap6' },
+            h('div', { class: 'addr-box break', style: 'font-size:12px' }, zpub),
+            h('div', { class: 'row gap6 wrap' },
+              copyBtn(zpub, t('copyKey')),
+              h('button', { class: 'btn-sm grow', onClick: () => { ui.pubkeyShown = false; render(); } }, t('hide'))))
+        : h('button', { class: 'btn-block', onClick: () => { ui.pubkeyShown = true; render(); } }, t('showPublicKey'))
+    ),
+    // Auto-logout (bottom)
+    h('div', { class: 'card col' },
+      h('h3', {}, t('autolockTitle')),
+      h('p', { class: 'small muted', style: 'margin:0' }, t('autolockDesc')),
+      h('select', { onChange: (e) => { a.autoLock = Number(e.target.value) || 0; persistAccounts(); if (a.persisted) writeVault(); render(); } },
+        AUTOLOCK_OPTIONS.map((o) => h('option', { value: String(o.ms), selected: o.ms === accAutoLock(a) }, t(o.label))))
+    ),
+    h('button', { class: 'btn-ghost btn-block', onClick: () => { ui.editLabel = null; ui.revealShown = false; ui.pubkeyShown = false; ui.loadSeed = null; ui.screen = 'accounts'; render(); } }, t('back'))
+  );
 }
 
 // Wipe every wallet from this device: session accounts, the encrypted vault,
