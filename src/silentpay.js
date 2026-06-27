@@ -1,4 +1,4 @@
-// Silent Payments (BIP-352) — sending side only.
+// Silent Payments (BIP-352) — sending and receiving.
 //
 // A silent payment address (sp1…) is a static, reusable address the receiver
 // publishes once. The sender derives a unique one-time taproot output for each
@@ -6,14 +6,12 @@
 // so there's no on-chain link between payments and no address reuse — without
 // any interaction with the receiver.
 //
-// This module only does the SENDER half (deriving the output). Receiving needs
-// chain scanning (a per-tx ECDH tweak), which a light client can't do without a
-// dedicated index server — out of scope here.
+// Sending (silentPaymentScripts) derives the output; we only spend compressed
+// P2WPKH inputs, so each input contributes its private key as-is. Receiving (see
+// the second half) can't scan the chain in a browser, so an indexing server
+// supplies per-tx tweaks + taproot UTXOs and we match them on-device.
 //
-// Validated against the official BIP-352 send test vectors. We only spend
-// compressed P2WPKH inputs, which keeps the eligible-input rules trivial: each
-// input contributes its private key as-is (no taproot even-Y negation, no
-// uncompressed-key or P2SH edge cases).
+// Validated against the official BIP-352 send + receive test vectors.
 
 import { secp256k1 } from '@noble/curves/secp256k1';
 import { sha256 } from '@noble/hashes/sha256';
@@ -154,6 +152,14 @@ function parseWitness(hex) {
   return items;
 }
 
+// Witness stack items as byte arrays. Accepts either a serialized witness (hex
+// string, as in the BIP-352 vectors) or an array of hex stack items (as Core's
+// getblock RPC returns in txinwitness).
+function witnessItems(witness) {
+  if (Array.isArray(witness)) return witness.map(hexToBytes);
+  return parseWitness(witness);
+}
+
 // Pull the data pushes out of a scriptSig (hex) — enough to recover the pubkey
 // from P2PKH or the redeemScript from P2SH (push opcodes only).
 function scriptPushes(hex) {
@@ -186,14 +192,14 @@ export function inputPubKey({ scriptSig = '', witness = '', scriptPubKey = '' })
     const spk = hexToBytes(scriptPubKey);
     // P2TR: OP_1 PUSH32 <x-only>
     if (spk.length === 34 && spk[0] === 0x51 && spk[1] === 0x20) {
-      let w = parseWitness(witness);
+      let w = witnessItems(witness);
       if (w.length > 1 && w[w.length - 1][0] === 0x50) w = w.slice(0, -1); // strip annex
       if (w.length > 1 && bytesToHex(w[w.length - 1].slice(1, 33)) === NUMS_H) return null; // NUMS script-path
       return Point.fromHex(concatBytes(Uint8Array.of(0x02), spk.slice(2, 34))).toRawBytes(true); // even-Y lift
     }
     // P2WPKH: OP_0 PUSH20
     if (spk.length === 22 && spk[0] === 0x00 && spk[1] === 0x14) {
-      const w = parseWitness(witness);
+      const w = witnessItems(witness);
       const pk = w[w.length - 1];
       return looksLikePubKey(pk) ? Point.fromHex(pk).toRawBytes(true) : null;
     }
@@ -201,7 +207,7 @@ export function inputPubKey({ scriptSig = '', witness = '', scriptPubKey = '' })
     if (spk.length === 23 && spk[0] === 0xa9 && spk[1] === 0x14 && spk[22] === 0x87) {
       const rs = scriptPushes(scriptSig)[0];
       if (!rs || rs.length !== 22 || rs[0] !== 0x00 || rs[1] !== 0x14) return null;
-      const w = parseWitness(witness);
+      const w = witnessItems(witness);
       const pk = w[w.length - 1];
       return looksLikePubKey(pk) ? Point.fromHex(pk).toRawBytes(true) : null;
     }
