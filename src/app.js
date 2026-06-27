@@ -8,7 +8,8 @@ import { Wallet, newMnemonic, isValidMnemonic, accountXpubFor, cacheKeyFor, utxo
 import { qrSvg } from './qr.js';
 import { scanQr } from './scan.js';
 import { getSyncConfig, setSyncConfig } from './nostr.js';
-import { getExplorerConfig, setExplorerConfig, EXPLORER_PRESETS, getDataMode, setDataMode, ELECTRUM_PRESETS, getElectrumServerConfig, setElectrumServerConfig, getNetwork, setNetwork, getRegtestEsplora, setRegtestEsplora } from './api.js';
+import { getExplorerConfig, setExplorerConfig, EXPLORER_PRESETS, getDataMode, setDataMode, ELECTRUM_PRESETS, getElectrumServerConfig, setElectrumServerConfig, getNetwork, setNetwork, getRegtestEsplora, setRegtestEsplora, getBoltzApi, setBoltzApi } from './api.js';
+import { SwapManager } from './swap.js';
 import { isSilentPaymentAddress } from './silentpay.js';
 import { t, LANGS, getLang, setLang, isRTL, loadLocale } from './i18n.js';
 import {
@@ -22,6 +23,11 @@ import {
 } from './format.js';
 
 const wallet = new Wallet();
+// Boltz swap orchestrator (reverse = receive over LN, submarine = spend over LN).
+const swaps = new SwapManager({
+  wallet, network: getNetwork(), getApi: getBoltzApi,
+  feeRate: 2, onUpdate: () => render(),
+});
 
 const ui = {
   screen: 'unlock', // 'unlock' | 'wallet' | 'claim' | 'howItWorks'
@@ -638,6 +644,8 @@ async function activateAccount(acc, opts = {}) {
   // balance/history and re-enter the seed to spend again.
   if (acc.type !== 'watch' && !acc.provisional) acc.xpub = wallet.accountXpub();
   persistAccounts();
+  swaps.network = getNetwork();
+  if (!wallet.watchOnly) { try { swaps.resumeAll(); } catch {} } // re-attach in-flight swap watchers
   const hadCache = wallet.restoreCache(); // show last-known balance/history instantly
   // An opened gift link starts on a claim/back-up screen instead of the wallet.
   ui.screen = opts.gift ? 'claim' : 'wallet';
@@ -1558,6 +1566,7 @@ function autoLockCard() {
 function changeNetwork(net) {
   if (net === getNetwork()) return;
   setNetwork(net);
+  swaps.network = net;
   const acc = accounts.find((a) => a.id === activeId);
   if (acc) activateAccount(acc); else render();
 }
@@ -2134,11 +2143,89 @@ function balanceCard() {
   );
 }
 
+async function doReverse() {
+  const amt = parseInt((ui.swapReverseAmt || '').trim(), 10);
+  if (!amt || amt < 50000) { ui.swapError = 'Enter at least 50,000 sats'; return render(); }
+  ui.swapError = ''; ui.swapBusy = true; render();
+  try { await swaps.startReverse(amt); ui.swapReverseAmt = ''; }
+  catch (e) { ui.swapError = e.message; }
+  ui.swapBusy = false; render();
+}
+
+async function doSubmarine() {
+  const inv = (ui.swapInvoice || '').trim().toLowerCase().replace(/^lightning:/, '');
+  if (!inv.startsWith('ln')) { ui.swapError = 'Paste a bolt11 invoice'; return render(); }
+  ui.swapError = ''; ui.swapBusy = true; render();
+  try { await swaps.startSubmarine(inv); ui.swapInvoice = ''; }
+  catch (e) { ui.swapError = e.message; }
+  ui.swapBusy = false; render();
+}
+
+async function doRefund(id) {
+  ui.swapError = ''; ui.swapBusy = true; render();
+  try { await swaps.refundSubmarine(id); }
+  catch (e) { ui.swapError = e.message; }
+  ui.swapBusy = false; render();
+}
+
+function swapListView() {
+  const list = swaps.list().slice().reverse();
+  if (!list.length) return null;
+  return h('div', { class: 'card col' },
+    h('h3', {}, 'Swaps'),
+    ...list.map((s) => h('div', { class: 'col', style: 'gap:6px;border-top:1px solid #2a2a2a;padding-top:8px' },
+      h('div', { class: 'row', style: 'justify-content:space-between' },
+        h('span', {}, s.kind === 'reverse' ? 'Receive ⚡→⛓' : 'Pay ⛓→⚡'),
+        h('span', { class: 'small muted' }, s.status + (s.boltzStatus ? ` (${s.boltzStatus})` : ''))
+      ),
+      (s.kind === 'reverse' && s.status === 'awaiting-payment')
+        ? h('div', { class: 'col', style: 'gap:6px' },
+            h('div', { class: 'small faint' }, `Pay this ${s.onchainAmount ? '' : ''}invoice from any Lightning wallet:`),
+            h('div', { html: qrSvg(s.invoice.toUpperCase(), { ec: 'L', mode: 'Alphanumeric' }) }),
+            h('div', { class: 'addr-box break', style: 'font-size:11px' }, s.invoice))
+        : null,
+      (s.kind === 'reverse' && s.status === 'claimed')
+        ? h('div', { class: 'small', style: 'color:#36d36b' }, `Received ${s.received} sats on-chain ✓`) : null,
+      (s.kind === 'submarine' && s.status === 'success')
+        ? h('div', { class: 'small', style: 'color:#36d36b' }, 'Invoice paid ✓') : null,
+      (s.kind === 'submarine' && ['funding', 'paying'].includes(s.status))
+        ? h('div', { class: 'small faint' }, 'Funding lockup / waiting for Boltz to pay…') : null,
+      (s.kind === 'submarine' && s.status === 'refundable')
+        ? h('div', { class: 'col', style: 'gap:4px' },
+            h('div', { class: 'small', style: 'color:#e0a13a' }, 'Payment failed — refundable after timeout block ' + s.timeoutBlockHeight),
+            h('button', { disabled: !!ui.swapBusy, onClick: () => doRefund(s.id) }, 'Refund on-chain'))
+        : null,
+      (s.status === 'refunded') ? h('div', { class: 'small', style: 'color:#36d36b' }, 'Refunded ✓') : null,
+      s.lastError ? h('div', { class: 'small', style: 'color:#e06a6a' }, s.lastError) : null
+    ))
+  );
+}
+
+function swapTab() {
+  return h('div', { class: 'col', style: 'gap:12px' },
+    h('div', { class: 'card col' },
+      h('h3', {}, '⚡ Receive over Lightning'),
+      h('p', { class: 'small muted', style: 'margin:0' }, 'Get a Lightning invoice; when paid, the sats are swapped on-chain into this wallet — non-custodial (you hold the preimage and claim on-chain).'),
+      h('label', { class: 'field' },
+        h('span', { class: 'lab' }, 'Amount (sats)'),
+        h('input', { type: 'number', inputmode: 'numeric', placeholder: '100000', value: ui.swapReverseAmt || '', onInput: (e) => { ui.swapReverseAmt = e.target.value; } })),
+      h('button', { disabled: !!ui.swapBusy, onClick: doReverse }, ui.swapBusy ? '…' : 'Create invoice')),
+    wallet.watchOnly ? null : h('div', { class: 'card col' },
+      h('h3', {}, '⚡ Pay a Lightning invoice'),
+      h('p', { class: 'small muted', style: 'margin:0' }, 'Pay a bolt11 from your on-chain balance: funds a swap that Boltz pays over Lightning.'),
+      h('textarea', { rows: 3, class: 'mono-input', placeholder: 'lnbcrt1…', value: ui.swapInvoice || '', onInput: (e) => { ui.swapInvoice = e.target.value; } }),
+      h('button', { disabled: !!ui.swapBusy, onClick: doSubmarine }, ui.swapBusy ? '…' : 'Pay invoice')),
+    ui.swapError ? h('div', { class: 'notice err' }, ui.swapError) : null,
+    swapListView()
+  );
+}
+
 function tabsBar() {
   const tabs = [
     ['receive', t('tabReceive')],
     // Watch-only wallets show Send too — it prompts to load the seed to spend.
     ['send', t('tabSend')],
+    ['swap', '⚡ Swap'],
     ['history', t('tabHistory')],
     ['settings', t('tabSettings')],
   ];
@@ -2164,6 +2251,7 @@ function tabContent() {
   switch (ui.tab) {
     case 'receive': return receiveTab();
     case 'send': return sendTab();
+    case 'swap': return swapTab();
     case 'history': return historyTab();
     case 'settings': return settingsTab();
   }

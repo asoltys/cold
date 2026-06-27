@@ -1088,6 +1088,26 @@ export class Wallet {
   _saveReclaimed() {
     try { localStorage.setItem(this._reclaimedKey(), JSON.stringify([...this.reclaimedSet()])); } catch {}
   }
+
+  // ---- Boltz swap support ----------------------------------------------
+  // Persisted swap records (public metadata only — keys/preimage are re-derived
+  // deterministically from the seed via swapNode, so nothing secret is stored).
+  _swapKey() { return this._cacheKey() + ':swaps'; }
+  loadSwaps() {
+    try { return JSON.parse(localStorage.getItem(this._swapKey()) || '[]'); } catch { return []; }
+  }
+  saveSwaps(list) {
+    try { localStorage.setItem(this._swapKey(), JSON.stringify(list)); } catch {}
+  }
+  nextSwapIndex() {
+    return this.loadSwaps().reduce((m, s) => Math.max(m, (s.swapIndex ?? -1) + 1), 0);
+  }
+  // Deterministic swap keypair on a dedicated chain (2) so swap keys never
+  // collide with receive (0) / change (1). Returns the HDKey node (has
+  // privateKey + publicKey, 33-byte compressed).
+  swapNode(index) {
+    return this.account().deriveChild(2).deriveChild(index);
+  }
   // Passive reclaim: free the coin for spending but keep tracking the live link
   // so it can still be revoked later (until the coin is spent).
   unreserve(id) {

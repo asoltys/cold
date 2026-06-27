@@ -57,6 +57,21 @@ export function setRegtestEsplora(url) {
   try { localStorage.setItem(REGTEST_ESPLORA_KEY, (url || '').trim()); } catch {}
 }
 
+// Boltz swap backend endpoints (regtest defaults; the api-v2 REST + the
+// sidecar swap-status WebSocket). Overridable in Settings for staging/mainnet.
+const BOLTZ_API_KEY = 'btc-wallet-boltz-api';
+const BOLTZ_WS_KEY = 'btc-wallet-boltz-ws';
+export function getBoltzApi() {
+  try { return (localStorage.getItem(BOLTZ_API_KEY) || '').trim() || 'http://localhost:9001'; }
+  catch { return 'http://localhost:9001'; }
+}
+export function getBoltzWs() {
+  try { return (localStorage.getItem(BOLTZ_WS_KEY) || '').trim() || 'ws://localhost:9004/v2/ws'; }
+  catch { return 'ws://localhost:9004/v2/ws'; }
+}
+export function setBoltzApi(url) { try { localStorage.setItem(BOLTZ_API_KEY, (url || '').trim()); } catch {} }
+export function setBoltzWs(url) { try { localStorage.setItem(BOLTZ_WS_KEY, (url || '').trim()); } catch {} }
+
 // Resolve the configured explorer to the host list the Api tries in order.
 function resolveHosts(net) {
   if (net === 'regtest') {
