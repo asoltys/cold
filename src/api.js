@@ -119,6 +119,9 @@ export const COINOS_ELECTRUM = false;
 const COINOS_ELECTRUM_URL = 'wss://coinos.io/electrum';
 
 export function getBackend() {
+  // Regtest runs Fulcrum (Electrum over WS) for both data and realtime push —
+  // matches prod and drops the esplora/electrs dependency.
+  if (getNetwork() === 'regtest') return 'electrum';
   const m = getDataMode();
   if (m === 'electrum') return 'electrum';
   if (m === 'coinos' && COINOS_ELECTRUM) return 'electrum';
@@ -156,6 +159,7 @@ export function setElectrumServerConfig({ server, url }) {
 // addresses to a public server you didn't pick.
 const PUBLIC_ELECTRUM = () => ELECTRUM_PRESETS.filter((x) => x.url).map((x) => x.url);
 export function electrumCandidates() {
+  if (getNetwork() === 'regtest') return [getRegtestElectrumWs()]; // local Fulcrum
   if (getDataMode() === 'coinos' && COINOS_ELECTRUM) return [COINOS_ELECTRUM_URL, ...PUBLIC_ELECTRUM()];
   const cfg = getElectrumServerConfig();
   if (cfg.server === 'custom') return cfg.url.trim() ? [cfg.url.trim()] : [];

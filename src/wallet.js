@@ -1269,8 +1269,8 @@ export class Wallet {
   // and balances update with no polling.
   wsUrl() {
     // Electrum backend: pick the current failover candidate (rotated on failure).
-    // Electrum is mainnet-only here; testnet/regtest use esplora + polling.
-    if (getBackend() === 'electrum' && this.netName === 'mainnet') {
+    // Mainnet (when cut over to Fulcrum) and regtest (local Fulcrum) use Electrum.
+    if (getBackend() === 'electrum' && (this.netName === 'mainnet' || this.netName === 'regtest')) {
       if (!this._wsCandidates || !this._wsCandidates.length) { this._wsCandidates = electrumCandidates(); this._wsCandIdx = 0; }
       const list = this._wsCandidates;
       return list.length ? list[(this._wsCandIdx || 0) % list.length] : null;
