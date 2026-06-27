@@ -369,6 +369,66 @@ export class Wallet {
     this.spUtxos = next;
   }
 
+  // Live silent-payment push: subscribe to the indexer's WebSocket so each new
+  // block's SP items are scanned on arrival instead of polling. Catches up via a
+  // /scan on connect (covers anything missed while disconnected) and reconnects.
+  _spConnect() {
+    if (this.offline) return;
+    const base = spIndexerUrl(this.netName);
+    if (!base || !this.silentPaymentKeys()) return;
+    const url = base.replace(/^http/, 'ws') + '/ws';
+    if (this._spWs && this._spWsUrl === url) return;
+    this._spDisconnect();
+    this._spWsUrl = url;
+    let ws;
+    try { ws = new WebSocket(url); } catch { return; }
+    this._spWs = ws;
+    ws.onopen = () => { this.spLive = true; this.scanSilentPayments({ silent: true }).catch(() => {}); };
+    ws.onmessage = (ev) => {
+      let msg;
+      try { msg = JSON.parse(typeof ev.data === 'string' ? ev.data : new TextDecoder().decode(ev.data)); } catch { return; }
+      if (msg && msg.type === 'block' && Array.isArray(msg.items)) this._scanSpItems(msg.items, msg.height).catch(() => {});
+    };
+    ws.onerror = () => { try { ws.close(); } catch {} };
+    ws.onclose = () => {
+      if (this._spWs !== ws) return;
+      this.spLive = false; this._spWs = null;
+      if (!this.offline) this._spReconnect = setTimeout(() => this._spConnect(), 3000);
+    };
+  }
+
+  _spDisconnect() {
+    clearTimeout(this._spReconnect);
+    this.spLive = false;
+    const ws = this._spWs;
+    this._spWs = null; this._spWsUrl = null;
+    if (ws) { try { ws.onclose = null; ws.close(); } catch {} }
+  }
+
+  // Scan a pushed block's items (no fetch) and fold any of ours into spUtxos. The
+  // block is confirmed (just mined), so matches are recorded confirmed; the
+  // backstop _refreshSpUtxos reconciles later spends.
+  async _scanSpItems(items, height) {
+    const keys = this.silentPaymentKeys();
+    if (!keys) return;
+    const have = new Set(this.spUtxos.map((u) => `${u.txid}:${u.vout}`));
+    let added = false;
+    for (const it of items) {
+      const matches = silentPaymentScan({ scanPriv: keys.scanPriv, spendPub: keys.spendPub, tweak: hex.decode(it.tweak), outputs: it.outputs.map((o) => o.xonly) });
+      for (const m of matches) {
+        const o = it.outputs.find((o) => o.xonly === m.output);
+        if (have.has(`${it.txid}:${o.vout}`)) continue;
+        have.add(`${it.txid}:${o.vout}`);
+        this.spUtxos.push({ txid: it.txid, vout: o.vout, value: o.value, xonly: m.output, tweak: m.tweak, address: this._spAddress(m.output), confirmed: true });
+        added = true;
+      }
+    }
+    if (height && height > this.lastSpScan) this.lastSpScan = height;
+    if (added) this._recomputeBalanceFromChains();
+    this.saveCache();
+    if (added) this.emit();
+  }
+
   node(chain, index) {
     // Relative derivation from the account node (chain/index are non-hardened).
     return this.account().deriveChild(chain).deriveChild(index);
@@ -1635,8 +1695,11 @@ export class Wallet {
       if (Date.now() - (this._lastPoll || 0) < due) return;
       this._lastPoll = Date.now();
       this.refreshLive();
-      this.scanSilentPayments({ silent: true }).catch(() => {}); // pick up new SP receipts (incremental, cheap)
+      // SP receipts arrive via the indexer WebSocket (_spConnect); only poll for
+      // them as a fallback when that socket isn't live.
+      if (!this.spLive) this.scanSilentPayments({ silent: true }).catch(() => {});
     }, 1000);
+    this._spConnect(); // live push of silent-payment receipts
     // No periodic full re-scan: the WS (and the frontier poll above) keep the
     // balance current, and refreshLive's _reconcileHeld catches spends of held
     // coins. The only thing neither covers is a deposit to a reused old address,
@@ -1899,6 +1962,7 @@ export class Wallet {
   stopRealtime() {
     this._wsWant = false;
     this.live = false;
+    this._spDisconnect();
     this._rejectPending('realtime stopped'); // fail any in-flight Electrum data calls
     this._callQueue = [];
     clearTimeout(this._wsRetry);

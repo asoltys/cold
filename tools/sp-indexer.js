@@ -76,13 +76,20 @@ async function indexBlock(height) {
   indexed = height;
 }
 
+let live = false; // true once caught up to the tip — then new blocks are pushed over WS
+
 async function sync() {
   try {
     const tip = await rpc('getblockcount', []);
     for (let h = Math.max(START, indexed + 1); h <= tip; h++) {
       await indexBlock(h);
+      // Push each newly-indexed block (once we're live) to subscribed wallets, so
+      // they scan on arrival instead of polling. The payload carries the items so
+      // there's no follow-up fetch.
+      if (live) server.publish('blocks', JSON.stringify({ type: 'block', height: h, items: blocks.get(h).items }));
       if (h % 100 === 0 || h === tip) console.log(`indexed height ${h}/${tip} (${blocks.get(h).items.length} sp-tx)`);
     }
+    if (!live) { live = true; console.log('caught up — pushing new blocks over websocket'); }
   } catch (e) {
     console.error('sync error:', e.message);
   }
@@ -91,12 +98,17 @@ async function sync() {
 const CORS = { 'access-control-allow-origin': '*', 'access-control-allow-headers': '*' };
 const json = (obj, status = 200) => new Response(JSON.stringify(obj), { status, headers: { 'content-type': 'application/json', ...CORS } });
 
-Bun.serve({
+const server = Bun.serve({
   port: PORT,
   async fetch(req) {
     const url = new URL(req.url);
     const p = url.pathname;
     if (req.method === 'OPTIONS') return new Response(null, { headers: CORS });
+    // WebSocket: subscribers get a {type:'block', height, items} push per new block.
+    if (p === '/ws') {
+      if (server.upgrade(req)) return undefined;
+      return new Response('expected websocket', { status: 400 });
+    }
     if (p === '/height') return json({ height: indexed });
     let m;
     if ((m = p.match(/^\/block\/(\d+)$/))) {
@@ -122,6 +134,11 @@ Bun.serve({
       return json({ tip: indexed, items });
     }
     return json({ error: 'not found' }, 404);
+  },
+  websocket: {
+    open(ws) { ws.subscribe('blocks'); ws.send(JSON.stringify({ type: 'height', height: indexed })); },
+    message() {}, // clients don't send anything
+    close(ws) { ws.unsubscribe('blocks'); },
   },
 });
 
