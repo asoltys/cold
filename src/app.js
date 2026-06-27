@@ -8,7 +8,7 @@ import { Wallet, newMnemonic, isValidMnemonic, accountXpubFor, cacheKeyFor, utxo
 import { qrSvg } from './qr.js';
 import { scanQr } from './scan.js';
 import { getSyncConfig, setSyncConfig } from './nostr.js';
-import { getExplorerConfig, setExplorerConfig, EXPLORER_PRESETS, getDataMode, setDataMode, ELECTRUM_PRESETS, getElectrumServerConfig, setElectrumServerConfig, getNetwork, setNetwork, getRegtestEsplora, setRegtestEsplora, getRegtestElectrumWs, setRegtestElectrumWs } from './api.js';
+import { getExplorerConfig, setExplorerConfig, explorerPresets, getDataMode, setDataMode, electrumPresets, getElectrumServerConfig, setElectrumServerConfig, getNetwork, setNetwork, NETWORKS } from './api.js';
 import { isSilentPaymentAddress } from './silentpay.js';
 import { t, LANGS, getLang, setLang, isRTL, loadLocale } from './i18n.js';
 import {
@@ -1562,43 +1562,22 @@ function changeNetwork(net) {
   if (acc) activateAccount(acc); else render();
 }
 
-// Network selector (mainnet / testnet / regtest). Regtest also exposes the
-// Esplora base URL (default coinos chopsticks at http://localhost:3000).
+// Network selector. Per-network endpoints (Electrum server / block explorer) are
+// configured in the Data source card below — no duplicate URL fields here.
 function networkCard() {
   const net = getNetwork();
   return h(
     'div',
     { class: 'card col' },
     h('h3', {}, 'Network'),
-    h('p', { class: 'small muted', style: 'margin:0' }, 'Bitcoin network this wallet operates on.'),
+    h('p', { class: 'small muted', style: 'margin:0' }, 'Bitcoin network this wallet operates on. Pick its servers under Data source.'),
     h('select', { onChange: (e) => changeNetwork(e.target.value) },
-      h('option', { value: 'mainnet', selected: net === 'mainnet' }, 'Mainnet'),
-      h('option', { value: 'testnet', selected: net === 'testnet' }, 'Testnet'),
-      h('option', { value: 'regtest', selected: net === 'regtest' }, 'Regtest')
-    ),
-    net === 'regtest'
-      ? h('div', { class: 'col', style: 'gap:10px' },
-          h('label', { class: 'field' },
-            h('span', { class: 'lab' }, 'Regtest Esplora URL'),
-            h('input', {
-              type: 'text', class: 'mono-input', placeholder: 'http://localhost:3000',
-              autocapitalize: 'none', autocomplete: 'off', spellcheck: 'false', value: getRegtestEsplora(),
-              onChange: (e) => { setRegtestEsplora(e.target.value.trim()); wallet.reloadExplorer(); },
-            }),
-            h('div', { class: 'small faint' }, 'Esplora-compatible REST endpoint (coinos chopsticks/electrs).')),
-          h('label', { class: 'field' },
-            h('span', { class: 'lab' }, 'Regtest realtime (Electrum WS)'),
-            h('input', {
-              type: 'text', class: 'mono-input', placeholder: 'ws://localhost:50003',
-              autocapitalize: 'none', autocomplete: 'off', spellcheck: 'false', value: getRegtestElectrumWs(),
-              onChange: (e) => { setRegtestElectrumWs(e.target.value.trim()); wallet.reloadExplorer(); },
-            }),
-            h('div', { class: 'small faint' }, 'Electrum-over-WebSocket bridge (ews) for instant updates; falls back to polling if unreachable.')))
-      : null
+      NETWORKS.map((n) => h('option', { value: n.id, selected: net === n.id }, n.label)))
   );
 }
 
 function explorerCard() {
+  const net = getNetwork();
   const mode = getDataMode();
   const cfg = getExplorerConfig();
   const ecfg = getElectrumServerConfig();
@@ -1623,7 +1602,7 @@ function explorerCard() {
           h('div', { class: 'small faint' }, t('backendElectrumDesc')),
           h('select', {
             onChange: (e) => { setElectrumServerConfig({ server: e.target.value, url: ecfg.url }); render(); if (e.target.value !== 'custom' || ecfg.url) wallet.reloadExplorer(); },
-          }, ELECTRUM_PRESETS.map((o) => h('option', { value: o.id, selected: o.id === ecfg.server }, o.label))),
+          }, electrumPresets(net).map((o) => h('option', { value: o.id, selected: o.id === ecfg.server }, o.label))),
           ecfg.server === 'custom'
             ? h('label', { class: 'field' },
                 h('span', { class: 'lab' }, t('electrumUrl')),
@@ -1642,7 +1621,7 @@ function explorerCard() {
           h('div', { class: 'small faint' }, t('modeExplorerDesc')),
           h('select', {
             onChange: (e) => { setExplorerConfig({ server: e.target.value, url: cfg.url }); render(); if (e.target.value !== 'custom' || cfg.url) wallet.reloadExplorer(); },
-          }, EXPLORER_PRESETS.map((o) => h('option', { value: o.id, selected: o.id === cfg.server }, o.label))),
+          }, explorerPresets(net).map((o) => h('option', { value: o.id, selected: o.id === cfg.server }, o.label))),
           cfg.server === 'custom'
             ? h('label', { class: 'field' },
                 h('span', { class: 'lab' }, t('explorerUrl')),

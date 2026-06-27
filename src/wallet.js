@@ -21,7 +21,7 @@ import * as btc from '@scure/btc-signer';
 import { p2wpkh } from '@scure/btc-signer/payment';
 import { concatBytes } from '@scure/btc-signer/utils.js';
 
-import { Api, pool, wsUrl, getBackend, explorerWeb, electrumCandidates } from './api.js';
+import { Api, pool, getBackend, explorerWeb, electrumCandidates } from './api.js';
 import { ElectrumApi } from './electrum.js';
 import { NostrSync, getSyncConfig } from './nostr.js';
 import { isSilentPaymentAddress, decodeSilentPaymentAddress, silentPaymentScripts, silentPaymentPlaceholder } from './silentpay.js';
@@ -41,6 +41,9 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const NETS = {
   mainnet: { net: btc.NETWORK, coin: 0 },
   testnet: { net: btc.TEST_NETWORK, coin: 1 },
+  // mutinynet is a signet — same address format / version bytes / coin type as
+  // testnet (`tb` HRP); only the chain + servers differ.
+  mutinynet: { net: btc.TEST_NETWORK, coin: 1 },
   // Regtest shares testnet's version bytes / coin type; only the bech32 HRP
   // differs (`bcrt`). @scure/btc-signer derives addresses + validates from this.
   regtest: { net: { ...btc.TEST_NETWORK, bech32: 'bcrt' }, coin: 1 },
@@ -1268,14 +1271,14 @@ export class Wallet {
   // Pushes us new mempool/confirmed transactions for our addresses so history
   // and balances update with no polling.
   wsUrl() {
-    // Electrum backend: pick the current failover candidate (rotated on failure).
-    // Mainnet (when cut over to Fulcrum) and regtest (local Fulcrum) use Electrum.
-    if (getBackend() === 'electrum' && (this.netName === 'mainnet' || this.netName === 'regtest')) {
-      if (!this._wsCandidates || !this._wsCandidates.length) { this._wsCandidates = electrumCandidates(); this._wsCandIdx = 0; }
+    // Electrum backend (any network): pick the current failover candidate for the
+    // active network (rotated on failure). Esplora backend has no push → poll.
+    if (getBackend() === 'electrum') {
+      if (!this._wsCandidates || !this._wsCandidates.length) { this._wsCandidates = electrumCandidates(this.netName); this._wsCandIdx = 0; }
       const list = this._wsCandidates;
       return list.length ? list[(this._wsCandIdx || 0) % list.length] : null;
     }
-    return wsUrl(this.netName); // coinos watcher, or null
+    return null;
   }
 
   // What realtime watches: the fresh frontier (next receive + next change), plus
