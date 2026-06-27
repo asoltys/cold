@@ -106,6 +106,40 @@ function netDefaults(net) { return NET_DEFAULTS[net] || NET_DEFAULTS.mainnet; }
 // get a ":<net>" suffix.
 function nk(base, net) { return net === 'mainnet' ? base : `${base}:${net}`; }
 
+// Silent-payment (BIP-352) tweak indexer — a separate, optional endpoint used
+// only for SP receiving. It serves public tweak/UTXO data (the scan key never
+// leaves the device), but a public one can observe which blocks hold your
+// outputs, so self-hosting is the privacy-max option. Per network; an empty URL
+// means SP receiving is unavailable on that network.
+const SP_INDEXER_PRESETS_BY_NET = {
+  mainnet: [{ id: 'custom', label: 'Custom', url: '' }], // a hosted default goes here once we run one
+  testnet: [{ id: 'custom', label: 'Custom', url: '' }],
+  mutinynet: [{ id: 'custom', label: 'Custom', url: '' }],
+  regtest: [{ id: 'local', label: 'Local (localhost:8888)', url: 'http://localhost:8888' }, { id: 'custom', label: 'Custom', url: '' }],
+};
+const SP_INDEXER_DEFAULT = { mainnet: 'custom', testnet: 'custom', mutinynet: 'custom', regtest: 'local' };
+const SP_INDEXER_KEY = 'btc-wallet-sp-indexer';
+export function spIndexerPresets(net = getNetwork()) { return SP_INDEXER_PRESETS_BY_NET[net] || SP_INDEXER_PRESETS_BY_NET.mainnet; }
+export function getSpIndexerConfig(net = getNetwork()) {
+  try {
+    const c = JSON.parse(localStorage.getItem(nk(SP_INDEXER_KEY, net)) || 'null');
+    if (c && c.server) return { server: c.server, url: c.url || '' };
+  } catch {}
+  return { server: SP_INDEXER_DEFAULT[net] || 'custom', url: '' };
+}
+export function setSpIndexerConfig({ server, url }, net = getNetwork()) {
+  try { localStorage.setItem(nk(SP_INDEXER_KEY, net), JSON.stringify({ server, url: url || '' })); } catch {}
+}
+// The resolved indexer base URL for a network, or '' if none is configured.
+export function spIndexerUrl(net = getNetwork()) {
+  const cfg = getSpIndexerConfig(net);
+  if (cfg.server === 'custom') return cfg.url.trim().replace(/\/+$/, '');
+  const p = spIndexerPresets(net).find((x) => x.id === cfg.server);
+  return p && p.url ? p.url.replace(/\/+$/, '') : '';
+}
+// SP receiving is available only when an indexer is configured for this network.
+export function spReceiveEnabled(net = getNetwork()) { return !!spIndexerUrl(net); }
+
 // Resolve the configured explorer to the host list the Api tries in order.
 function resolveHosts(net) {
   const cfg = getExplorerConfig(net);

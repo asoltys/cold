@@ -24,7 +24,7 @@ import { concatBytes } from '@scure/btc-signer/utils.js';
 import { Api, pool, getBackend, explorerWeb, electrumCandidates } from './api.js';
 import { ElectrumApi } from './electrum.js';
 import { NostrSync, getSyncConfig } from './nostr.js';
-import { isSilentPaymentAddress, decodeSilentPaymentAddress, silentPaymentScripts, silentPaymentPlaceholder } from './silentpay.js';
+import { isSilentPaymentAddress, decodeSilentPaymentAddress, silentPaymentScripts, silentPaymentPlaceholder, deriveSilentPaymentKeys, encodeSilentPaymentAddress, silentPaymentScan } from './silentpay.js';
 
 // No look-ahead: stop scanning a chain at the first unused address. This wallet
 // only ever exposes ONE unused address at a time (freshReceive = first unused;
@@ -253,6 +253,28 @@ export class Wallet {
   // The account-level extended public key (xpub / zpub) for export → watch-only.
   accountXpub() {
     return this.account().publicExtendedKey;
+  }
+
+  // BIP-352 scan/spend keys, derived from the master seed (m/352' paths) — so
+  // they need the mnemonic (or a depth-0 master xprv); watch-only and account-
+  // level imported keys can't do silent payments. Cached per account.
+  silentPaymentKeys() {
+    if (this.watchOnly) return null;
+    const coin = NETS[this.netName].coin;
+    const ck = `sp|${this.netName}|${this.mnemonic}|${this.passphrase}|${this.xprv}`;
+    if (this._spKeys && this._spKeysKey === ck) return this._spKeys;
+    let master = null;
+    if (this.mnemonic) master = HDKey.fromMasterSeed(mnemonicToSeedSync(this.mnemonic, this.passphrase));
+    else if (this.xprv) { const n = HDKey.fromExtendedKey(this.xprv); if (n.depth === 0) master = n; }
+    this._spKeys = master ? deriveSilentPaymentKeys(master, coin) : null;
+    this._spKeysKey = ck;
+    return this._spKeys;
+  }
+
+  // Our silent-payment address (sp1…/tsp1…), or null if this wallet can't do SP.
+  silentPaymentAddress() {
+    const k = this.silentPaymentKeys();
+    return k ? encodeSilentPaymentAddress(k.scanPub, k.spendPub, { testnet: this.netName !== 'mainnet' }) : null;
   }
 
   node(chain, index) {
