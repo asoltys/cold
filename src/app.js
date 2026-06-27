@@ -1257,18 +1257,11 @@ function addressScanView() {
 
 function settingsTab() {
   if (ui.addrScan && !wallet.offline) return addressScanView();
-  const shown = ui.revealShown;
-  const words = wallet.mnemonic.split(' ');
-  const cells = words.map((w, i) =>
-    h('div', { class: 'w' + (shown ? '' : ' masked') },
-      h('span', { class: 'n' }, i + 1),
-      h('span', { class: 't' }, shown ? w : '••••••')
-    )
-  );
-
   return h(
     'div',
     { class: 'col', style: 'gap:16px' },
+    // Recovery phrase + public key live on each wallet's own settings page now
+    // (Accounts → ⚙). Watch-only wallets can still add their seed here.
     wallet.watchOnly
       ? (ui.loadSeed
           ? loadSeedCard()
@@ -1279,32 +1272,7 @@ function settingsTab() {
                 ? h('button', { class: 'btn-primary btn-block', style: 'margin-top:4px', onClick: () => startLoadSeed() }, t('loadSeedBtn'))
                 : null
             ))
-      : !wallet.mnemonic
-      ? h('div', { class: 'card col' },
-          h('h3', {}, t('importedKey')),
-          h('p', { class: 'small muted', style: 'margin:0' }, t('importedKeyNote'))
-        )
-      : h(
-          'div',
-          { class: 'card col' },
-          h('h3', {}, t('recoveryPhrase')),
-          h('div', { class: 'warn-box' }, t('recoveryWarn')),
-          h('div', { class: 'words' }, cells),
-          shown && wallet.passphrase
-            ? h('div', { class: 'col gap6' },
-                h('span', { class: 'lab' }, t('bip39Passphrase')),
-                h('div', { class: 'addr-box' }, wallet.passphrase)
-              )
-            : null,
-          shown
-            ? h('div', { class: 'row gap6 wrap' },
-                copyBtn(wallet.mnemonic, t('copyPhrase')),
-                wallet.passphrase ? copyBtn(wallet.passphrase, t('copyPassphrase')) : null,
-                h('button', { class: 'btn-sm grow', onClick: () => { ui.revealShown = false; render(); } }, t('hide'))
-              )
-            : h('button', { class: 'btn-primary btn-block', onClick: () => { ui.revealShown = true; render(); } }, t('revealRecovery'))
-        ),
-    pubkeyCard(),
+      : null,
     wallet.watchOnly
       ? null
       : h(
@@ -1328,27 +1296,6 @@ function settingsTab() {
   );
 }
 
-// Public key export: the account zpub, for watching this wallet elsewhere
-// (read-only). Gated behind a reveal since it exposes all your addresses.
-function pubkeyCard() {
-  let zpub = '';
-  try { zpub = xpubToZpub(wallet.accountXpub()); } catch {}
-  return h(
-    'div',
-    { class: 'card col' },
-    h('h3', {}, t('publicKey')),
-    h('p', { class: 'small muted', style: 'margin:0' }, t('publicKeyDesc')),
-    ui.pubkeyShown
-      ? h('div', { class: 'col gap6' },
-          h('div', { class: 'addr-box break', style: 'font-size:12px' }, zpub),
-          h('div', { class: 'row gap6 wrap' },
-            copyBtn(zpub, t('copyKey')),
-            h('button', { class: 'btn-sm grow', onClick: () => { ui.pubkeyShown = false; render(); } }, t('hide'))
-          )
-        )
-      : h('button', { class: 'btn-block', onClick: () => { ui.pubkeyShown = true; render(); } }, t('showPublicKey'))
-  );
-}
 
 // Gift link: presign a chosen amount as a #gift= PSBT that whoever opens claims
 // into a fresh wallet only they control. The coin is reserved until claimed.
@@ -1533,25 +1480,6 @@ async function doRevoke(id) {
   }
   ui.busy = false;
   render();
-}
-
-// Block explorer / server selection: a preset (mempool.space, blockstream.info)
-// or a custom Esplora/electrs REST URL (e.g. your own node).
-// Auto log-out after the app has been in the background for the chosen time —
-// drops to watch-only (re-enter the seed to spend). Never counts while focused.
-function autoLockCard() {
-  const acc = activeAccount();
-  if (!acc) return null;
-  const cur = accAutoLock(acc);
-  return h(
-    'div',
-    { class: 'card col' },
-    h('h3', {}, t('autolockTitle')),
-    h('p', { class: 'small muted', style: 'margin:0' }, t('autolockDesc')),
-    h('select', { onChange: (e) => { acc.autoLock = Number(e.target.value) || 0; persistAccounts(); render(); } },
-      AUTOLOCK_OPTIONS.map((o) => h('option', { value: String(o.ms), selected: o.ms === cur }, t(o.label)))
-    )
-  );
 }
 
 // Switch the active Bitcoin network. Changes addresses/balances entirely, so we
@@ -2051,24 +1979,7 @@ function accountSettingsScreen() {
     'div',
     { class: 'col', style: 'gap:16px' },
     brandHeader(false),
-    // Name
-    h('div', { class: 'card col' },
-      h('h3', {}, t('walletName')),
-      h('div', { class: 'row gap6' },
-        h('input', { type: 'text', style: 'flex:1', value: ui.editLabel != null ? ui.editLabel : a.label,
-          onInput: (e) => { ui.editLabel = e.target.value; },
-          onKeyDown: (e) => { if (e.key === 'Enter') saveName(); } }),
-        h('button', { class: 'btn-sm', onClick: saveName }, t('save'))
-      )
-    ),
-    // Auto-logout (per wallet)
-    h('div', { class: 'card col' },
-      h('h3', {}, t('autolockTitle')),
-      h('p', { class: 'small muted', style: 'margin:0' }, t('autolockDesc')),
-      h('select', { onChange: (e) => { a.autoLock = Number(e.target.value) || 0; persistAccounts(); if (a.persisted) writeVault(); render(); } },
-        AUTOLOCK_OPTIONS.map((o) => h('option', { value: String(o.ms), selected: o.ms === accAutoLock(a) }, t(o.label))))
-    ),
-    // Recovery phrase
+    // Recovery phrase (top)
     isWatch
       ? h('div', { class: 'card col' }, h('h3', {}, t('recoveryPhrase')), h('p', { class: 'small muted', style: 'margin:0' }, t('watchOnlyNote')))
       : !a.mnemonic
@@ -2088,6 +1999,16 @@ function accountSettingsScreen() {
                   h('button', { class: 'btn-sm grow', onClick: () => { ui.revealShown = false; render(); } }, t('hide')))
               : h('button', { class: 'btn-primary btn-block', onClick: () => { ui.revealShown = true; render(); } }, t('revealRecovery'))
           ),
+    // Name
+    h('div', { class: 'card col' },
+      h('h3', {}, t('walletName')),
+      h('div', { class: 'row gap6' },
+        h('input', { type: 'text', style: 'flex:1', value: ui.editLabel != null ? ui.editLabel : a.label,
+          onInput: (e) => { ui.editLabel = e.target.value; },
+          onKeyDown: (e) => { if (e.key === 'Enter') saveName(); } }),
+        h('button', { class: 'btn-sm', onClick: saveName }, t('save'))
+      )
+    ),
     // Public key (zpub)
     h('div', { class: 'card col' },
       h('h3', {}, t('publicKey')),
@@ -2099,6 +2020,13 @@ function accountSettingsScreen() {
               copyBtn(zpub, t('copyKey')),
               h('button', { class: 'btn-sm grow', onClick: () => { ui.pubkeyShown = false; render(); } }, t('hide'))))
         : h('button', { class: 'btn-block', onClick: () => { ui.pubkeyShown = true; render(); } }, t('showPublicKey'))
+    ),
+    // Auto-logout (bottom)
+    h('div', { class: 'card col' },
+      h('h3', {}, t('autolockTitle')),
+      h('p', { class: 'small muted', style: 'margin:0' }, t('autolockDesc')),
+      h('select', { onChange: (e) => { a.autoLock = Number(e.target.value) || 0; persistAccounts(); if (a.persisted) writeVault(); render(); } },
+        AUTOLOCK_OPTIONS.map((o) => h('option', { value: String(o.ms), selected: o.ms === accAutoLock(a) }, t(o.label))))
     ),
     h('button', { class: 'btn-ghost btn-block', onClick: () => { ui.editLabel = null; ui.revealShown = false; ui.pubkeyShown = false; ui.screen = 'accounts'; render(); } }, t('back'))
   );

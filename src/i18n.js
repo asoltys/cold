@@ -284,7 +284,7 @@ const STR = {
     walletName: 'Wallet name',
     walletSettings: 'Wallet settings',
     autolockTitle: 'Log out automatically',
-    autolockDesc: "After the app has been in the background this long, log THIS wallet out — it's removed from this device (including from Save to device), so keep its recovery phrase. Other wallets aren't affected. The timer never runs while the app is open and focused.",
+    autolockDesc: "After the app has been in the background this long, log this wallet out — it's removed from this device (including from Save to device), so keep its recovery phrase. Other wallets aren't affected. The timer never runs while the app is open and focused.",
     autolockNever: 'Never',
     autolock1m: 'After 1 minute',
     autolock5m: 'After 5 minutes',
