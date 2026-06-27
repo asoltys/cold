@@ -297,7 +297,7 @@ const STR = {
     modeExplorer: 'Block explorer',
     modeExplorerDesc: 'Reads from your chosen block explorer and polls for payments. A bit slower.',
     modeElectrum: 'Electrum server',
-    backendElectrumDesc: 'Data and instant payments over one Electrum WebSocket. Point it at your own server for a fully self-hosted wallet — no REST.',
+    backendElectrumDesc: 'Data and instant payments over one Electrum WebSocket. Point it at your own server for a fully self-hosted wallet.',
     electrumUrl: 'Electrum server (wss://)',
     electrumUrlHint: 'A WebSocket Electrum server, e.g. wss://your-node:50004',
     silentPaymentNote: 'Silent payment',
