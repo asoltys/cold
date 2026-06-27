@@ -1260,6 +1260,10 @@ function settingsTab() {
   return h(
     'div',
     { class: 'col', style: 'gap:16px' },
+    // Quick link to the active wallet's own settings (name, seed, pubkey, auto-logout).
+    activeAccount()
+      ? h('button', { class: 'btn-block', onClick: () => openAccountSettings(activeId) }, '⚙ ' + t('walletSettings'))
+      : null,
     // Recovery phrase + public key live on each wallet's own settings page now
     // (Accounts → ⚙). Watch-only wallets can still add their seed here.
     wallet.watchOnly
