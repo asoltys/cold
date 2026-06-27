@@ -8,7 +8,7 @@ import { Wallet, newMnemonic, isValidMnemonic, accountXpubFor, cacheKeyFor, utxo
 import { qrSvg } from './qr.js';
 import { scanQr } from './scan.js';
 import { getSyncConfig, setSyncConfig } from './nostr.js';
-import { getExplorerConfig, setExplorerConfig, EXPLORER_PRESETS, getDataMode, setDataMode, ELECTRUM_PRESETS, getElectrumServerConfig, setElectrumServerConfig, getNetwork, setNetwork, getRegtestEsplora, setRegtestEsplora, getBoltzApi, BOLTZ_PRESETS, getBoltzProviderId, setBoltzProviderId, getBoltzCustom, setBoltzCustom } from './api.js';
+import { getExplorerConfig, setExplorerConfig, EXPLORER_PRESETS, getDataMode, setDataMode, ELECTRUM_PRESETS, getElectrumServerConfig, setElectrumServerConfig, getNetwork, setNetwork, getRegtestEsplora, setRegtestEsplora, getRegtestElectrumWs, setRegtestElectrumWs, getBoltzApi, BOLTZ_PRESETS, getBoltzProviderId, setBoltzProviderId, getBoltzCustom, setBoltzCustom } from './api.js';
 import { SwapManager } from './swap.js';
 import { isSilentPaymentAddress } from './silentpay.js';
 import { t, LANGS, getLang, setLang, isRTL, loadLocale } from './i18n.js';
@@ -1620,15 +1620,23 @@ function networkCard() {
       h('option', { value: 'regtest', selected: net === 'regtest' }, 'Regtest')
     ),
     net === 'regtest'
-      ? h('label', { class: 'field' },
-          h('span', { class: 'lab' }, 'Regtest Esplora URL'),
-          h('input', {
-            type: 'text', class: 'mono-input', placeholder: 'http://localhost:3000',
-            autocapitalize: 'none', autocomplete: 'off', spellcheck: 'false', value: getRegtestEsplora(),
-            onChange: (e) => { setRegtestEsplora(e.target.value.trim()); wallet.reloadExplorer(); },
-          }),
-          h('div', { class: 'small faint' }, 'Esplora-compatible REST endpoint (coinos chopsticks/electrs).')
-        )
+      ? h('div', { class: 'col', style: 'gap:10px' },
+          h('label', { class: 'field' },
+            h('span', { class: 'lab' }, 'Regtest Esplora URL'),
+            h('input', {
+              type: 'text', class: 'mono-input', placeholder: 'http://localhost:3000',
+              autocapitalize: 'none', autocomplete: 'off', spellcheck: 'false', value: getRegtestEsplora(),
+              onChange: (e) => { setRegtestEsplora(e.target.value.trim()); wallet.reloadExplorer(); },
+            }),
+            h('div', { class: 'small faint' }, 'Esplora-compatible REST endpoint (coinos chopsticks/electrs).')),
+          h('label', { class: 'field' },
+            h('span', { class: 'lab' }, 'Regtest realtime (Electrum WS)'),
+            h('input', {
+              type: 'text', class: 'mono-input', placeholder: 'ws://localhost:50003',
+              autocapitalize: 'none', autocomplete: 'off', spellcheck: 'false', value: getRegtestElectrumWs(),
+              onChange: (e) => { setRegtestElectrumWs(e.target.value.trim()); wallet.reloadExplorer(); },
+            }),
+            h('div', { class: 'small faint' }, 'Electrum-over-WebSocket bridge (ews) for instant updates; falls back to polling if unreachable.')))
       : null
   );
 }
