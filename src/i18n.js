@@ -263,7 +263,7 @@ const STR = {
     copyPassphrase: 'Copy passphrase',
     revealRecovery: 'Reveal recovery phrase',
     offlineTransfer: 'Offline transfer',
-    offlineTransferDesc: 'Export your coins on an online device, then import the file on an offline device (with this wallet + seed) to sign without internet.',
+    offlineTransferDesc: 'Export your coins on an online device, then import the file on an offline device to sign without internet.',
     exportSnapshot: '⤓ Export snapshot',
     importSnapshot: 'Import snapshot…',
     rescan: 'Rescan',
