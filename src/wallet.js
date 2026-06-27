@@ -307,13 +307,13 @@ export class Wallet {
   // Scan the configured SP indexer from the last-scanned height to the tip, find
   // outputs paying our scan/spend keys, and verify each is unspent via the chain
   // backend (the indexer only does discovery). Updates this.spUtxos.
-  async scanSilentPayments({ rescan = false } = {}) {
+  async scanSilentPayments({ rescan = false, silent = false } = {}) {
     const keys = this.silentPaymentKeys();
     const indexer = spIndexerUrl(this.netName);
     if (!keys || !indexer || this.offline) return { unavailable: true };
     if (this.spScanning) return { busy: true };
     this.spScanning = true;
-    this.emit();
+    if (!silent) this.emit(); // manual scans show a "Scanning…" state; auto-scans stay quiet
     try {
       if (rescan) { this.spUtxos = []; this.lastSpScan = 0; }
       const from = (this.lastSpScan || 0) + 1;
@@ -345,12 +345,13 @@ export class Wallet {
         } catch {}
       }
       await this._refreshSpUtxos();
+      this._recomputeBalanceFromChains(); // fold found SP value into the displayed balance
       this.saveCache();
       this.emit();
       return { found: found.length, scanned: tip };
     } finally {
       this.spScanning = false;
-      this.emit();
+      if (!silent) this.emit();
     }
   }
 
@@ -729,6 +730,7 @@ export class Wallet {
       }
       this.loaded = true;
       this.saveCache();
+      this.scanSilentPayments({ silent: true }).catch(() => {}); // fold in any silent-payment receipts
     } finally {
       this._refreshing = false;
       this.historyLoading = false; // clear even if an earlier step threw
@@ -1633,6 +1635,7 @@ export class Wallet {
       if (Date.now() - (this._lastPoll || 0) < due) return;
       this._lastPoll = Date.now();
       this.refreshLive();
+      this.scanSilentPayments({ silent: true }).catch(() => {}); // pick up new SP receipts (incremental, cheap)
     }, 1000);
     // No periodic full re-scan: the WS (and the frontier poll above) keep the
     // balance current, and refreshLive's _reconcileHeld catches spends of held

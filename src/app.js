@@ -2254,18 +2254,22 @@ function silentPaymentReceiveCard(spAddr) {
     h('div', { style: 'align-self:center' }, h('div', { html: qrSvg(spAddr) })),
     h('div', { class: 'addr-box break', style: 'width:100%;font-size:12px' }, spAddr),
     copyBtn(spAddr, t('copyAddress')),
-    bal.count
-      ? h('div', { class: 'small', style: 'text-align:center' },
-          t('spReceived', { amount: fmtAmount(bal.confirmed + bal.pending) + ' ' + unitLabel(), n: bal.count }))
-      : null,
-    h('button', { class: 'btn-block', disabled: wallet.spScanning, onClick: doSpScan },
-      wallet.spScanning ? t('spScanning') : t('spScan'))
+    h('div', { class: 'row between', style: 'align-items:center' },
+      h('span', { class: 'small muted' },
+        wallet.spScanning
+          ? t('spScanning')
+          : bal.count
+            ? t('spReceived', { amount: fmtAmount(bal.confirmed + bal.pending) + ' ' + unitLabel(), n: bal.count })
+            : t('spWatching')),
+      h('button', { class: 'linklike small', disabled: wallet.spScanning, onClick: doSpScan }, t('spRescan'))
+    )
   );
 }
 
+// Auto-scanning runs on the poll loop; this is a manual full rescan.
 function doSpScan() {
   if (wallet.spScanning || wallet.offline) return;
-  wallet.scanSilentPayments().catch(() => {}).finally(render);
+  wallet.scanSilentPayments({ rescan: true }).catch(() => {}).finally(render);
   render();
 }
 

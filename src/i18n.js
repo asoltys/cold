@@ -305,6 +305,8 @@ const STR = {
     spReceiveDesc: 'A reusable address that leaks nothing on-chain — each sender derives a unique, unlinkable output. Scanning finds payments on-device using the indexer set under Data source.',
     spScan: 'Scan for silent payments',
     spScanning: 'Scanning…',
+    spWatching: 'Watching for payments',
+    spRescan: 'Rescan',
     spReceived: 'Found {n} silent payment output(s): {amount}',
     spIndexerTitle: 'Silent payment indexer',
     spIndexerDesc: 'Where to scan for received silent payments. It only serves public tweak data — your scan key stays on-device — but a public one can see which blocks hold your outputs, so self-host for full privacy.',
