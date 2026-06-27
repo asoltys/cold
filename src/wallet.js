@@ -311,9 +311,11 @@ export class Wallet {
     const keys = this.silentPaymentKeys();
     const indexer = spIndexerUrl(this.netName);
     if (!keys || !indexer || this.offline) return { unavailable: true };
-    if (this.spScanning) return { busy: true };
-    this.spScanning = true;
-    if (!silent) this.emit(); // manual scans show a "Scanning…" state; auto-scans stay quiet
+    if (this._spScanBusy) return { busy: true };
+    this._spScanBusy = true;
+    // Only a manual scan shows the visible "Scanning…" state; auto-scans are
+    // invisible (setting spScanning for them left the card stuck on "Scanning…").
+    if (!silent) { this.spScanning = true; this.emit(); }
     try {
       if (rescan) { this.spUtxos = []; this.lastSpScan = 0; }
       const from = (this.lastSpScan || 0) + 1;
@@ -347,11 +349,11 @@ export class Wallet {
       await this._refreshSpUtxos();
       this._recomputeBalanceFromChains(); // fold found SP value into the displayed balance
       this.saveCache();
-      this.emit();
       return { found: found.length, scanned: tip };
     } finally {
+      this._spScanBusy = false;
       this.spScanning = false;
-      if (!silent) this.emit();
+      this.emit(); // always refresh (balance + clears any "Scanning…")
     }
   }
 
