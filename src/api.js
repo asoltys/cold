@@ -111,12 +111,12 @@ export function getDataMode() {
 export function setDataMode(m) {
   try { localStorage.setItem(DATA_MODE_KEY, m === 'electrum' || m === 'explorer' ? m : 'coinos'); } catch {}
 }
-// Cutover switch: flip to true once coinos runs a real Electrum server (Fulcrum)
-// behind the /electrum endpoint. Until then 'coinos' mode = explorer REST data +
-// coinos watcher push (the shim can't serve data). When true, 'coinos' becomes a
-// full Electrum backend pointed at coinos, with public servers as failover.
-export const COINOS_ELECTRUM = false;
-const COINOS_ELECTRUM_URL = 'wss://coinos.io/electrum';
+// 'coinos' data-source mode is now a full Electrum backend pointed at our own
+// Fulcrum (served same-origin at /electrum, proxied to the Fulcrum on cs), with
+// the public Electrum servers as automatic failover. Set false to revert to the
+// old explorer-REST-data + coinos-watcher-push behaviour.
+export const COINOS_ELECTRUM = true;
+const COINOS_ELECTRUM_URL = 'wss://halwallet.app/electrum';
 
 export function getBackend() {
   // Regtest runs Fulcrum (Electrum over WS) for both data and realtime push —
