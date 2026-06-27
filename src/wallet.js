@@ -1481,16 +1481,18 @@ export class Wallet {
     if (typeof WebSocket === 'undefined' || !this.wsUrl()) return;
     this._wsWant = true;
 
-    // Heartbeat: ping every 15s; if no message (incl. pong) for 45s the socket
-    // is half-open (died without firing onclose) — force a reconnect.
+    // Heartbeat: ping every 10s; if nothing comes back (incl. our own pong) for
+    // 21s the socket is half-open (died without firing onclose) — recycle it.
+    // The trigger is two unanswered pings, so one slow round-trip won't churn,
+    // but a silently-dead socket now recovers in ~20s instead of ~45s.
     this._hbTimer = setInterval(() => {
       if (this.offline || !this._ws || this._ws.readyState !== 1) return;
-      if (Date.now() - this._lastMsg > 45000) {
+      if (Date.now() - this._lastMsg > 21000) {
         this._reconnectNow();
       } else {
         this._rpcSend('server.ping', []);
       }
-    }, 15000);
+    }, 10000);
 
     // Reconnect + refresh when the tab refocuses or the network returns.
     if (!this._wakeHooked && typeof document !== 'undefined') {
@@ -1518,6 +1520,8 @@ export class Wallet {
       } catch {}
       this._ws = null;
     }
+    // onclose was nulled above so it won't fire — fail in-flight calls here too.
+    this._rejectPending('socket recycled');
     this.live = false;
     this._connectWs();
   }
@@ -1581,6 +1585,10 @@ export class Wallet {
     ws.onclose = () => {
       this.live = false;
       this._ws = null;
+      // Fail any in-flight data calls so the _rpcCall pump frees its slots
+      // immediately; otherwise dead calls hold the pump until they time out and
+      // the post-reconnect refresh stalls behind them (~10s of stale UI).
+      this._rejectPending('socket closed');
       this.emit();
       this._scheduleReconnect();
     };
