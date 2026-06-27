@@ -696,7 +696,12 @@ async function activateAccount(acc, opts = {}) {
         wallet.setReceiveAck(ack);
       }
     }
-    ui.receiveSeenIndex = ack;
+    // For a fresh open, leave receiveSeenIndex null until the post-scan baseline
+    // below. Setting it now (to the pre-scan frontier) lets the socket's reconcile
+    // credit a deposit that predates this open and briefly flash the "payment
+    // received" screen before the baseline catches up. A same-session refresh
+    // uses the persisted ack right away.
+    if (!opts.fresh) ui.receiveSeenIndex = ack;
 
     // Go Live immediately: the socket must not wait on Nostr (up to 6s) or any
     // discovery scan. The cache/Nostr state is already on screen.
