@@ -8,7 +8,7 @@ import { Wallet, newMnemonic, isValidMnemonic, accountXpubFor, cacheKeyFor, utxo
 import { qrSvg } from './qr.js';
 import { scanQr } from './scan.js';
 import { getSyncConfig, setSyncConfig } from './nostr.js';
-import { getExplorerConfig, setExplorerConfig, EXPLORER_PRESETS, getDataMode, setDataMode, ELECTRUM_PRESETS, getElectrumServerConfig, setElectrumServerConfig, getNetwork, setNetwork, getRegtestEsplora, setRegtestEsplora, getBoltzApi, setBoltzApi } from './api.js';
+import { getExplorerConfig, setExplorerConfig, EXPLORER_PRESETS, getDataMode, setDataMode, ELECTRUM_PRESETS, getElectrumServerConfig, setElectrumServerConfig, getNetwork, setNetwork, getRegtestEsplora, setRegtestEsplora, getBoltzApi, BOLTZ_PRESETS, getBoltzProviderId, setBoltzProviderId, getBoltzCustom, setBoltzCustom } from './api.js';
 import { SwapManager } from './swap.js';
 import { isSilentPaymentAddress } from './silentpay.js';
 import { t, LANGS, getLang, setLang, isRTL, loadLocale } from './i18n.js';
@@ -1330,6 +1330,7 @@ function settingsTab() {
     ),
     autoLockCard(),
     networkCard(),
+    boltzProviderCard(),
     explorerCard(),
     wallet.watchOnly || !wallet.mnemonic ? null : syncCard()
   );
@@ -1569,6 +1570,39 @@ function changeNetwork(net) {
   swaps.network = net;
   const acc = accounts.find((a) => a.id === activeId);
   if (acc) activateAccount(acc); else render();
+}
+
+// Swap provider selector. Boltz-compatible providers (from SwapMarket) plus a
+// custom option. Swaps stay non-custodial regardless of provider.
+function boltzProviderCard() {
+  const id = getBoltzProviderId();
+  const custom = getBoltzCustom();
+  return h(
+    'div',
+    { class: 'card col' },
+    h('h3', {}, '⚡ Swap provider'),
+    h('p', { class: 'small muted', style: 'margin:0' }, 'Boltz-compatible provider for Lightning swaps. Non-custodial: a provider can fail a swap but never take your funds.'),
+    h('select', { onChange: (e) => { setBoltzProviderId(e.target.value); render(); } },
+      BOLTZ_PRESETS.map((p) => h('option', { value: p.id, selected: p.id === id }, p.label))),
+    id === 'custom'
+      ? h('div', { class: 'col', style: 'gap:8px' },
+          h('label', { class: 'field' },
+            h('span', { class: 'lab' }, 'API URL'),
+            h('input', {
+              type: 'text', class: 'mono-input', placeholder: 'https://api.example.com',
+              autocapitalize: 'none', autocomplete: 'off', spellcheck: 'false', value: custom.api,
+              onChange: (e) => { setBoltzCustom({ api: e.target.value.trim(), ws: custom.ws }); render(); },
+            })),
+          h('label', { class: 'field' },
+            h('span', { class: 'lab' }, 'WebSocket URL (optional)'),
+            h('input', {
+              type: 'text', class: 'mono-input', placeholder: 'wss://api.example.com/v2/ws',
+              autocapitalize: 'none', autocomplete: 'off', spellcheck: 'false', value: custom.ws,
+              onChange: (e) => { setBoltzCustom({ api: custom.api, ws: e.target.value.trim() }); render(); },
+            }),
+            h('div', { class: 'small faint' }, 'Left blank, the WS is derived from the API URL.')))
+      : h('div', { class: 'small faint', style: 'word-break:break-all' }, getBoltzApi())
+  );
 }
 
 // Network selector (mainnet / testnet / regtest). Regtest also exposes the

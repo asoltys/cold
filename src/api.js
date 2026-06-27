@@ -57,20 +57,43 @@ export function setRegtestEsplora(url) {
   try { localStorage.setItem(REGTEST_ESPLORA_KEY, (url || '').trim()); } catch {}
 }
 
-// Boltz swap backend endpoints (regtest defaults; the api-v2 REST + the
-// sidecar swap-status WebSocket). Overridable in Settings for staging/mainnet.
-const BOLTZ_API_KEY = 'btc-wallet-boltz-api';
-const BOLTZ_WS_KEY = 'btc-wallet-boltz-ws';
-export function getBoltzApi() {
-  try { return (localStorage.getItem(BOLTZ_API_KEY) || '').trim() || 'http://localhost:9001'; }
-  catch { return 'http://localhost:9001'; }
+// Boltz swap provider — the api-v2 REST endpoint the SwapManager talks to; the
+// swap-status WebSocket is derived from it (http->ws + /v2/ws) unless given.
+// Presets are independent Boltz-compatible instances from SwapMarket's list
+// (swapmarket.github.io); `local` is the regtest stack. Non-custodial either
+// way: a provider can fail a swap but never steal (we claim/refund on-chain).
+export const BOLTZ_PRESETS = [
+  { id: 'local', label: 'Local (regtest)', api: 'http://localhost:9001', ws: 'ws://localhost:9004/v2/ws' },
+  { id: 'boltz', label: 'Boltz Exchange', api: 'https://api.boltz.exchange' },
+  { id: 'middleway', label: 'Middle Way', api: 'https://api.middle-way.space' },
+  { id: 'zeus', label: 'ZEUS Swaps', api: 'https://swaps.zeuslsp.com/api' },
+  { id: 'eldamar', label: 'Eldamar', api: 'https://boltz-api.eldamar.icu' },
+  { id: 'custom', label: 'Custom…', api: '', ws: '' },
+];
+const BOLTZ_PROVIDER_KEY = 'btc-wallet-boltz-provider'; // selected preset id
+const BOLTZ_CUSTOM_KEY = 'btc-wallet-boltz-custom';     // { api, ws } for custom
+
+export function getBoltzCustom() {
+  try { const c = JSON.parse(localStorage.getItem(BOLTZ_CUSTOM_KEY) || 'null'); if (c) return { api: c.api || '', ws: c.ws || '' }; } catch {}
+  return { api: '', ws: '' };
 }
-export function getBoltzWs() {
-  try { return (localStorage.getItem(BOLTZ_WS_KEY) || '').trim() || 'ws://localhost:9004/v2/ws'; }
-  catch { return 'ws://localhost:9004/v2/ws'; }
+export function setBoltzCustom({ api, ws }) {
+  try { localStorage.setItem(BOLTZ_CUSTOM_KEY, JSON.stringify({ api: (api || '').trim(), ws: (ws || '').trim() })); } catch {}
 }
-export function setBoltzApi(url) { try { localStorage.setItem(BOLTZ_API_KEY, (url || '').trim()); } catch {} }
-export function setBoltzWs(url) { try { localStorage.setItem(BOLTZ_WS_KEY, (url || '').trim()); } catch {} }
+export function getBoltzProviderId() {
+  try { const id = localStorage.getItem(BOLTZ_PROVIDER_KEY); if (id && BOLTZ_PRESETS.some((p) => p.id === id)) return id; } catch {}
+  return getNetwork() === 'regtest' ? 'local' : 'boltz'; // default per network
+}
+export function setBoltzProviderId(id) { try { localStorage.setItem(BOLTZ_PROVIDER_KEY, id); } catch {} }
+
+export function getBoltzProvider() {
+  const p = BOLTZ_PRESETS.find((x) => x.id === getBoltzProviderId()) || BOLTZ_PRESETS[1];
+  if (p.id === 'custom') { const c = getBoltzCustom(); return { id: 'custom', api: c.api, ws: c.ws }; }
+  return { id: p.id, api: p.api, ws: p.ws || '' };
+}
+const deriveBoltzWs = (api) => api ? api.replace(/^http/, 'ws').replace(/\/+$/, '') + '/v2/ws' : '';
+export function getBoltzApi() { return getBoltzProvider().api; }
+export function getBoltzWs() { const p = getBoltzProvider(); return p.ws || deriveBoltzWs(p.api); }
 
 // Resolve the configured explorer to the host list the Api tries in order.
 function resolveHosts(net) {
