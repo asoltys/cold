@@ -41,6 +41,9 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const NETS = {
   mainnet: { net: btc.NETWORK, coin: 0 },
   testnet: { net: btc.TEST_NETWORK, coin: 1 },
+  // Regtest shares testnet's version bytes / coin type; only the bech32 HRP
+  // differs (`bcrt`). @scure/btc-signer derives addresses + validates from this.
+  regtest: { net: { ...btc.TEST_NETWORK, bech32: 'bcrt' }, coin: 1 },
 };
 
 export function newMnemonic(strengthBits = 128) {
@@ -192,7 +195,7 @@ export class Wallet {
       this.api = new ElectrumApi({
         call: (m, p) => this._rpcCall(m, p),
         network: this.netCfg.net,
-        testnet: this.netName === 'testnet',
+        testnet: this.netName !== 'mainnet',
         explorerWeb: explorerWeb(),
       });
     } else {
@@ -1266,7 +1269,8 @@ export class Wallet {
   // and balances update with no polling.
   wsUrl() {
     // Electrum backend: pick the current failover candidate (rotated on failure).
-    if (getBackend() === 'electrum' && this.netName !== 'testnet') {
+    // Electrum is mainnet-only here; testnet/regtest use esplora + polling.
+    if (getBackend() === 'electrum' && this.netName === 'mainnet') {
       if (!this._wsCandidates || !this._wsCandidates.length) { this._wsCandidates = electrumCandidates(); this._wsCandIdx = 0; }
       const list = this._wsCandidates;
       return list.length ? list[(this._wsCandIdx || 0) % list.length] : null;

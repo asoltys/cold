@@ -32,8 +32,37 @@ export function setExplorerConfig({ server, url }) {
   } catch {}
 }
 
+// Active Bitcoin network (mainnet | testnet | regtest), persisted globally.
+const NETWORK_KEY = 'btc-wallet-network';
+export function getNetwork() {
+  try {
+    const n = localStorage.getItem(NETWORK_KEY);
+    if (n === 'mainnet' || n === 'testnet' || n === 'regtest') return n;
+  } catch {}
+  return 'mainnet';
+}
+export function setNetwork(net) {
+  try { localStorage.setItem(NETWORK_KEY, net); } catch {}
+}
+
+// Regtest points at a local Esplora-compatible server (coinos's chopsticks `cs`
+// at :3000 by default). Treated like a self-hosted custom explorer: the URL is
+// used as the esplora base directly (no `/api` prefix, no `/testnet`).
+const REGTEST_ESPLORA_KEY = 'btc-wallet-regtest-esplora';
+export function getRegtestEsplora() {
+  try { return (localStorage.getItem(REGTEST_ESPLORA_KEY) || '').trim() || 'http://localhost:3000'; }
+  catch { return 'http://localhost:3000'; }
+}
+export function setRegtestEsplora(url) {
+  try { localStorage.setItem(REGTEST_ESPLORA_KEY, (url || '').trim()); } catch {}
+}
+
 // Resolve the configured explorer to the host list the Api tries in order.
 function resolveHosts(net) {
+  if (net === 'regtest') {
+    const base = getRegtestEsplora().replace(/\/+$/, '');
+    return [{ base, kind: 'esplora', web: base, cooldownUntil: 0 }];
+  }
   const cfg = getExplorerConfig();
   const apiPath = net === 'testnet' ? '/testnet/api' : '/api';
   const host = (web, kind) => ({ base: web + apiPath, kind, web, cooldownUntil: 0 });
@@ -138,7 +167,7 @@ export function resolveElectrumUrl() {
 }
 
 export function wsUrl(net) {
-  if (net === 'testnet') return null;
+  if (net !== 'mainnet') return null; // coinos watcher is mainnet-only
   // Electrum backend selects/rotates candidates in the wallet; here we only
   // resolve the coinos watcher (esplora 'coinos' mode) or null (esplora 'explorer').
   if (getBackend() === 'electrum') return null;
@@ -181,6 +210,8 @@ export class Api {
     const web = (this._hosts[0] && this._hosts[0].web) || 'https://mempool.space';
     return web + (this.net === 'testnet' ? '/testnet/tx/' : '/tx/') + txid;
   }
+
+  get isRegtest() { return this.net === 'regtest'; }
 
   // ---- rate-aware global scheduler --------------------------------------
   #schedule(task) {

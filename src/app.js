@@ -8,7 +8,7 @@ import { Wallet, newMnemonic, isValidMnemonic, accountXpubFor, cacheKeyFor, utxo
 import { qrSvg } from './qr.js';
 import { scanQr } from './scan.js';
 import { getSyncConfig, setSyncConfig } from './nostr.js';
-import { getExplorerConfig, setExplorerConfig, EXPLORER_PRESETS, getDataMode, setDataMode, ELECTRUM_PRESETS, getElectrumServerConfig, setElectrumServerConfig } from './api.js';
+import { getExplorerConfig, setExplorerConfig, EXPLORER_PRESETS, getDataMode, setDataMode, ELECTRUM_PRESETS, getElectrumServerConfig, setElectrumServerConfig, getNetwork, setNetwork, getRegtestEsplora, setRegtestEsplora } from './api.js';
 import { isSilentPaymentAddress } from './silentpay.js';
 import { t, LANGS, getLang, setLang, isRTL, loadLocale } from './i18n.js';
 import {
@@ -629,9 +629,10 @@ async function activateAccount(acc, opts = {}) {
   // until the user commits (claims, or chooses to keep it / enters the wallet),
   // so bailing from an already-claimed gift doesn't leave an empty account.
   if (opts.gift) acc.provisional = true;
-  if (acc.type === 'watch') wallet.load({ xpub: acc.xpub, netName: 'mainnet', offline: false });
-  else if (acc.xprv) wallet.load({ xprv: acc.xprv, netName: 'mainnet', offline: false });
-  else wallet.load({ mnemonic: acc.mnemonic, passphrase: acc.passphrase || '', netName: 'mainnet', offline: false });
+  const netName = getNetwork();
+  if (acc.type === 'watch') wallet.load({ xpub: acc.xpub, netName, offline: false });
+  else if (acc.xprv) wallet.load({ xprv: acc.xprv, netName, offline: false });
+  else wallet.load({ mnemonic: acc.mnemonic, passphrase: acc.passphrase || '', netName, offline: false });
   // Record the account-level xpub so this wallet survives a session wipe as a
   // watch-only entry (see the durable account directory) — you keep seeing your
   // balance/history and re-enter the seed to spend again.
@@ -1140,7 +1141,7 @@ function lock() {
   wallet.stopRealtime();
   clearAccounts();
   vaultPassword = null;
-  wallet.load({ mnemonic: '', passphrase: '', netName: 'mainnet', offline: false });
+  wallet.load({ mnemonic: '', passphrase: '', netName: getNetwork(), offline: false });
   wallet.mnemonic = '';
   ui.screen = hasVault() ? 'vault' : 'unlock';
   ui.unlockTab = 'create';
@@ -1320,6 +1321,7 @@ function settingsTab() {
         : h('button', { onClick: () => { ui.addrScan = true; ui.addrScanPage = 0; render(); } }, t('rescanAddresses'))
     ),
     autoLockCard(),
+    networkCard(),
     explorerCard(),
     wallet.watchOnly || !wallet.mnemonic ? null : syncCard()
   );
@@ -1548,6 +1550,43 @@ function autoLockCard() {
     h('select', { onChange: (e) => { acc.autoLock = Number(e.target.value) || 0; persistAccounts(); render(); } },
       AUTOLOCK_OPTIONS.map((o) => h('option', { value: String(o.ms), selected: o.ms === cur }, t(o.label)))
     )
+  );
+}
+
+// Switch the active Bitcoin network. Changes addresses/balances entirely, so we
+// persist the choice and reload the active account (or empty wallet) under it.
+function changeNetwork(net) {
+  if (net === getNetwork()) return;
+  setNetwork(net);
+  const acc = accounts.find((a) => a.id === activeId);
+  if (acc) activateAccount(acc); else render();
+}
+
+// Network selector (mainnet / testnet / regtest). Regtest also exposes the
+// Esplora base URL (default coinos chopsticks at http://localhost:3000).
+function networkCard() {
+  const net = getNetwork();
+  return h(
+    'div',
+    { class: 'card col' },
+    h('h3', {}, 'Network'),
+    h('p', { class: 'small muted', style: 'margin:0' }, 'Bitcoin network this wallet operates on.'),
+    h('select', { onChange: (e) => changeNetwork(e.target.value) },
+      h('option', { value: 'mainnet', selected: net === 'mainnet' }, 'Mainnet'),
+      h('option', { value: 'testnet', selected: net === 'testnet' }, 'Testnet'),
+      h('option', { value: 'regtest', selected: net === 'regtest' }, 'Regtest')
+    ),
+    net === 'regtest'
+      ? h('label', { class: 'field' },
+          h('span', { class: 'lab' }, 'Regtest Esplora URL'),
+          h('input', {
+            type: 'text', class: 'mono-input', placeholder: 'http://localhost:3000',
+            autocapitalize: 'none', autocomplete: 'off', spellcheck: 'false', value: getRegtestEsplora(),
+            onChange: (e) => { setRegtestEsplora(e.target.value.trim()); wallet.reloadExplorer(); },
+          }),
+          h('div', { class: 'small faint' }, 'Esplora-compatible REST endpoint (coinos chopsticks/electrs).')
+        )
+      : null
   );
 }
 
