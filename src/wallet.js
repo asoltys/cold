@@ -706,6 +706,9 @@ export class Wallet {
   _sortTxs() {
     this.txs.sort((a, b) => {
       if (a.confirmed !== b.confirmed) return a.confirmed ? 1 : -1; // pending first
+      // Pending txs share blockTime 0, so order them by when we first saw them
+      // (newest on top); confirmed txs go by block time (newest on top).
+      if (!a.confirmed) return (b.firstSeen || 0) - (a.firstSeen || 0);
       return (b.blockTime || 0) - (a.blockTime || 0);
     });
   }
@@ -1801,6 +1804,7 @@ export class Wallet {
     this.change = d.change || [];
     this.utxos = d.utxos || [];
     this.txs = d.txs || [];
+    this._sortTxs(); // a cache saved before the firstSeen-ordering fix may be stale
     this.nextReceiveIndex = d.nextReceiveIndex || 0;
     this.nextChangeIndex = d.nextChangeIndex || 0;
     this.feeRates = d.feeRates || this.feeRates;
