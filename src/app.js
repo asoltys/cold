@@ -5,6 +5,7 @@
 // (without re-rendering) so their values survive structural re-renders.
 
 import { Wallet, newMnemonic, isValidMnemonic, utxoId, previewGift, giftOutpoints, buildClaimTx, giftMinimum, parseExtendedKey, xpubToZpub, encryptVault, decryptVault, NETS, parseDescriptor, exportLabelsBIP329, importLabelsBIP329, detectNetworkFromKey } from './wallet.js';
+import { hex, base64 } from '@scure/base';
 import { qrSvg } from './qr.js';
 import { scanQr } from './scan.js';
 import { getSyncConfig, setSyncConfig } from './nostr.js';
@@ -49,6 +50,7 @@ const ui = {
   importNet: '',
   scanGapLimit: 20,
   scanFromDate: '',
+  scanFromBlock: '',
   showAdvanced: false,
   revealShown: false, // recovery phrase unmasked on the Backup tab (after the warning)
   pubkeyShown: false, // account public key revealed in Settings
@@ -83,6 +85,12 @@ const ui = {
   spScanDone: 0,
   spScanStarted: 0,
   spScanFromHeight: 709632,
+  spScanFromDate: '',
+  psbtInput: '',
+  psbtResult: null, // { signedPsbtHex, signedPsbtB64, txHex, txid, nSigned, total } after signing
+  psbtError: '',
+  psbtBusy: false,
+
   send: blankSend(),
   draft: null, // built tx summary awaiting review
   broadcastTx: null, // scanned signed tx awaiting broadcast confirmation
@@ -336,6 +344,34 @@ function toggleUnit() {
 const unitLabel = () => (unit === 'sats' ? 'sats' : 'BTC');
 const fmtAmount = (sats) => (unit === 'sats' ? fmtSats(sats) : fmtBtc(sats));
 
+// Approximate block height ↔ date conversions (~10 min blocks).
+const GENESIS_TS = 1231006505;
+const SECS_PER_BLOCK = 600;
+function heightToDate(height) {
+  const d = new Date((GENESIS_TS + height * SECS_PER_BLOCK) * 1000);
+  return d.toISOString().split('T')[0];
+}
+function dateToHeight(dateStr) {
+  if (!dateStr) return 709632;
+  const ts = Math.floor(new Date(dateStr).getTime() / 1000);
+  if (ts <= 0) return 709632;
+  return Math.max(0, Math.floor((ts - GENESIS_TS) / SECS_PER_BLOCK));
+}
+function dateParts(d) {
+  if (!d) return { y: '', m: '', d: '' };
+  const p = d.split('-');
+  return { y: p[0] || '', m: p[1] || '', d: p[2] || '' };
+}
+function makeDate(y, m, dd) {
+  if (!y || !m || !dd) return '';
+  return `${y}-${String(m).padStart(2, '0')}-${String(dd).padStart(2, '0')}`;
+}
+const curYear = new Date().getFullYear();
+function selOpts(opts) { return opts.map(v => h('option', { value: v }, v)); }
+function yearOpts() { return [h('option', { value: '' }, 'Year'), ...selOpts(Array.from({length: curYear - 2008}, (_, i) => String(2009 + i))), h('option', { value: String(curYear + 1) }, String(curYear + 1))]; }
+function monthOpts() { return [h('option', { value: '' }, 'Month'), ...selOpts(Array.from({length: 12}, (_, i) => String(i + 1).padStart(2, '0')))]; }
+function dayOpts() { return [h('option', { value: '' }, 'Day'), ...selOpts(Array.from({length: 31}, (_, i) => String(i + 1).padStart(2, '0')))]; }
+
 // A clickable unit label. cls lets callers inherit surrounding sizing.
 function unitTag(cls = '') {
   return h('button', { type: 'button', class: 'unit-tag ' + cls, title: t('switchUnit'), onClick: toggleUnit }, unitLabel());
@@ -557,23 +593,46 @@ function importPane() {
       'label',
       { class: 'field' },
       h('span', { class: 'lab' }, t('importLabel')),
-      h('textarea', {
-        placeholder: t('importPlaceholder'),
-        autocapitalize: 'none',
-        autocomplete: 'off',
-        spellcheck: 'false',
-        value: ui.importText,
-        onInput: (e) => {
-          ui.importText = e.target.value;
-          // Auto-detect network from pasted key/descriptor.
-          const detected = detectNetworkFromKey(ui.importText);
-          if (detected) ui.importNet = detected;
-        },
-      })
+      h('div', { class: 'textarea-wrap' },
+        h('textarea', {
+          placeholder: t('importPlaceholder'),
+          autocapitalize: 'none',
+          autocomplete: 'off',
+          spellcheck: 'false',
+          value: ui.importText,
+          onInput: (e) => {
+            ui.importText = e.target.value;
+            // Auto-detect network from pasted key/descriptor.
+            const detected = detectNetworkFromKey(ui.importText);
+            if (detected) ui.importNet = detected;
+          },
+        }),
+        canScan() && h('button', {
+          type: 'button', class: 'btn-sm textarea-scan-btn', title: t('scanSeedQr'), onClick: scanSeedQr,
+          html: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3"/></svg>',
+        })
+      )
     ),
     optionsPanel(),
     h('button', { class: 'btn-primary btn-block', onClick: () => openWallet(ui.importText) }, t('openWallet'))
   );
+}
+
+async function scanSeedQr() {
+  let text;
+  try {
+    text = await scanQr(t);
+  } catch (e) {
+    ui.unlockError = e.message;
+    render();
+    return;
+  }
+  if (text) {
+    ui.importText = text.trim();
+    const detected = detectNetworkFromKey(ui.importText);
+    if (detected) ui.importNet = detected;
+    render();
+  }
 }
 
 function optionsPanel() {
@@ -627,12 +686,30 @@ function optionsPanel() {
       h(
         'label',
         { class: 'field' },
-        h('span', { class: 'lab' }, t('scanFromDate')),
+        h('span', { class: 'lab' }, t('scanFrom')),
         h('input', {
-          type: 'date',
-          value: ui.scanFromDate,
-          onInput: (e) => { ui.scanFromDate = e.target.value; },
+          type: 'number', min: 1, placeholder: 'Block height', class: 'mono-input',
+          value: ui.scanFromBlock,
+          onInput: (e) => {
+            ui.scanFromBlock = e.target.value;
+            const h = parseInt(ui.scanFromBlock) || 0;
+            ui.scanFromDate = h > 0 ? heightToDate(h) : '';
+          },
         }),
+        h('div', { class: 'date-picker' },
+          (() => {
+            const { y, m, d: dd } = dateParts(ui.scanFromDate);
+            const sync = (e) => {
+              const s = e.target.closest('.date-picker').querySelectorAll('select');
+              const nd = makeDate(s[0].value, s[1].value, s[2].value);
+              ui.scanFromDate = nd;
+              if (nd) ui.scanFromBlock = String(dateToHeight(nd));
+            };
+            return [h('select', { class: 'mono-input', value: y, onChange: sync }, yearOpts()),
+                    h('select', { class: 'mono-input', value: m, onChange: sync }, monthOpts()),
+                    h('select', { class: 'mono-input', value: dd, onChange: sync }, dayOpts())];
+          })()
+        ),
         h('span', { class: 'small muted', style: 'margin-top:2px' }, t('scanFromDateDesc'))
       )
     ) : null
@@ -1037,6 +1114,7 @@ function lock() {
   ui.importNet = '';
   ui.scanGapLimit = 20;
   ui.scanFromDate = '';
+  ui.scanFromBlock = '';
   ui.showAdvanced = false;
   ui.confirm = [];
   ui.revealShown = false;
@@ -1303,12 +1381,29 @@ function silentPaymentCard() {
     ),
     wallet.offline ? null : h('div', { class: 'col', style: 'gap:8px;margin-top:8px' },
       h('label', { class: 'field', style: 'margin:0' },
-        h('span', { class: 'lab' }, t('spScanFromHeight')),
+        h('span', { class: 'lab' }, t('scanFrom')),
         h('input', {
           type: 'number', min: 1, class: 'mono-input',
+          placeholder: 'Block height',
           value: ui.spScanFromHeight || 709632,
-          onInput: (e) => { ui.spScanFromHeight = parseInt(e.target.value) || 709632; },
-        })
+          onInput: (e) => {
+            ui.spScanFromHeight = parseInt(e.target.value) || 0;
+            ui.spScanFromDate = heightToDate(ui.spScanFromHeight);
+          },
+        }),
+        h('div', { class: 'date-picker' },
+          (() => {
+            const { y, m, d: dd } = dateParts(ui.spScanFromDate || heightToDate(ui.spScanFromHeight || 709632));
+            const sync = (e) => {
+              const s = e.target.closest('.date-picker').querySelectorAll('select');
+              const nd = makeDate(s[0].value, s[1].value, s[2].value);
+              if (nd) { ui.spScanFromDate = nd; ui.spScanFromHeight = dateToHeight(nd); }
+            };
+            return [h('select', { class: 'mono-input', value: y, onChange: sync }, yearOpts()),
+                    h('select', { class: 'mono-input', value: m, onChange: sync }, monthOpts()),
+                    h('select', { class: 'mono-input', value: dd, onChange: sync }, dayOpts())];
+          })()
+        )
       ),
       ui.spScanBusy
         ? h('div', { class: 'col gap4' },
@@ -2084,10 +2179,11 @@ function balanceCard() {
 
 function tabsBar() {
   const tabs = [
-    ['receive', t('tabReceive')],
-    // Watch-only wallets can't sign, so no Send tab.
-    ...(wallet.watchOnly ? [] : [['send', t('tabSend')]]),
     ['history', t('tabHistory')],
+    ['receive', t('tabReceive')],
+    // Watch-only wallets can't sign, so no Send or Sign tab.
+    ...(wallet.watchOnly ? [] : [['send', t('tabSend')]]),
+    ...(wallet.watchOnly ? [] : [['sign', t('tabSign')]]),
     ['settings', t('tabSettings')],
   ];
   return h(
@@ -2102,6 +2198,7 @@ function tabsBar() {
         ui.addrScan = false; // and back to the main Settings, not the address list
         ui.bump = null;
         ui.giftMode = false;
+        ui.psbtResult = null;
         render();
       })
     )
@@ -2112,6 +2209,7 @@ function tabContent() {
   switch (ui.tab) {
     case 'receive': return receiveTab();
     case 'send': return sendTab();
+    case 'sign': return signTab();
     case 'history': return historyTab();
     case 'settings': return settingsTab();
   }
@@ -2793,6 +2891,131 @@ function sendResultView() {
   );
 }
 
+// ---------------------------------------------------------------- Sign external PSBT
+function signTab() {
+  if (ui.psbtResult) return signResultView();
+  return h(
+    'div',
+    { class: 'col' },
+    h('div', { class: 'card col' },
+      h('h3', { style: 'margin:0' }, t('signPsbt')),
+      h('p', { class: 'small muted', style: 'margin:0' }, t('psbtDesc')),
+      h('label', { class: 'field' },
+        h('span', { class: 'lab' }, t('psbtLabel')),
+        h('div', { class: 'textarea-wrap' },
+          h('textarea', {
+            placeholder: t('psbtPlaceholder'),
+            autocapitalize: 'none', autocomplete: 'off', spellcheck: 'false',
+            style: 'min-height:90px',
+            value: ui.psbtInput,
+            onInput: (e) => { ui.psbtInput = e.target.value; },
+          }),
+          canScan() && h('button', {
+            type: 'button', class: 'btn-sm textarea-scan-btn', title: t('psbtScanBtn'), onClick: scanPsbtQr,
+            html: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3"/></svg>',
+          })
+        )
+      ),
+      ui.psbtError && h('div', { class: 'notice err' }, ui.psbtError),
+      ui.psbtBusy
+        ? h('button', { class: 'btn-primary btn-block', disabled: true }, h('span', { class: 'spinner' }), ' ', t('psbtSigning'))
+        : h('button', { class: 'btn-primary btn-block', onClick: doSignPsbt }, t('psbtSignBtn'))
+    )
+  );
+}
+
+async function scanPsbtQr() {
+  let text;
+  try {
+    text = await scanQr(t);
+  } catch (e) {
+    ui.psbtError = e.message;
+    render();
+    return;
+  }
+  if (text) {
+    ui.psbtInput = text.trim();
+    ui.psbtError = '';
+    render();
+  }
+}
+
+function doSignPsbt() {
+  ui.psbtError = '';
+  const raw = (ui.psbtInput || '').trim();
+  if (!raw) { ui.psbtError = t('psbtPlaceholder'); render(); return; }
+  ui.psbtBusy = true;
+  render();
+  try {
+    let bytes;
+    if (/^[0-9a-fA-F]+$/.test(raw) && raw.length % 2 === 0) {
+      bytes = hex.decode(raw);
+    } else {
+      bytes = base64.decode(raw);
+    }
+    const tx = wallet.signPSBT(bytes);
+    const total = tx.inputsLength;
+    const statuses = [];
+    for (let i = 0; i < total; i++) statuses.push(tx.inputStatus(i));
+    const nSigned = statuses.filter((s) => s !== 'unsigned').length;
+    let finalized = false;
+    try { tx.finalize(); finalized = true; } catch {}
+    const signedPsbtBytes = tx.toPSBT();
+    const signedPsbtHex = hex.encode(signedPsbtBytes);
+    const signedPsbtB64 = base64.encode(signedPsbtBytes);
+    const txHex = finalized ? tx.hex : '';
+    ui.psbtResult = {
+      signedPsbtHex,
+      signedPsbtB64,
+      txHex,
+      txid: finalized ? tx.id : '',
+      nSigned,
+      total,
+      finalized,
+    };
+    ui.psbtInput = '';
+    ui.psbtError = '';
+  } catch (e) {
+    ui.psbtError = t('psbtSignError', { msg: e.message });
+  }
+  ui.psbtBusy = false;
+  render();
+}
+
+function signResultView() {
+  const r = ui.psbtResult;
+  const reset = () => { ui.psbtResult = null; render(); };
+  const showQr = r.finalized ? r.txHex : r.signedPsbtB64;
+  return h('div', { class: 'card col' },
+    h('div', { class: r.finalized ? 'notice ok' : 'warn-box' }, r.finalized ? t('psbtFinalized') : t('psbtSignedNote')),
+    h('div', { class: 'small muted' }, t('psbtInputsSigned', { n: r.nSigned, total: r.total, plural: r.nSigned !== 1 ? 's' : '' })),
+    r.finalized && h('div', { class: 'small muted mt8' }, t('transactionId'), h('div', { class: 'addr-box', style: 'margin-top:4px' }, r.txid)),
+    r.finalized
+      ? h('div', { class: 'mt8' },
+          h('div', { class: 'small muted' }, t('signedTxRaw')),
+          h('textarea', { readonly: true, style: 'min-height:80px;margin-top:4px', value: r.txHex }),
+          h('div', { class: 'row gap6 mt8' },
+            copyBtn(r.txHex, t('copyHex')),
+            h('button', { class: 'btn-sm', onClick: () => download(`tx-${r.txid.slice(0, 8)}.txt`, r.txHex, 'text/plain') }, t('downloadLabel')),
+          )
+        )
+      : h('div', { class: 'mt8' },
+          h('div', { class: 'small muted' }, t('psbtCopyBase64')),
+          h('textarea', { readonly: true, style: 'min-height:80px;margin-top:4px', value: r.signedPsbtB64 }),
+          h('div', { class: 'row gap6 mt8' },
+            copyBtn(r.signedPsbtB64, t('psbtCopyBase64')),
+            copyBtn(r.signedPsbtHex, t('psbtCopyHex')),
+            h('button', { class: 'btn-sm', onClick: () => download(`psbt-${(r.txid || Date.now()).toString().slice(0, 8)}.psbt`, r.signedPsbtHex, 'application/octet-stream') }, t('psbtSave')),
+          )
+        ),
+    h('details', { class: 'mt8' },
+      h('summary', { class: 'small muted' }, t('psbtShowQr')),
+      h('div', { style: 'margin-top:10px', html: qrSvg(showQr) })
+    ),
+    h('button', { class: 'btn-block mt8', onClick: reset }, t('done'))
+  );
+}
+
 // ---------------------------------------------------------------- History
 // An outstanding sent gift shown in History: tappable to cancel (reclaim the
 // coin for a future payment, or revoke the link on-chain) without going through
@@ -2879,6 +3102,24 @@ function giftsAllView(gifts) {
   );
 }
 
+async function rescanPending() {
+  if (wallet.offline) return;
+  const pending = wallet.txs.filter((t) => !t.confirmed);
+  for (const tx of pending) {
+    try {
+      const full = await wallet.api.getTx(tx.txid);
+      if (!full) continue;
+      if (full.status && full.status.confirmed) {
+        tx.confirmed = true;
+        tx.blockHeight = full.status.block_height || 0;
+        tx.blockTime = full.status.block_time || 0;
+      }
+    } catch {}
+  }
+  wallet.saveCache();
+  render();
+}
+
 function historyTab() {
   if (ui.bump) return bumpView();
   if (ui.txDetail) {
@@ -2888,6 +3129,7 @@ function historyTab() {
   }
   if (wallet.offline)
     return h('div', { class: 'card' }, h('p', { class: 'muted center', style: 'margin:0' }, t('historyOffline')));
+  const pendingTxs = wallet.txs.filter((t) => !t.confirmed);
   if ((wallet.scanning && !wallet.loaded) || (wallet.historyLoading && !wallet.txs.length))
     return h(
       'div',
@@ -2911,6 +3153,9 @@ function historyTab() {
   return h(
     'div',
     { class: 'card' },
+    pendingTxs.length && !wallet.offline
+      ? h('button', { class: 'btn-sm btn-block', style: 'margin-bottom:8px', onClick: rescanPending }, t('rescanPending', { n: pendingTxs.length }))
+      : null,
     h('div', { class: 'list' },
       ...giftsHead.map(giftHistoryItem),
       ...txSlice.map(txHistoryItem)
@@ -2999,6 +3244,9 @@ function txDetailView(tx) {
           ? h('button', { class: 'btn-primary btn-block', disabled: true }, h('span', { class: 'spinner' }))
           : h('button', { class: 'btn-primary btn-block', onClick: () => bumpFee(tx.txid) }, t('bumpFee')))
       : null,
+    !tx.confirmed && !wallet.offline
+      ? h('button', { class: 'btn-ghost btn-block', onClick: () => openTx(tx.txid) }, t('checkStatus'))
+      : null,
     h('button', { class: 'btn-ghost btn-block', onClick: () => { ui.txDetail = null; render(); } }, t('backToHistory'))
   );
 }
@@ -3074,6 +3322,7 @@ async function importLabelsFile(e) {
 // Load the active language's strings (English is inline; others are fetched),
 // apply text direction, then restore a wallet left open in this tab — otherwise
 // show the unlock screen.
+applyTheme();
 applyDir();
 loadLocale(getLang()).finally(() => {
   const code = readGiftHash();

@@ -11,7 +11,7 @@
 import { HDKey } from '@scure/bip32';
 import { generateMnemonic, mnemonicToSeedSync, validateMnemonic } from '@scure/bip39';
 import { wordlist } from '@scure/bip39/wordlists/english';
-import { hex, base64urlnopad, base32nopad, base58check } from '@scure/base';
+import { hex, base64, base64urlnopad, base32nopad, base58check } from '@scure/base';
 import { sha256 } from '@noble/hashes/sha256';
 import { scrypt } from '@noble/hashes/scrypt';
 import { randomBytes } from '@noble/hashes/utils';
@@ -1018,6 +1018,33 @@ export class Wallet {
     }
     tx.finalize();
     return tx.hex;
+  }
+
+  // Sign external PSBT. Matches inputs by bip32Derivation path and signs those
+  // whose chain/index we control. Returns the Transaction (caller gets .toPSBT() or .hex).
+  signPSBT(psbtBytes) {
+    if (this.watchOnly) throw new Error('Watch-only — no keys.');
+    const tx = btc.Transaction.fromPSBT(psbtBytes);
+    let nSigned = 0;
+    for (let i = 0; i < tx.inputsLength; i++) {
+      if (tx.inputStatus(i) !== 'unsigned') continue;
+      const inp = tx.getInput(i);
+      if (!inp.bip32Derivation || !inp.bip32Derivation.length) continue;
+      for (const [, { path }] of inp.bip32Derivation) {
+        if (path.length < 2) continue;
+        const chain = path[path.length - 2];
+        const index = path[path.length - 1];
+        if (chain > 1 || index > 0xfffffff) continue;
+        try {
+          const node = this.node(chain, index);
+          tx.signIdx(node.privateKey, i);
+          nSigned++;
+          break;
+        } catch {}
+      }
+    }
+    if (!nSigned) throw new Error('No inputs match this wallet.');
+    return tx;
   }
 
   async broadcast(hexTx) {
