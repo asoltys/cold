@@ -291,7 +291,7 @@ const STR = {
     dataSource: 'Data source',
     dataSourceDesc: 'Where Hal reads the chain and how it learns about incoming payments.',
     modeCoinos: 'coinos (instant)',
-    modeCoinosDesc: 'The default. Instant payment alerts via coinos, with chain data from a public block explorer.',
+    modeCoinosDesc: "The default. Chain data and instant payments come from coinos's own Bitcoin node, with public servers as automatic backup.",
     modeExplorer: 'Block explorer',
     modeExplorerDesc: 'Reads from your chosen block explorer and polls for payments — nothing is sent to coinos. A bit slower.',
     modeElectrum: 'Electrum server',
