@@ -166,8 +166,20 @@ export function resolveElectrumUrl() {
   return electrumCandidates()[0] || null;
 }
 
+// Regtest realtime push: a local electrs reached over a WS<->TCP bridge (electrs
+// is TCP-only). Same Electrum protocol the watcher already speaks, so the wallet
+// subscribes scripthashes and reconciles via esplora on each notification.
+const REGTEST_ELECTRUM_KEY = 'btc-wallet-regtest-electrum';
+export function getRegtestElectrumWs() {
+  try { return (localStorage.getItem(REGTEST_ELECTRUM_KEY) || '').trim() || 'ws://localhost:50003'; }
+  catch { return 'ws://localhost:50003'; }
+}
+export function setRegtestElectrumWs(url) { try { localStorage.setItem(REGTEST_ELECTRUM_KEY, (url || '').trim()); } catch {} }
+
 export function wsUrl(net) {
-  if (net !== 'mainnet') return null; // coinos watcher is mainnet-only
+  // Regtest gets realtime via the local electrs WS bridge (data still via esplora).
+  if (net === 'regtest') return getRealtimeEnabled() ? getRegtestElectrumWs() : null;
+  if (net !== 'mainnet') return null; // testnet: poll-only
   // Electrum backend selects/rotates candidates in the wallet; here we only
   // resolve the coinos watcher (esplora 'coinos' mode) or null (esplora 'explorer').
   if (getBackend() === 'electrum') return null;
