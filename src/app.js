@@ -889,13 +889,15 @@ function startSave(id) {
 }
 // --- load a seed into a watch-only account (make it spendable) --------------
 function startLoadSeed(opts = {}) {
-  ui.loadSeed = { value: '', passphrase: '', save: !!opts.save, error: '' };
+  // accId lets the per-wallet settings page import a seed for a specific
+  // (possibly non-active) watch-only wallet; defaults to the active one.
+  ui.loadSeed = { value: '', passphrase: '', save: !!opts.save, error: '', accId: opts.accId || activeId };
   render();
 }
 function cancelLoadSeed() { ui.loadSeed = null; render(); }
 async function doLoadSeed() {
   const ls = ui.loadSeed;
-  const acc = activeAccount();
+  const acc = (ls && accounts.find((a) => a.id === ls.accId)) || activeAccount();
   if (!ls || !acc || !acc.xpub) return;
   const raw = (ls.value || '').trim().replace(/\s+/g, ' ');
   if (!raw) { ls.error = t('enterSeedToSpend'); render(); return; }
@@ -1963,6 +1965,7 @@ function openAccountSettings(id) {
   ui.editLabel = null;
   ui.revealShown = false;
   ui.pubkeyShown = false;
+  ui.loadSeed = null;
   ui.screen = 'accountSettings';
   render();
 }
@@ -1989,7 +1992,15 @@ function accountSettingsScreen() {
     brandHeader(false),
     // Recovery phrase (top)
     isWatch
-      ? h('div', { class: 'card col' }, h('h3', {}, t('recoveryPhrase')), h('p', { class: 'small muted', style: 'margin:0' }, t('watchOnlyNote')))
+      ? (ui.loadSeed && ui.loadSeed.accId === a.id
+          ? loadSeedCard()
+          : h('div', { class: 'card col' },
+              h('h3', {}, t('recoveryPhrase')),
+              h('p', { class: 'small muted', style: 'margin:0' }, t('watchOnlyNote')),
+              a.xpub
+                ? h('button', { class: 'btn-primary btn-block', style: 'margin-top:4px', onClick: () => startLoadSeed({ accId: a.id }) }, t('loadSeedBtn'))
+                : null
+            ))
       : !a.mnemonic
         ? h('div', { class: 'card col' }, h('h3', {}, t('importedKey')), h('p', { class: 'small muted', style: 'margin:0' }, t('importedKeyNote')))
         : h('div', { class: 'card col' },
@@ -2036,7 +2047,7 @@ function accountSettingsScreen() {
       h('select', { onChange: (e) => { a.autoLock = Number(e.target.value) || 0; persistAccounts(); if (a.persisted) writeVault(); render(); } },
         AUTOLOCK_OPTIONS.map((o) => h('option', { value: String(o.ms), selected: o.ms === accAutoLock(a) }, t(o.label))))
     ),
-    h('button', { class: 'btn-ghost btn-block', onClick: () => { ui.editLabel = null; ui.revealShown = false; ui.pubkeyShown = false; ui.screen = 'accounts'; render(); } }, t('back'))
+    h('button', { class: 'btn-ghost btn-block', onClick: () => { ui.editLabel = null; ui.revealShown = false; ui.pubkeyShown = false; ui.loadSeed = null; ui.screen = 'accounts'; render(); } }, t('back'))
   );
 }
 
