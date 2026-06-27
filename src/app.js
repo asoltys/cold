@@ -8,7 +8,7 @@ import { Wallet, newMnemonic, isValidMnemonic, accountXpubFor, cacheKeyFor, utxo
 import { qrSvg } from './qr.js';
 import { scanQr } from './scan.js';
 import { getSyncConfig, setSyncConfig } from './nostr.js';
-import { getExplorerConfig, setExplorerConfig, explorerPresets, getDataMode, setDataMode, electrumPresets, getElectrumServerConfig, setElectrumServerConfig, getNetwork, setNetwork, NETWORKS } from './api.js';
+import { getExplorerConfig, setExplorerConfig, explorerPresets, getDataMode, setDataMode, electrumPresets, getElectrumServerConfig, setElectrumServerConfig, getNetwork, setNetwork, NETWORKS, getSpIndexerConfig, setSpIndexerConfig, spIndexerPresets } from './api.js';
 import { isSilentPaymentAddress } from './silentpay.js';
 import { t, LANGS, getLang, setLang, isRTL, loadLocale } from './i18n.js';
 import {
@@ -1307,6 +1307,7 @@ function settingsTab() {
     ),
     networkCard(),
     explorerCard(),
+    spIndexerCard(),
     wallet.watchOnly || !wallet.mnemonic ? null : syncCard()
   );
 }
@@ -2224,12 +2225,73 @@ function receiveTab() {
   }
 
   const fresh = wallet.freshReceive();
+  const spAddr = wallet.silentPaymentsAvailable() ? wallet.silentPaymentAddress() : null;
   return h(
     'div',
-    { class: 'card col', style: 'align-items:center;gap:14px' },
-    h('div', { html: qrSvg(fresh.address) }),
-    h('div', { class: 'addr-box', style: 'width:100%' }, fresh.address),
-    copyBtn(fresh.address, t('copyAddress'))
+    { class: 'col', style: 'gap:16px' },
+    h('div', { class: 'card col', style: 'align-items:center;gap:14px' },
+      h('div', { html: qrSvg(fresh.address) }),
+      h('div', { class: 'addr-box', style: 'width:100%' }, fresh.address),
+      copyBtn(fresh.address, t('copyAddress'))
+    ),
+    spAddr ? silentPaymentReceiveCard(spAddr) : null
+  );
+}
+
+// Reusable silent-payment receive address (sp1…/tsp1…) + on-device scan. The
+// address is static and reusable; senders derive a unique on-chain output each
+// time, so there's no address reuse and nothing links the payments.
+function silentPaymentReceiveCard(spAddr) {
+  const bal = wallet.spBalance();
+  return h(
+    'div',
+    { class: 'card col', style: 'gap:12px' },
+    h('div', { class: 'row between' },
+      h('h3', { style: 'margin:0' }, t('spReceiveTitle')),
+      h('span', { class: 'small muted' }, 'BIP-352')
+    ),
+    h('p', { class: 'small muted', style: 'margin:0' }, t('spReceiveDesc')),
+    h('div', { style: 'align-self:center' }, h('div', { html: qrSvg(spAddr) })),
+    h('div', { class: 'addr-box break', style: 'width:100%;font-size:12px' }, spAddr),
+    copyBtn(spAddr, t('copyAddress')),
+    bal.count
+      ? h('div', { class: 'small', style: 'text-align:center' },
+          t('spReceived', { amount: fmtAmount(bal.confirmed + bal.pending) + ' ' + unitLabel(), n: bal.count }))
+      : null,
+    h('button', { class: 'btn-block', disabled: wallet.spScanning, onClick: doSpScan },
+      wallet.spScanning ? t('spScanning') : t('spScan'))
+  );
+}
+
+function doSpScan() {
+  if (wallet.spScanning || wallet.offline) return;
+  wallet.scanSilentPayments().catch(() => {}).finally(render);
+  render();
+}
+
+// Silent-payment tweak indexer picker (per network) — the endpoint used to scan
+// for received silent payments. Only shown for wallets that can derive SP keys.
+function spIndexerCard() {
+  if (!wallet.silentPaymentKeys || !wallet.silentPaymentKeys()) return null;
+  const net = getNetwork();
+  const cfg = getSpIndexerConfig(net);
+  return h(
+    'div',
+    { class: 'card col' },
+    h('h3', {}, t('spIndexerTitle')),
+    h('p', { class: 'small muted', style: 'margin:0' }, t('spIndexerDesc')),
+    h('select', { onChange: (e) => { setSpIndexerConfig({ server: e.target.value, url: cfg.url }, net); render(); } },
+      spIndexerPresets(net).map((o) => h('option', { value: o.id, selected: o.id === cfg.server }, o.label))),
+    cfg.server === 'custom'
+      ? h('label', { class: 'field' },
+          h('span', { class: 'lab' }, t('spIndexerUrl')),
+          h('input', {
+            type: 'text', class: 'mono-input', placeholder: 'https://your-indexer:8888',
+            autocapitalize: 'none', autocomplete: 'off', spellcheck: 'false', value: cfg.url,
+            onChange: (e) => { setSpIndexerConfig({ server: 'custom', url: e.target.value.trim() }, net); render(); },
+          }),
+          h('div', { class: 'small faint' }, t('spIndexerHint')))
+      : null
   );
 }
 

@@ -109,6 +109,18 @@ Bun.serve({
       const b = blocks.get(Number(m[1]));
       return json(b ? b.items.map((i) => i.tweak) : []);
     }
+    // All SP-eligible tx items from height `from` to the tip, in one response —
+    // each tagged with its height. Lets a client scan a range without one fetch
+    // per block. (Regtest-scale; mainnet would page or use BIP-158 filters.)
+    if ((m = p.match(/^\/scan\/(\d+)$/))) {
+      const from = Number(m[1]);
+      const items = [];
+      for (let h = from; h <= indexed; h++) {
+        const b = blocks.get(h);
+        if (b) for (const it of b.items) items.push({ height: h, ...it });
+      }
+      return json({ tip: indexed, items });
+    }
     return json({ error: 'not found' }, 404);
   },
 });

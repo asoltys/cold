@@ -21,7 +21,7 @@ import * as btc from '@scure/btc-signer';
 import { p2wpkh } from '@scure/btc-signer/payment';
 import { concatBytes } from '@scure/btc-signer/utils.js';
 
-import { Api, pool, getBackend, explorerWeb, electrumCandidates } from './api.js';
+import { Api, pool, getBackend, explorerWeb, electrumCandidates, spIndexerUrl } from './api.js';
 import { ElectrumApi } from './electrum.js';
 import { NostrSync, getSyncConfig } from './nostr.js';
 import { isSilentPaymentAddress, decodeSilentPaymentAddress, silentPaymentScripts, silentPaymentPlaceholder, deriveSilentPaymentKeys, encodeSilentPaymentAddress, silentPaymentScan } from './silentpay.js';
@@ -102,6 +102,12 @@ export class Wallet {
     this.feeRates = null;
     this.confirmed = 0;
     this.pending = 0;
+    // Silent-payment (BIP-352) receiving: outputs we found by scanning the
+    // indexer. Kept in their own bucket (one-time taproot keys, not BIP84
+    // addresses); { txid, vout, value, confirmed, tweak, xonly, address }.
+    this.spUtxos = [];
+    this.lastSpScan = 0; // highest block height scanned for silent payments
+    this.spScanning = false;
 
     this.scanning = false;
     this.loaded = false; // true once a scan/snapshot has populated balances once
@@ -178,6 +184,8 @@ export class Wallet {
     this.txs = [];
     this.confirmed = 0;
     this.pending = 0;
+    this.spUtxos = [];
+    this.lastSpScan = 0;
     this.loaded = false;
     this.nextReceiveIndex = 0;
     this.nextChangeIndex = 0;
@@ -275,6 +283,88 @@ export class Wallet {
   silentPaymentAddress() {
     const k = this.silentPaymentKeys();
     return k ? encodeSilentPaymentAddress(k.scanPub, k.spendPub, { testnet: this.netName !== 'mainnet' }) : null;
+  }
+
+  // Is SP receiving available here? (we can derive keys AND an indexer is set)
+  silentPaymentsAvailable() {
+    return !!(this.silentPaymentKeys() && spIndexerUrl(this.netName));
+  }
+
+  // Total received via silent payments: { confirmed, pending, count } over the
+  // unspent SP outputs we've found.
+  spBalance() {
+    let confirmed = 0, pending = 0;
+    for (const u of this.spUtxos) { if (u.confirmed) confirmed += u.value; else pending += u.value; }
+    return { confirmed, pending, count: this.spUtxos.length };
+  }
+
+  // The taproot address for an x-only output key (for backend UTXO lookups).
+  _spAddress(xonly) {
+    return btc.Address(this.netCfg.net).encode(btc.OutScript.decode(btc.OutScript.encode({ type: 'tr', pubkey: hex.decode(xonly) })));
+  }
+
+  // Scan the configured SP indexer from the last-scanned height to the tip, find
+  // outputs paying our scan/spend keys, and verify each is unspent via the chain
+  // backend (the indexer only does discovery). Updates this.spUtxos.
+  async scanSilentPayments({ rescan = false } = {}) {
+    const keys = this.silentPaymentKeys();
+    const indexer = spIndexerUrl(this.netName);
+    if (!keys || !indexer || this.offline) return { unavailable: true };
+    if (this.spScanning) return { busy: true };
+    this.spScanning = true;
+    this.emit();
+    try {
+      if (rescan) { this.spUtxos = []; this.lastSpScan = 0; }
+      const from = (this.lastSpScan || 0) + 1;
+      const res = await (await fetch(`${indexer}/scan/${from}`)).json();
+      const tip = res.tip || 0;
+      const have = new Set(this.spUtxos.map((u) => `${u.txid}:${u.vout}`));
+      const found = [];
+      for (const it of res.items || []) {
+        const matches = silentPaymentScan({
+          scanPriv: keys.scanPriv, spendPub: keys.spendPub,
+          tweak: hex.decode(it.tweak), outputs: it.outputs.map((o) => o.xonly),
+        });
+        for (const m of matches) {
+          const o = it.outputs.find((o) => o.xonly === m.output);
+          const id = `${it.txid}:${o.vout}`;
+          if (have.has(id)) continue;
+          have.add(id);
+          found.push({ txid: it.txid, vout: o.vout, value: o.value, xonly: m.output, tweak: m.tweak });
+        }
+      }
+      if (tip > this.lastSpScan) this.lastSpScan = tip;
+      // Verify newly-found outputs are unspent + get confirmation status.
+      for (const f of found) {
+        const address = this._spAddress(f.xonly);
+        try {
+          const us = await this.api.addressUtxos(address);
+          const u = us.find((x) => x.txid === f.txid && x.vout === f.vout);
+          if (u) this.spUtxos.push({ ...f, address, confirmed: !!(u.status && u.status.confirmed) });
+        } catch {}
+      }
+      await this._refreshSpUtxos();
+      this.saveCache();
+      this.emit();
+      return { found: found.length, scanned: tip };
+    } finally {
+      this.spScanning = false;
+      this.emit();
+    }
+  }
+
+  // Re-check tracked SP outputs against the backend: drop spent ones, refresh
+  // confirmation status.
+  async _refreshSpUtxos() {
+    const next = [];
+    for (const u of this.spUtxos) {
+      try {
+        const us = await this.api.addressUtxos(u.address);
+        const live = us.find((x) => x.txid === u.txid && x.vout === u.vout);
+        if (live) next.push({ ...u, confirmed: !!(live.status && live.status.confirmed) });
+      } catch { next.push(u); } // backend hiccup: keep as-is
+    }
+    this.spUtxos = next;
   }
 
   node(chain, index) {
@@ -1818,6 +1908,8 @@ export class Wallet {
       nextReceiveIndex: this.nextReceiveIndex,
       nextChangeIndex: this.nextChangeIndex,
       feeRates: this.feeRates,
+      spUtxos: this.spUtxos,
+      lastSpScan: this.lastSpScan,
     };
   }
 
@@ -1830,6 +1922,8 @@ export class Wallet {
     this.nextReceiveIndex = d.nextReceiveIndex || 0;
     this.nextChangeIndex = d.nextChangeIndex || 0;
     this.feeRates = d.feeRates || this.feeRates;
+    this.spUtxos = d.spUtxos || [];
+    this.lastSpScan = d.lastSpScan || 0;
     this.addrMap = new Map();
     for (const a of [...this.receive, ...this.change]) {
       this.addrMap.set(a.address, { chain: a.chain, index: a.index });
