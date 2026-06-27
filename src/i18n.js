@@ -206,7 +206,6 @@ const STR = {
     status: 'Status',
     confirmed: 'Confirmed',
     confirmedTag: 'confirmed',
-    pendingInMempool: 'Pending (in mempool)',
     block: 'Block',
     date: 'Date',
     copyId: 'Copy ID',

@@ -3054,7 +3054,7 @@ function txDetailView(tx) {
       ' ', unitTag('unit')
     ),
     h('div', { class: 'summary col', style: 'gap:0' },
-      line(t('status'), tx.confirmed ? t('confirmed') : t('pendingInMempool')),
+      line(t('status'), tx.confirmed ? t('confirmed') : t('pending')),
       tx.confirmed ? line(t('block'), String(tx.blockHeight || '—')) : null,
       tx.confirmed && tx.blockTime ? line(t('date'), new Date(tx.blockTime * 1000).toLocaleString()) : null,
       tx.fee ? line(t('networkFee'), fmtAmount(tx.fee) + ' ' + unitLabel()) : null
