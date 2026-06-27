@@ -89,51 +89,44 @@ export function getElectrumWsUrl() {
   return 'wss://coinos.io/electrum';
 }
 
-// One "data source" setting drives both where chain data comes from and whether
-// coinos sees your addresses for instant push:
-//   coinos   — block-explorer data + coinos instant-payment notifications (default)
-//   explorer — block-explorer data only; polls for payments, nothing sent to coinos
-//   electrum — a single Electrum-over-WS server for both data and push (your node)
-// getBackend()/getRealtimeEnabled() derive from it, so the rest of the code (and
-// the wsUrl logic) is unchanged. Existing per-feature settings migrate in.
+// The "data source" setting picks where chain data + payment notifications come
+// from:
+//   electrum — an Electrum-over-WS server for both data and instant push. The
+//              default server is coinos's own Fulcrum node (see ELECTRUM_PRESETS),
+//              with public servers as failover; or point it at your own node.
+//   explorer — block-explorer REST data only; polls for payments, no node.
+// getBackend() derives from it. Old 'coinos' mode maps to 'electrum' — coinos is
+// now simply the default Electrum server rather than a separate mode.
 const DATA_MODE_KEY = 'btc-wallet-mode';
-const BACKEND_KEY = 'btc-wallet-backend'; // legacy (migration only)
 const REALTIME_KEY = 'btc-wallet-realtime'; // legacy (migration only)
 export function getDataMode() {
   try {
     const m = localStorage.getItem(DATA_MODE_KEY);
-    if (m === 'coinos' || m === 'explorer' || m === 'electrum') return m;
-    if (localStorage.getItem(BACKEND_KEY) === 'electrum') return 'electrum';
+    if (m === 'electrum' || m === 'explorer') return m;
+    if (m === 'coinos') return 'electrum'; // coinos is now the default Electrum server
     if (localStorage.getItem(REALTIME_KEY) === 'off') return 'explorer';
   } catch {}
-  return 'coinos';
+  return 'electrum';
 }
 export function setDataMode(m) {
-  try { localStorage.setItem(DATA_MODE_KEY, m === 'electrum' || m === 'explorer' ? m : 'coinos'); } catch {}
+  try { localStorage.setItem(DATA_MODE_KEY, m === 'explorer' ? 'explorer' : 'electrum'); } catch {}
 }
-// 'coinos' data-source mode is now a full Electrum backend pointed at our own
-// Fulcrum (served same-origin at /electrum, proxied to the Fulcrum on cs), with
-// the public Electrum servers as automatic failover. Set false to revert to the
-// old explorer-REST-data + coinos-watcher-push behaviour.
-export const COINOS_ELECTRUM = true;
-const COINOS_ELECTRUM_URL = 'wss://halwallet.app/electrum';
 
 export function getBackend() {
   // Regtest runs Fulcrum (Electrum over WS) for both data and realtime push —
   // matches prod and drops the esplora/electrs dependency.
   if (getNetwork() === 'regtest') return 'electrum';
-  const m = getDataMode();
-  if (m === 'electrum') return 'electrum';
-  if (m === 'coinos' && COINOS_ELECTRUM) return 'electrum';
-  return 'esplora';
+  return getDataMode() === 'electrum' ? 'electrum' : 'esplora';
 }
-// The coinos watcher is only used in 'coinos' mode AND only while coinos serves
-// notifications via the shim (pre-Fulcrum); 'explorer' mode polls instead.
-export function getRealtimeEnabled() { return getDataMode() === 'coinos' && !COINOS_ELECTRUM; }
+// The legacy coinos watcher shim is retired (coinos is a full Electrum server
+// now); 'explorer' mode polls for payments instead of subscribing.
+export function getRealtimeEnabled() { return false; }
 
-// Electrum servers that accept WebSocket connections. blockstream.info is
-// electrs (validated); the point, though, is pointing at your own Fulcrum/electrs.
+// Electrum servers that accept WebSocket connections. coinos is our own Fulcrum
+// (served same-origin at /electrum) and the default; the public servers are
+// failover and alternatives; or point it at your own Fulcrum/electrs.
 export const ELECTRUM_PRESETS = [
+  { id: 'coinos', label: 'coinos', url: 'wss://halwallet.app/electrum' },
   { id: 'blockstream', label: 'blockstream.info', url: 'wss://blockstream.info/electrum-websocket/' },
   { id: 'electroncash', label: 'btc.electroncash.dk', url: 'wss://btc.electroncash.dk:60004' },
   { id: 'blackie', label: 'blackie.c3-soft.com', url: 'wss://blackie.c3-soft.com:57004' },
@@ -147,7 +140,7 @@ export function getElectrumServerConfig() {
     const c = JSON.parse(localStorage.getItem(ELECTRUM_SERVER_KEY) || 'null');
     if (c && c.server) return { server: c.server, url: c.url || '' };
   } catch {}
-  return { server: 'blockstream', url: '' };
+  return { server: 'coinos', url: '' };
 }
 export function setElectrumServerConfig({ server, url }) {
   try { localStorage.setItem(ELECTRUM_SERVER_KEY, JSON.stringify({ server, url: url || '' })); } catch {}
@@ -160,7 +153,6 @@ export function setElectrumServerConfig({ server, url }) {
 const PUBLIC_ELECTRUM = () => ELECTRUM_PRESETS.filter((x) => x.url).map((x) => x.url);
 export function electrumCandidates() {
   if (getNetwork() === 'regtest') return [getRegtestElectrumWs()]; // local Fulcrum
-  if (getDataMode() === 'coinos' && COINOS_ELECTRUM) return [COINOS_ELECTRUM_URL, ...PUBLIC_ELECTRUM()];
   const cfg = getElectrumServerConfig();
   if (cfg.server === 'custom') return cfg.url.trim() ? [cfg.url.trim()] : [];
   const primary = (ELECTRUM_PRESETS.find((x) => x.id === cfg.server) || ELECTRUM_PRESETS[0]).url;

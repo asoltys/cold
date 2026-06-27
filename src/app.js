@@ -1603,15 +1603,11 @@ function explorerCard() {
   const cfg = getExplorerConfig();
   const ecfg = getElectrumServerConfig();
   const setMode = (m) => {
-    const prev = getDataMode();
-    if (m === prev) return;
+    if (m === getDataMode()) return;
     setDataMode(m);
     render();
-    if (wallet.offline) return;
-    // coinos⇄explorer only flips the watcher (same REST data); to/from electrum
-    // swaps the whole backend, so rebuild + rescan there.
-    if ((m === 'electrum') !== (prev === 'electrum')) wallet.reloadExplorer();
-    else wallet.startRealtime();
+    // electrum⇄explorer swaps the whole backend, so rebuild + rescan.
+    if (!wallet.offline) wallet.reloadExplorer();
   };
   return h(
     'div',
@@ -1619,13 +1615,9 @@ function explorerCard() {
     h('h3', {}, t('dataSource')),
     h('p', { class: 'small muted', style: 'margin:0' }, t('dataSourceDesc')),
     h('select', { onChange: (e) => setMode(e.target.value) },
-      h('option', { value: 'coinos', selected: mode === 'coinos' }, t('modeCoinos')),
-      h('option', { value: 'explorer', selected: mode === 'explorer' }, t('modeExplorer')),
-      h('option', { value: 'electrum', selected: mode === 'electrum' }, t('modeElectrum'))
+      h('option', { value: 'electrum', selected: mode === 'electrum' }, t('modeElectrum')),
+      h('option', { value: 'explorer', selected: mode === 'explorer' }, t('modeExplorer'))
     ),
-    mode === 'coinos'
-      ? h('div', { class: 'small faint' }, t('modeCoinosDesc'))
-      : null,
     mode === 'electrum'
       ? h('div', { class: 'col', style: 'gap:8px' },
           h('div', { class: 'small faint' }, t('backendElectrumDesc')),
