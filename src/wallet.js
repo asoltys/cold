@@ -494,6 +494,17 @@ export class Wallet {
         this.utxos.push({ txid: u.txid, vout: u.vout, value: u.value, address, chain: p.chain, index: p.index, confirmed: conf });
       }
       if (entry) { entry.confirmed = eConf; entry.pending = ePend; }
+      // Also refresh this address's tx history so a pending→confirmed transition
+      // shows in History on the next poll — not only via the realtime push,
+      // which regtest / custom-explorer (non-WS) backends don't have.
+      try {
+        const list = await this.api.addressTxs(address);
+        for (const tx of list) {
+          const summary = this._txSummary(tx);
+          const at = this.txs.findIndex((t) => t.txid === tx.txid);
+          if (at >= 0) this.txs[at] = summary; else this.txs.push(summary);
+        }
+      } catch {}
       changed = true;
     }
     return changed;
