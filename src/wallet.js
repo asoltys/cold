@@ -24,7 +24,8 @@ import { concatBytes } from '@scure/btc-signer/utils.js';
 import { Api, pool, getBackend, explorerWeb, electrumCandidates, spIndexerUrl } from './api.js';
 import { ElectrumApi } from './electrum.js';
 import { NostrSync, getSyncConfig } from './nostr.js';
-import { isSilentPaymentAddress, decodeSilentPaymentAddress, silentPaymentScripts, silentPaymentPlaceholder, deriveSilentPaymentKeys, encodeSilentPaymentAddress, silentPaymentScan } from './silentpay.js';
+import { isSilentPaymentAddress, decodeSilentPaymentAddress, silentPaymentScripts, silentPaymentPlaceholder, deriveSilentPaymentKeys, encodeSilentPaymentAddress, silentPaymentScan, silentPaymentOutputPrivKey } from './silentpay.js';
+import { schnorr } from '@noble/curves/secp256k1';
 
 // No look-ahead: stop scanning a chain at the first unused address. This wallet
 // only ever exposes ONE unused address at a time (freshReceive = first unused;
@@ -897,13 +898,15 @@ export class Wallet {
       c += a.confirmed || 0;
       p += a.pending || 0;
     }
-    this.confirmed = c;
-    this.pending = p;
+    const sp = this.spBalance();
+    this.confirmed = c + sp.confirmed;
+    this.pending = p + sp.pending;
   }
 
   _recomputeBalanceFromUtxos() {
-    this.confirmed = this.utxos.reduce((s, u) => s + (u.confirmed ? u.value : 0), 0);
-    this.pending = this.utxos.reduce((s, u) => s + (u.confirmed ? 0 : u.value), 0);
+    const sp = this.spBalance();
+    this.confirmed = this.utxos.reduce((s, u) => s + (u.confirmed ? u.value : 0), 0) + sp.confirmed;
+    this.pending = this.utxos.reduce((s, u) => s + (u.confirmed ? 0 : u.value), 0) + sp.pending;
   }
 
   freshReceive() {
@@ -921,19 +924,40 @@ export class Wallet {
     const pool_ = coinIds
       ? this.utxos.filter((u) => coinIds.includes(utxoId(u)))
       : this.utxos.filter((u) => !this.isReserved(utxoId(u))); // skip coins set aside for gifts
-    if (!pool_.length) throw new Error('No spendable coins selected.');
+    // Received silent-payment outputs are spendable too — one-time taproot keys,
+    // signed by sign() with the per-output key. Excluded when paying an sp1…
+    // recipient (funding an SP send from a taproot input needs BIP-352 even-Y
+    // key handling we don't do yet), so those sends use BIP84 coins.
+    const payingSp = recipients.some((r) => isSilentPaymentAddress(r.address));
+    const spPool = payingSp
+      ? []
+      : coinIds
+        ? this.spUtxos.filter((u) => coinIds.includes(utxoId(u)))
+        : this.spUtxos.slice();
+    if (!pool_.length && !spPool.length) throw new Error('No spendable coins selected.');
 
-    const inputs = pool_.map((u) => {
-      const { script, pubkey } = this.derive(u.chain, u.index);
-      const pay = p2wpkh(pubkey, this.netCfg.net);
-      return {
-        ...pay,
+    const inputs = [
+      ...pool_.map((u) => {
+        const { pubkey } = this.derive(u.chain, u.index);
+        const pay = p2wpkh(pubkey, this.netCfg.net);
+        return {
+          ...pay,
+          txid: u.txid,
+          index: u.vout,
+          sequence: 0xfffffffd, // signal opt-in RBF (BIP125) so sends are bumpable
+          witnessUtxo: { script: pay.script, amount: BigInt(u.value) },
+        };
+      }),
+      ...spPool.map((u) => ({
         txid: u.txid,
         index: u.vout,
-        sequence: 0xfffffffd, // signal opt-in RBF (BIP125) so sends are bumpable
-        witnessUtxo: { script: pay.script, amount: BigInt(u.value) },
-      };
-    });
+        sequence: 0xfffffffd,
+        witnessUtxo: { script: btc.OutScript.encode({ type: 'tr', pubkey: hex.decode(u.xonly) }), amount: BigInt(u.value) },
+        // Present so the fee estimator sizes a key-path (64-byte) witness; the
+        // value is unused (SP outputs are signed raw in sign(), via tapKeySig).
+        tapInternalKey: hex.decode(u.xonly),
+      })),
+    ];
 
     const changeAddress = this.freshChange().address;
     const feePerByte = BigInt(Math.max(1, Math.round(feeRate)));
@@ -964,6 +988,7 @@ export class Wallet {
         network: this.netCfg.net,
         createTx: true,
         bip69: true,
+        disableScriptCheck: true,
       });
       if (!sel || !sel.tx) throw new Error('Fee exceeds balance.');
       if (spOuts.length) this._applySilentPayments(sel.tx, spOuts);
@@ -987,7 +1012,8 @@ export class Wallet {
       feePerByte,
       network: this.netCfg.net,
       createTx: true,
-      bip69: true,
+        bip69: true,
+        disableScriptCheck: true,
     });
     if (!sel || !sel.tx)
       throw new Error('Insufficient funds for amount + fee.');
@@ -1042,18 +1068,39 @@ export class Wallet {
     return false;
   }
 
-  // Sign every input of an already-built Transaction with the matching HD key.
+  // Sign every input of an already-built Transaction. BIP84 inputs sign with the
+  // matching HD key; received silent-payment outputs are taproot key-path spends
+  // signed manually with d = spend_priv + t_k (the output key is used raw, with
+  // no BIP-341 tweak, so btc-signer's auto key-path signing doesn't apply).
   sign(tx) {
     if (this.watchOnly) throw new Error('Watch-only wallet — no keys to sign with.');
-    const byOutpoint = new Map();
-    for (const u of this.utxos) byOutpoint.set(utxoId(u), u);
+    const bip84 = new Map();
+    for (const u of this.utxos) bip84.set(utxoId(u), u);
+    const sp = new Map();
+    for (const u of this.spUtxos) sp.set(utxoId(u), u);
+    // Prevout scripts + amounts for any taproot (SP) sighash.
+    const prevScripts = [];
+    const amounts = [];
+    for (let i = 0; i < tx.inputsLength; i++) {
+      const w = tx.getInput(i).witnessUtxo;
+      prevScripts.push(w.script);
+      amounts.push(w.amount);
+    }
+    const spKeys = sp.size ? this.silentPaymentKeys() : null;
     for (let i = 0; i < tx.inputsLength; i++) {
       const inp = tx.getInput(i);
       const id = `${hex.encode(inp.txid)}:${inp.index}`;
-      const u = byOutpoint.get(id);
-      if (!u) throw new Error(`Cannot find key for input ${id}`);
-      const node = this.node(u.chain, u.index);
-      tx.signIdx(node.privateKey, i);
+      if (bip84.has(id)) {
+        const u = bip84.get(id);
+        tx.signIdx(this.node(u.chain, u.index).privateKey, i);
+      } else if (sp.has(id)) {
+        const u = sp.get(id);
+        const d = silentPaymentOutputPrivKey(spKeys.spendPriv, hex.decode(u.tweak));
+        const hash = tx.preimageWitnessV1(i, prevScripts, btc.SigHash.DEFAULT, amounts);
+        tx.updateInput(i, { tapKeySig: schnorr.sign(hash, d) }, true);
+      } else {
+        throw new Error(`Cannot find key for input ${id}`);
+      }
     }
     tx.finalize();
     return tx.hex;
