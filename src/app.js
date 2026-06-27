@@ -231,6 +231,8 @@ function render() {
       ? walletScreen()
       : ui.screen === 'accounts'
         ? accountsScreen()
+        : ui.screen === 'accountSettings'
+          ? accountSettingsScreen()
         : ui.screen === 'vault'
           ? vaultScreen()
           : ui.screen === 'claim'
@@ -1320,7 +1322,6 @@ function settingsTab() {
         ? null
         : h('button', { onClick: () => { ui.addrScan = true; ui.addrScanPage = 0; render(); } }, t('rescanAddresses'))
     ),
-    autoLockCard(),
     networkCard(),
     explorerCard(),
     wallet.watchOnly || !wallet.mnemonic ? null : syncCard()
@@ -1990,7 +1991,7 @@ function accountsScreen() {
                 class: 'linklike', style: 'text-align:left;flex:1;font-size:15px;' + (isActive ? 'font-weight:600' : ''),
                 onClick: () => { if (isActive) { ui.screen = 'wallet'; render(); } else switchAccount(a.id); },
               }, (isActive ? '● ' : '○ ') + a.label + tag),
-              h('button', { class: 'btn-sm', title: t('rename'), onClick: () => { ui.editId = a.id; ui.editLabel = a.label; render(); } }, '✎'),
+              h('button', { class: 'btn-sm', title: t('walletSettings'), onClick: () => openAccountSettings(a.id) }, '⚙'),
               h('button', { class: 'btn-sm', title: t('remove'), onClick: () => { ui.confirmRemove = a.id; render(); } }, '✕')
             ),
             a.type === 'full'
@@ -2018,6 +2019,89 @@ function renameAccount(id) {
   }
   ui.editId = null;
   render();
+}
+
+// Open the per-wallet settings page for an account.
+function openAccountSettings(id) {
+  ui.settingsId = id;
+  ui.editLabel = null;
+  ui.revealShown = false;
+  ui.pubkeyShown = false;
+  ui.screen = 'accountSettings';
+  render();
+}
+
+// Per-wallet settings: name, auto-logout, recovery phrase, and public key — for
+// any account (not just the active one; full accounts keep their seed in memory).
+function accountSettingsScreen() {
+  const a = accounts.find((x) => x.id === ui.settingsId) || activeAccount();
+  if (!a) { ui.screen = 'accounts'; return accountsScreen(); }
+  const isWatch = a.type === 'watch' || (!a.mnemonic && !a.xprv);
+  const shown = ui.revealShown;
+  const words = a.mnemonic ? a.mnemonic.split(' ') : [];
+  let zpub = '';
+  try { if (a.xpub) zpub = xpubToZpub(a.xpub); } catch {}
+  const saveName = () => {
+    const v = (ui.editLabel || '').trim();
+    if (v && v !== a.label) { a.label = v; persistAccounts(); if (a.persisted) writeVault(); }
+    ui.editLabel = null;
+    render();
+  };
+  return h(
+    'div',
+    { class: 'col', style: 'gap:16px' },
+    brandHeader(false),
+    // Name
+    h('div', { class: 'card col' },
+      h('h3', {}, t('walletName')),
+      h('div', { class: 'row gap6' },
+        h('input', { type: 'text', style: 'flex:1', value: ui.editLabel != null ? ui.editLabel : a.label,
+          onInput: (e) => { ui.editLabel = e.target.value; },
+          onKeyDown: (e) => { if (e.key === 'Enter') saveName(); } }),
+        h('button', { class: 'btn-sm', onClick: saveName }, t('save'))
+      )
+    ),
+    // Auto-logout (per wallet)
+    h('div', { class: 'card col' },
+      h('h3', {}, t('autolockTitle')),
+      h('p', { class: 'small muted', style: 'margin:0' }, t('autolockDesc')),
+      h('select', { onChange: (e) => { a.autoLock = Number(e.target.value) || 0; persistAccounts(); if (a.persisted) writeVault(); render(); } },
+        AUTOLOCK_OPTIONS.map((o) => h('option', { value: String(o.ms), selected: o.ms === accAutoLock(a) }, t(o.label))))
+    ),
+    // Recovery phrase
+    isWatch
+      ? h('div', { class: 'card col' }, h('h3', {}, t('recoveryPhrase')), h('p', { class: 'small muted', style: 'margin:0' }, t('watchOnlyNote')))
+      : !a.mnemonic
+        ? h('div', { class: 'card col' }, h('h3', {}, t('importedKey')), h('p', { class: 'small muted', style: 'margin:0' }, t('importedKeyNote')))
+        : h('div', { class: 'card col' },
+            h('h3', {}, t('recoveryPhrase')),
+            h('div', { class: 'warn-box' }, t('recoveryWarn')),
+            h('div', { class: 'words' }, words.map((w, i) =>
+              h('div', { class: 'w' + (shown ? '' : ' masked') }, h('span', { class: 'n' }, i + 1), h('span', { class: 't' }, shown ? w : '••••••')))),
+            shown && a.passphrase
+              ? h('div', { class: 'col gap6' }, h('span', { class: 'lab' }, t('bip39Passphrase')), h('div', { class: 'addr-box' }, a.passphrase))
+              : null,
+            shown
+              ? h('div', { class: 'row gap6 wrap' },
+                  copyBtn(a.mnemonic, t('copyPhrase')),
+                  a.passphrase ? copyBtn(a.passphrase, t('copyPassphrase')) : null,
+                  h('button', { class: 'btn-sm grow', onClick: () => { ui.revealShown = false; render(); } }, t('hide')))
+              : h('button', { class: 'btn-primary btn-block', onClick: () => { ui.revealShown = true; render(); } }, t('revealRecovery'))
+          ),
+    // Public key (zpub)
+    h('div', { class: 'card col' },
+      h('h3', {}, t('publicKey')),
+      h('p', { class: 'small muted', style: 'margin:0' }, t('publicKeyDesc')),
+      ui.pubkeyShown
+        ? h('div', { class: 'col gap6' },
+            h('div', { class: 'addr-box break', style: 'font-size:12px' }, zpub),
+            h('div', { class: 'row gap6 wrap' },
+              copyBtn(zpub, t('copyKey')),
+              h('button', { class: 'btn-sm grow', onClick: () => { ui.pubkeyShown = false; render(); } }, t('hide'))))
+        : h('button', { class: 'btn-block', onClick: () => { ui.pubkeyShown = true; render(); } }, t('showPublicKey'))
+    ),
+    h('button', { class: 'btn-ghost btn-block', onClick: () => { ui.editLabel = null; ui.revealShown = false; ui.pubkeyShown = false; ui.screen = 'accounts'; render(); } }, t('back'))
+  );
 }
 
 // Wipe every wallet from this device: session accounts, the encrypted vault,
