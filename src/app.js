@@ -8,7 +8,7 @@ import { Wallet, newMnemonic, isValidMnemonic, accountXpubFor, cacheKeyFor, utxo
 import { qrSvg } from './qr.js';
 import { scanQr } from './scan.js';
 import { getSyncConfig, setSyncConfig } from './nostr.js';
-import { getExplorerConfig, setExplorerConfig, explorerPresets, getDataMode, setDataMode, electrumPresets, getElectrumServerConfig, setElectrumServerConfig, getNetwork, setNetwork, NETWORKS, getSpIndexerConfig, setSpIndexerConfig, spIndexerPresets } from './api.js';
+import { dataSources, getSource, setSource, getNetwork, setNetwork, NETWORKS, getSpIndexerConfig, setSpIndexerConfig, spIndexerPresets } from './api.js';
 import { isSilentPaymentAddress } from './silentpay.js';
 import { t, LANGS, getLang, setLang, isRTL, loadLocale } from './i18n.js';
 import {
@@ -1613,63 +1613,34 @@ function networkCard() {
 
 function explorerCard() {
   const net = getNetwork();
-  const mode = getDataMode();
-  const cfg = getExplorerConfig();
-  const ecfg = getElectrumServerConfig();
-  const setMode = (m) => {
-    if (m === getDataMode()) return;
-    setDataMode(m);
+  const src = getSource();
+  const sources = dataSources(net);
+  const pick = (id) => {
+    setSource({ id, url: '' });
     render();
-    // electrum⇄explorer swaps the whole backend, so rebuild + rescan.
-    if (!wallet.offline) wallet.reloadExplorer();
+    // Switching source can swap the whole backend (electrum⇄esplora), so rebuild
+    // + rescan — except an empty custom (wait for the URL).
+    if (id !== 'custom' && !wallet.offline) wallet.reloadExplorer();
   };
+  const typeDesc = t(src.type === 'electrum' ? 'detectedElectrum' : 'detectedEsplora');
   return h(
     'div',
     { class: 'card col' },
     h('h3', {}, t('dataSource')),
     h('p', { class: 'small muted', style: 'margin:0' }, t('dataSourceDesc')),
-    h('select', { onChange: (e) => setMode(e.target.value) },
-      h('option', { value: 'electrum', selected: mode === 'electrum' }, t('modeElectrum')),
-      h('option', { value: 'explorer', selected: mode === 'explorer' }, t('modeExplorer'))
-    ),
-    mode === 'electrum'
-      ? h('div', { class: 'col', style: 'gap:8px' },
-          h('div', { class: 'small faint' }, t('backendElectrumDesc')),
-          h('select', {
-            onChange: (e) => { setElectrumServerConfig({ server: e.target.value, url: ecfg.url }); render(); if (e.target.value !== 'custom' || ecfg.url) wallet.reloadExplorer(); },
-          }, electrumPresets(net).map((o) => h('option', { value: o.id, selected: o.id === ecfg.server }, o.label))),
-          ecfg.server === 'custom'
-            ? h('label', { class: 'field' },
-                h('span', { class: 'lab' }, t('electrumUrl')),
-                h('input', {
-                  type: 'text', class: 'mono-input', placeholder: 'wss://your-node:50004',
-                  autocapitalize: 'none', autocomplete: 'off', spellcheck: 'false', value: ecfg.url,
-                  onChange: (e) => { setElectrumServerConfig({ server: 'custom', url: e.target.value.trim() }); wallet.reloadExplorer(); },
-                }),
-                h('div', { class: 'small faint' }, t('electrumUrlHint'))
-              )
-            : null
+    h('select', { onChange: (e) => pick(e.target.value) },
+      sources.map((o) => h('option', { value: o.id, selected: o.id === src.id }, o.label))),
+    src.id === 'custom'
+      ? h('label', { class: 'field' },
+          h('span', { class: 'lab' }, t('sourceUrl')),
+          h('input', {
+            type: 'text', class: 'mono-input', placeholder: 'wss://your-node:50004  ·  https://your-esplora/api',
+            autocapitalize: 'none', autocomplete: 'off', spellcheck: 'false', value: src.url || '',
+            onChange: (e) => { const url = e.target.value.trim(); setSource({ id: 'custom', url }); render(); if (!wallet.offline) wallet.reloadExplorer(); },
+          }),
+          h('div', { class: 'small faint' }, src.url ? typeDesc : t('sourceUrlHint'))
         )
-      : null,
-    mode === 'explorer'
-      ? h('div', { class: 'col', style: 'gap:8px' },
-          h('div', { class: 'small faint' }, t('modeExplorerDesc')),
-          h('select', {
-            onChange: (e) => { setExplorerConfig({ server: e.target.value, url: cfg.url }); render(); if (e.target.value !== 'custom' || cfg.url) wallet.reloadExplorer(); },
-          }, explorerPresets(net).map((o) => h('option', { value: o.id, selected: o.id === cfg.server }, o.label))),
-          cfg.server === 'custom'
-            ? h('label', { class: 'field' },
-                h('span', { class: 'lab' }, t('explorerUrl')),
-                h('input', {
-                  type: 'text', class: 'mono-input', placeholder: 'https://mempool.space/api',
-                  autocapitalize: 'none', autocomplete: 'off', spellcheck: 'false', value: cfg.url,
-                  onChange: (e) => { setExplorerConfig({ server: 'custom', url: e.target.value.trim() }); wallet.reloadExplorer(); },
-                }),
-                h('div', { class: 'small faint' }, t('explorerUrlHint'))
-              )
-            : null
-        )
-      : null
+      : h('div', { class: 'small faint' }, typeDesc)
   );
 }
 
