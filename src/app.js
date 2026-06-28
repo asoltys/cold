@@ -302,6 +302,15 @@ window.addEventListener('popstate', (e) => {
   }
 });
 
+// In-app "back" buttons call this instead of mutating ui + render() directly, so
+// they POP the history entry they're leaving rather than pushing a duplicate.
+// When there's no in-app entry to pop (e.g. the page was reloaded straight into a
+// sub-screen), fall back to navigating to the explicit parent.
+function goBack(toParent) {
+  if (navIndex > 0) history.back();
+  else { toParent(); render(); }
+}
+
 // ---------------------------------------------------------------- utilities
 let toastTimer;
 function toast(msg) {
@@ -1999,7 +2008,7 @@ function accountsScreen() {
       hasVault() ? h('button', { class: 'btn-ghost btn-block', onClick: startChangePw }, t('changePassword')) : null,
       h('button', { class: 'btn-ghost btn-block', onClick: () => { ui.confirmClear = true; render(); } }, t('clearAll'))
     ),
-    h('button', { class: 'btn-ghost btn-block', onClick: () => { ui.screen = 'wallet'; render(); } }, t('back'))
+    h('button', { class: 'btn-ghost btn-block', onClick: () => goBack(() => { ui.screen = 'wallet'; }) }, t('back'))
   );
 }
 
@@ -2103,7 +2112,7 @@ function accountSettingsScreen() {
       h('select', { onChange: (e) => { a.autoLock = Number(e.target.value) || 0; persistAccounts(); if (a.persisted) writeVault(); render(); } },
         AUTOLOCK_OPTIONS.map((o) => h('option', { value: String(o.ms), selected: o.ms === accAutoLock(a) }, t(o.label))))
     ),
-    h('button', { class: 'btn-ghost btn-block', onClick: () => { ui.editLabel = null; ui.revealShown = false; ui.pubkeyShown = false; ui.loadSeed = null; ui.screen = 'accounts'; render(); } }, t('back'))
+    h('button', { class: 'btn-ghost btn-block', onClick: () => { ui.editLabel = null; ui.revealShown = false; ui.pubkeyShown = false; ui.loadSeed = null; goBack(() => { ui.screen = 'accounts'; }); } }, t('back'))
   );
 }
 
@@ -2383,7 +2392,7 @@ function giftView() {
     'div',
     { class: 'col', style: 'gap:12px' },
     giftCard(),
-    h('button', { class: 'btn-ghost btn-block', onClick: () => { ui.giftMode = false; ui.giftCode = null; ui.giftError = ''; ui.giftMax = false; ui.giftSplitOffer = null; ui.revokeId = null; render(); } }, t('back'))
+    h('button', { class: 'btn-ghost btn-block', onClick: () => { ui.giftCode = null; ui.giftError = ''; ui.giftMax = false; ui.giftSplitOffer = null; ui.revokeId = null; goBack(() => { ui.giftMode = false; }); } }, t('back'))
   );
 }
 
@@ -2563,7 +2572,7 @@ function bumpView() {
     ),
     (ui.sendError || planErr) && h('div', { class: 'notice err' }, ui.sendError || planErr),
     h('div', { class: 'row gap6' },
-      h('button', { class: 'btn-ghost', onClick: () => { ui.bump = null; ui.sendError = ''; render(); } }, t('back')),
+      h('button', { class: 'btn-ghost', onClick: () => { ui.sendError = ''; goBack(() => { ui.bump = null; }); } }, t('back')),
       ui.busy
         ? h('button', { class: 'btn-primary grow', disabled: true }, h('span', { class: 'spinner' }))
         : h('button', { class: 'btn-primary grow', disabled: !newFee, onClick: doBump }, t('replaceTx'))
@@ -3050,7 +3059,7 @@ function giftsAllView(gifts) {
     { class: 'card col', style: 'gap:12px' },
     h('div', { class: 'row between' },
       h('h3', { style: 'margin:0' }, t('giftReserved', { n: gifts.length })),
-      h('button', { class: 'btn-sm', onClick: () => { ui.giftsAll = false; ui.revokeId = null; render(); } }, t('back'))
+      h('button', { class: 'btn-sm', onClick: () => { ui.revokeId = null; goBack(() => { ui.giftsAll = false; }); } }, t('back'))
     ),
     h('div', { class: 'list' }, ...slice.map(giftHistoryItem)),
     pager(page, gifts.length, (p) => { ui.giftsPage = p; render(); })
@@ -3170,7 +3179,7 @@ function txDetailView(tx) {
           ? h('button', { class: 'btn-primary btn-block', disabled: true }, h('span', { class: 'spinner' }))
           : h('button', { class: 'btn-primary btn-block', onClick: () => bumpFee(tx.txid) }, t('bumpFee')))
       : null,
-    h('button', { class: 'btn-ghost btn-block', onClick: () => { ui.txDetail = null; render(); } }, t('backToHistory'))
+    h('button', { class: 'btn-ghost btn-block', onClick: () => goBack(() => { ui.txDetail = null; }) }, t('backToHistory'))
   );
 }
 
