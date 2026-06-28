@@ -249,8 +249,58 @@ function render() {
     // Remember where we are so a refresh restores it (only meaningful on the wallet).
     try { sessionStorage.setItem(NAV_KEY, JSON.stringify({ tab: ui.tab, txDetail: ui.txDetail })); } catch {}
   }
+  syncHistory(); // mirror the current screen into browser history (Back/Forward)
 }
 wallet.subscribe(render);
+
+// ---- browser-history navigation ------------------------------------------
+// Mirror the app's screen position into the browser history so the Back/Forward
+// buttons (and Android/system back) move between screens we've actually viewed.
+// We snapshot only the navigation-relevant `ui` fields, so incidental re-renders
+// (typing, polling, balance updates) don't create history entries.
+const NAV_FIELDS = ['screen', 'tab', 'txDetail', 'bump', 'giftsAll', 'giftMode', 'claimStep'];
+function navSnapshot() {
+  const s = {};
+  for (const f of NAV_FIELDS) s[f] = ui[f] ?? null;
+  return s;
+}
+const navSig = (s) => JSON.stringify(s);
+let navStack = []; // in-memory mirror of the history entries (to detect an in-app Back)
+let navIndex = -1;
+let restoringHistory = false; // true while applying a popstate (suppresses pushing)
+
+function syncHistory() {
+  if (restoringHistory) return;
+  try {
+    const snap = navSnapshot();
+    const sig = navSig(snap);
+    if (navIndex >= 0 && sig === navSig(navStack[navIndex])) return; // no navigation change
+    // Every screen change is a new history entry. (We deliberately don't try to
+    // detect in-app "back" navigations — an A→B→A pattern is indistinguishable
+    // from a genuine back, so guessing corrupts the stack. An in-app back just
+    // adds an entry; Back/Forward still walk the screens correctly.)
+    navStack = navStack.slice(0, navIndex + 1); // drop any forward entries
+    navStack.push(snap);
+    navIndex++;
+    const entry = { nav: snap, i: navIndex };
+    if (navIndex === 0) history.replaceState(entry, '');
+    else history.pushState(entry, '');
+  } catch {} // history API failures must never break a render
+}
+
+window.addEventListener('popstate', (e) => {
+  const st = e.state;
+  const snap = (st && st.nav) || navSnapshot();
+  restoringHistory = true;
+  try {
+    for (const f of NAV_FIELDS) ui[f] = f in snap ? snap[f] : null;
+    if (st && typeof st.i === 'number') navIndex = st.i;
+    else { const i = navStack.findIndex((s) => navSig(s) === navSig(snap)); if (i >= 0) navIndex = i; }
+    render();
+  } finally {
+    restoringHistory = false;
+  }
+});
 
 // ---------------------------------------------------------------- utilities
 let toastTimer;
