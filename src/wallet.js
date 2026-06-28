@@ -24,7 +24,7 @@ import { concatBytes } from '@scure/btc-signer/utils.js';
 import { Api, pool, getBackend, explorerWeb, electrumCandidates, spIndexerUrl } from './api.js';
 import { ElectrumApi } from './electrum.js';
 import { NostrSync, getSyncConfig } from './nostr.js';
-import { isSilentPaymentAddress, decodeSilentPaymentAddress, silentPaymentScripts, silentPaymentPlaceholder, deriveSilentPaymentKeys, encodeSilentPaymentAddress, silentPaymentScan, silentPaymentOutputPrivKey } from './silentpay.js';
+import { isSilentPaymentAddress, decodeSilentPaymentAddress, silentPaymentScripts, silentPaymentPlaceholder, deriveSilentPaymentKeys, encodeSilentPaymentAddress, silentPaymentScan, silentPaymentOutputPrivKey, silentPaymentCandidate, bloomHas } from './silentpay.js';
 import { schnorr } from '@noble/curves/secp256k1';
 
 // No look-ahead: stop scanning a chain at the first unused address. This wallet
@@ -38,6 +38,11 @@ const GAP_LIMIT = 1;
 const USED_HIT_DELAY_MS = 500;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// Silent-payment catch-up dust limit (sats): the indexer drops tweaks for txs
+// whose taproot outputs are all below this, cutting the candidate math on a big
+// scan. 0 = receive everything (default, so no small payment is ever missed).
+const SP_DUST_LIMIT = 0;
 
 const NETS = {
   mainnet: { net: btc.NETWORK, coin: 0 },
@@ -319,21 +324,30 @@ export class Wallet {
     try {
       if (rescan) { this.spUtxos = []; this.lastSpScan = 0; }
       const from = (this.lastSpScan || 0) + 1;
-      const res = await (await fetch(`${indexer}/scan/${from}`)).json();
+      // Catch-up: per block we get tweaks + a Bloom filter (no outputs). Derive a
+      // candidate key per tweak, test the filter, and only fetch the full block on
+      // a hit — so most blocks cost just the candidate math, no download/scan.
+      const res = await (await fetch(`${indexer}/scan/${from}?dustLimit=${SP_DUST_LIMIT}`)).json();
       const tip = res.tip || 0;
       const have = new Set(this.spUtxos.map((u) => `${u.txid}:${u.vout}`));
       const found = [];
-      for (const it of res.items || []) {
-        const matches = silentPaymentScan({
-          scanPriv: keys.scanPriv, spendPub: keys.spendPub,
-          tweak: hex.decode(it.tweak), outputs: it.outputs.map((o) => o.xonly),
-        });
-        for (const m of matches) {
-          const o = it.outputs.find((o) => o.xonly === m.output);
-          const id = `${it.txid}:${o.vout}`;
-          if (have.has(id)) continue;
-          have.add(id);
-          found.push({ txid: it.txid, vout: o.vout, value: o.value, xonly: m.output, tweak: m.tweak });
+      for (const block of res.blocks || []) {
+        let hit = false;
+        for (const tw of block.tweaks) {
+          const cand = silentPaymentCandidate({ scanPriv: keys.scanPriv, spendPub: keys.spendPub, tweak: hex.decode(tw) });
+          if (bloomHas(block.filter, cand)) { hit = true; break; }
+        }
+        if (!hit) continue;
+        const blk = await (await fetch(`${indexer}/block/${block.height}`)).json();
+        for (const it of blk.items || []) {
+          const matches = silentPaymentScan({ scanPriv: keys.scanPriv, spendPub: keys.spendPub, tweak: hex.decode(it.tweak), outputs: it.outputs.map((o) => o.xonly) });
+          for (const m of matches) {
+            const o = it.outputs.find((o) => o.xonly === m.output);
+            const id = `${it.txid}:${o.vout}`;
+            if (have.has(id)) continue;
+            have.add(id);
+            found.push({ txid: it.txid, vout: o.vout, value: o.value, xonly: m.output, tweak: m.tweak });
+          }
         }
       }
       if (tip > this.lastSpScan) this.lastSpScan = tip;

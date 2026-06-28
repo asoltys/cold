@@ -16,7 +16,7 @@
 import { Database } from 'bun:sqlite';
 import net from 'node:net';
 import http from 'node:http';
-import { inputPubKey, silentPaymentTweak } from '../src/silentpay.js';
+import { inputPubKey, silentPaymentTweak, buildBloom } from '../src/silentpay.js';
 
 const RPC = process.env.CORE_RPC || 'http://127.0.0.1:18443';
 const RPC_USER = process.env.RPC_USER || 'admin1';
@@ -216,13 +216,22 @@ const server = Bun.serve({
       const b = qGetBlock.get(Number(m[1]));
       return json(b ? JSON.parse(b.items).map((i) => i.tweak) : []);
     }
-    // All SP-eligible tx items from height `from` to the tip, in one response —
-    // each tagged with its height. Lets a client scan a range without one fetch
-    // per block. (A future BIP-158/Bloom filter will cut this for large ranges.)
+    // Catch-up over a height range: per block, the tweaks (dust-filtered) + a
+    // Bloom filter over that block's taproot output keys — NOT the outputs. The
+    // client derives its candidate key per tweak, tests the filter, and only
+    // fetches /block for the rare hits. dustLimit (sats) drops txs whose taproot
+    // outputs are all below it (fewer tweaks to check).
     if ((m = p.match(/^\/scan\/(\d+)$/))) {
-      const items = [];
-      for (const row of qScanFrom.all(Number(m[1]))) for (const it of JSON.parse(row.items)) items.push({ height: row.height, ...it });
-      return json({ tip: indexed, items });
+      const dust = Number(url.searchParams.get('dustLimit') || 0);
+      const blocks = [];
+      for (const row of qScanFrom.all(Number(m[1]))) {
+        let items = JSON.parse(row.items);
+        if (dust > 0) items = items.filter((it) => it.outputs.some((o) => o.value >= dust));
+        if (!items.length) continue;
+        const outKeys = items.flatMap((it) => it.outputs.map((o) => o.xonly));
+        blocks.push({ height: row.height, tweaks: items.map((it) => it.tweak), filter: buildBloom(outKeys) });
+      }
+      return json({ tip: indexed, blocks });
     }
     // Current unconfirmed (mempool) SP-eligible txs — for the pending catch-up on
     // connect; live updates arrive as {type:'mempool'} WS pushes.

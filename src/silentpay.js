@@ -292,3 +292,43 @@ export function encodeSilentPaymentAddress(scanPub, spendPub, { testnet = false 
   const words = [0, ...bech32m.toWords(concatBytes(scanPub, spendPub))];
   return bech32m.encode(hrp, words, 1023);
 }
+
+// ---- catch-up scaling: candidate keys + per-block Bloom filters -----------
+// For a large historical scan, downloading every block's outputs is wasteful.
+// The indexer gives, per block, the tweaks + a Bloom filter over that block's
+// taproot output keys. The client derives its candidate key P_0 from each tweak
+// and tests the filter; only on a hit does it pull the block's outputs and run
+// the full scan. (P_0 always exists if we're paid, so testing it alone suffices.)
+
+// Our candidate output key (P_0 = B_spend + t_0·G, x-only hex) for one tweak.
+export function silentPaymentCandidate({ scanPriv, spendPub, tweak }) {
+  const ecdh = Point.fromHex(tweak).multiply(modN(toInt(scanPriv))).toRawBytes(true);
+  const t0 = modN(toInt(tagged('BIP0352/SharedSecret', concatBytes(ecdh, be32(0)))));
+  return bytesToHex(Point.fromHex(spendPub).add(G.multiply(t0)).toRawBytes(true).slice(1));
+}
+
+// k bit indices for a 32-byte x-only key (hex) in an m-bit filter, via
+// double-hashing one sha256(key): idx_i = (h1 + i·h2) mod m.
+function* bloomIndices(keyHex, m, k) {
+  const h = sha256(hexToBytes(keyHex));
+  const u32 = (o) => (h[o] | (h[o + 1] << 8) | (h[o + 2] << 16) | (h[o + 3] * 0x1000000)) >>> 0;
+  const h1 = u32(0);
+  const h2 = u32(4) | 1; // odd, so it's coprime-ish with m
+  for (let i = 0; i < k; i++) yield ((h1 + i * h2) >>> 0) % m;
+}
+
+// Build a Bloom filter over x-only keys (hex). { m (bits), k (hashes), bits (hex) }.
+export function buildBloom(keysHex, bitsPerKey = 10, k = 7) {
+  const m = Math.max(8, keysHex.length * bitsPerKey);
+  const bytes = new Uint8Array(Math.ceil(m / 8));
+  for (const key of keysHex) for (const idx of bloomIndices(key, m, k)) bytes[idx >> 3] |= 1 << (idx & 7);
+  return { m, k, bits: bytesToHex(bytes) };
+}
+
+// Is an x-only key (hex) possibly in the filter? (false = definitely not.)
+export function bloomHas(filter, keyHex) {
+  if (!filter || !filter.m) return true; // no filter ⇒ can't rule out → scan it
+  const bytes = hexToBytes(filter.bits);
+  for (const idx of bloomIndices(keyHex, filter.m, filter.k)) if (!(bytes[idx >> 3] & (1 << (idx & 7)))) return false;
+  return true;
+}
