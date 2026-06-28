@@ -1629,7 +1629,7 @@ function explorerCard() {
     h('h3', {}, t('dataSource')),
     h('p', { class: 'small muted', style: 'margin:0' }, t('dataSourceDesc')),
     h('select', { onChange: (e) => pick(e.target.value) },
-      sources.map((o) => h('option', { value: o.id, selected: o.id === src.id }, o.label))),
+      sources.map((o) => h('option', { value: o.id, selected: o.id === src.id }, o.id === 'custom' ? o.label : `${o.label} — ${o.url || o.base}`))),
     src.id === 'custom'
       ? h('label', { class: 'field' },
           h('span', { class: 'lab' }, t('sourceUrl')),
@@ -2319,7 +2319,7 @@ function spIndexerCard() {
     h('h3', {}, t('spIndexerTitle')),
     h('p', { class: 'small muted', style: 'margin:0' }, t('spIndexerDesc')),
     h('select', { onChange: (e) => { setSpIndexerConfig({ server: e.target.value, url: cfg.url }, net); render(); } },
-      spIndexerPresets(net).map((o) => h('option', { value: o.id, selected: o.id === cfg.server }, o.label))),
+      spIndexerPresets(net).map((o) => h('option', { value: o.id, selected: o.id === cfg.server }, o.id === 'custom' ? o.label : `${o.label} — ${o.url}`))),
     cfg.server === 'custom'
       ? h('label', { class: 'field' },
           h('span', { class: 'lab' }, t('spIndexerUrl')),
