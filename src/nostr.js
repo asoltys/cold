@@ -70,6 +70,28 @@ async function _fetchProfileFrom(url, pk) {
   });
 }
 
+// Where to deliver a DM to a pubkey: prefer their NIP-17 DM relay list (kind
+// 10050), else their NIP-65 read relays (kind 10002), else [] (caller falls back).
+export async function fetchInboxRelays(pubkeyHex, relays = PROFILE_RELAYS) {
+  const lists = (await Promise.allSettled(relays.map((url) => _fetchRelayListFrom(url, pubkeyHex)))).flatMap((r) => (r.status === 'fulfilled' && r.value) || []);
+  const newest = (kind) => lists.filter((e) => e.kind === kind).sort((a, b) => b.created_at - a.created_at)[0];
+  const dm = newest(10050);
+  if (dm) { const r = dm.tags.filter((t) => t[0] === 'relay' && t[1]).map((t) => t[1]); if (r.length) return r; }
+  const nip65 = newest(10002);
+  if (nip65) { const r = nip65.tags.filter((t) => t[0] === 'r' && t[1] && (!t[2] || t[2] === 'read')).map((t) => t[1]); if (r.length) return r; }
+  return [];
+}
+async function _fetchRelayListFrom(url, pk) {
+  let relay;
+  try { relay = await Relay.connect(url); } catch { return []; }
+  return new Promise((resolve) => {
+    const evs = [];
+    const done = () => { try { sub.close(); } catch {} try { relay.close(); } catch {} resolve(evs); };
+    const sub = relay.subscribe([{ kinds: [10002, 10050], authors: [pk] }], { onevent: (e) => evs.push(e), oneose: done });
+    setTimeout(done, 5000);
+  });
+}
+
 const DTAG = 'bitcoin-wallet';
 const SYNC_KEY = 'btc-wallet-sync';
 export const DEFAULT_SYNC_RELAYS = ['wss://relay.coinos.io'];
@@ -169,16 +191,22 @@ export class NostrSync {
   }
 
   // Send an encrypted DM (NIP-04 kind 4) — used to deliver a locked gift's claim
-  // code. Best-effort across the broad relay set so the recipient's client sees
-  // it. Returns true if at least one relay accepted it.
-  async sendDM(recipientPkHex, text, relays = PROFILE_RELAYS) {
+  // code. Delivers to the recipient's published inbox relays (NIP-17 / NIP-65) so
+  // their client actually sees it, plus a broad fallback. Returns true if ≥1 relay
+  // accepted it.
+  async sendDM(recipientPkHex, text, relays = null) {
     if (!this.sk) return false;
     let evt;
     try {
       const content = await nip04.encrypt(this.sk, recipientPkHex, text);
       evt = finalizeEvent({ kind: 4, created_at: Math.floor(Date.now() / 1000), tags: [['p', recipientPkHex]], content }, this.sk);
     } catch { return false; }
-    const res = await Promise.allSettled((relays || PROFILE_RELAYS).map(async (url) => { const r = await this._connect(url); await r.publish(evt); }));
+    let targets = relays;
+    if (!targets) {
+      const inbox = await fetchInboxRelays(recipientPkHex);
+      targets = [...new Set([...inbox, ...PROFILE_RELAYS])].slice(0, 8); // recipient's inbox + safety net
+    }
+    const res = await Promise.allSettled(targets.map(async (url) => { const r = await this._connect(url); await r.publish(evt); }));
     return res.some((x) => x.status === 'fulfilled');
   }
 
