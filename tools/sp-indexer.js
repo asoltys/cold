@@ -169,10 +169,18 @@ async function scanMempoolTx(txid) {
   return { txid: tx.txid, tweak: Buffer.from(tweak).toString('hex'), outputs };
 }
 
+let mempoolInit = false;
 async function mempoolSync() {
   try {
     const txids = await rpc('getrawmempool', []);
     const inPool = new Set(txids);
+    if (!mempoolInit) {
+      mempoolInit = true;
+      // Don't scan a large (mainnet) backlog on startup — that's thousands of
+      // getrawtransaction calls in a burst on the node. Mark it seen and watch
+      // only new arrivals. A small (regtest) mempool is cheap, so scan it.
+      if (txids.length > 200) { for (const txid of txids) mempoolSeen.set(txid, null); return; }
+    }
     let changed = false;
     for (const txid of txids) {
       if (mempoolSeen.has(txid)) continue;
