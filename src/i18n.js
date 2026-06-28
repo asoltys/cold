@@ -240,6 +240,7 @@ const STR = {
     giftDmSending: 'Sending the claim code…',
     giftDmFailed: 'Couldn’t send the nostr DM. Share this code with them privately:',
     giftCopyCode: 'Copy claim code',
+    giftQrTooLong: 'Too large for a QR code — share the link below instead.',
     claimWithExtension: 'Claim with nostr extension',
     orEnterCode: 'or paste the claim code',
     extWrongAccount: 'Your extension is signed in as a different nostr account than this gift is for.',

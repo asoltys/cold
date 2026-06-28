@@ -1549,8 +1549,13 @@ function giftCard() {
           })(),
           // A bearer gift uppercases the URL for a smaller alphanumeric QR (the
           // base32 code is case-insensitive). A locked gift's payload is
-          // case-sensitive base64url, so it uses a plain byte-mode QR.
-          h('div', { html: ui.giftLocked ? qrSvg(giftUrl()) : qrSvg(giftUrl().toUpperCase(), { ec: 'L', mode: 'Alphanumeric' }) }),
+          // case-sensitive base64url, so it uses a plain byte-mode QR. A large
+          // (many-input) gift can exceed QR capacity — then fall back to the link.
+          (() => {
+            let svg = null;
+            try { svg = ui.giftLocked ? qrSvg(giftUrl()) : qrSvg(giftUrl().toUpperCase(), { ec: 'L', mode: 'Alphanumeric' }); } catch {}
+            return svg ? h('div', { html: svg }) : h('div', { class: 'small faint', style: 'text-align:center;padding:8px' }, t('giftQrTooLong'));
+          })(),
           h('div', { class: 'addr-box break', style: 'width:100%;font-size:12px' }, giftUrl()),
           h('div', { class: 'row gap6 wrap' },
             copyBtn(giftUrl(), t('copyLink')),
@@ -2533,7 +2538,8 @@ function giftView() {
     'div',
     { class: 'col', style: 'gap:12px' },
     giftCard(),
-    h('button', { class: 'btn-ghost btn-block', onClick: () => { ui.giftCode = null; ui.giftError = ''; ui.giftMax = false; ui.giftSplitOffer = null; ui.revokeId = null; goBack(() => { ui.giftMode = false; }); } }, t('back'))
+    // The split-offer card has its own Back; don't show a second one under it.
+    ui.giftSplitOffer ? null : h('button', { class: 'btn-ghost btn-block', onClick: () => { ui.giftCode = null; ui.giftError = ''; ui.giftMax = false; ui.giftSplitOffer = null; ui.revokeId = null; goBack(() => { ui.giftMode = false; }); } }, t('back'))
   );
 }
 
