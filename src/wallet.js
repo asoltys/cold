@@ -602,12 +602,13 @@ export class Wallet {
         // any pending that just confirmed, so an outpoint never appears twice.
         const confNow = this.spUtxos.filter((u) => u.confirmed);
         const confNowIds = new Set(confNow.map((u) => `${u.txid}:${u.vout}`));
-        const prevPending = this.spUtxos.length - confNow.length;
+        const oldPendingIds = new Set(this.spUtxos.filter((u) => !u.confirmed).map((u) => `${u.txid}:${u.vout}`));
         const freshPending = pending.filter((p) => !confNowIds.has(`${p.txid}:${p.vout}`));
+        // Only emit when our pending set actually changed — the mempool churns
+        // constantly, and a no-op emit would re-render and steal input focus.
+        const changed = freshPending.length !== oldPendingIds.size || freshPending.some((p) => !oldPendingIds.has(`${p.txid}:${p.vout}`));
         this.spUtxos = [...confNow, ...freshPending];
-        if (freshPending.length !== prevPending || freshPending.length) this._recomputeBalanceFromChains();
-        this.saveCache();
-        this.emit();
+        if (changed) { this._recomputeBalanceFromChains(); this.saveCache(); this.emit(); }
       }
     } finally {
       this._spMempoolBusy = false;

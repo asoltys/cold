@@ -225,7 +225,32 @@ function openHowItWorks() {
 // Per-tab session nav (tab + open tx), so a refresh keeps the user's place.
 const NAV_KEY = 'btc-wallet-nav';
 
+// Index path from #app down to a node, and back — used to re-find the focused
+// field after a full rebuild (a background re-render produces the same structure).
+function focusPath(el) {
+  const path = [];
+  for (let n = el; n && n !== root; n = n.parentNode) {
+    const p = n.parentNode;
+    if (!p) return null;
+    path.unshift(Array.prototype.indexOf.call(p.children, n));
+  }
+  return path;
+}
+function nodeAtPath(path) {
+  let n = root;
+  for (const i of path) n = n && n.children[i];
+  return n || null;
+}
+
 function render() {
+  // Preserve focus + caret across the rebuild, so a background update (poll, a
+  // payment push, an SP scan) can't kick the user out of a field they're editing.
+  const a = document.activeElement;
+  let fpath = null, selStart = null, selEnd = null;
+  if (a && root.contains(a) && /^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName)) {
+    fpath = focusPath(a);
+    try { selStart = a.selectionStart; selEnd = a.selectionEnd; } catch {}
+  }
   const screen =
     ui.screen === 'wallet'
       ? walletScreen()
@@ -241,6 +266,12 @@ function render() {
             ? howItWorksScreen()
             : unlockScreen();
   root.replaceChildren(screen, footer());
+  if (fpath) {
+    const el = nodeAtPath(fpath);
+    if (el && el !== a && /^(INPUT|SELECT|TEXTAREA)$/.test(el.tagName)) {
+      try { el.focus({ preventScroll: true }); if (selStart != null && el.setSelectionRange) el.setSelectionRange(selStart, selEnd); } catch {}
+    }
+  }
   // Fast-poll the receive address only while the user is actually watching for a
   // payment (wallet screen, Receive tab, online). Idempotent — safe each render.
   wallet.setWatchReceive(ui.screen === 'wallet' && ui.tab === 'receive' && !wallet.offline);
