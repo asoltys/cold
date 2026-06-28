@@ -385,11 +385,18 @@ export class Wallet {
     let ws;
     try { ws = new WebSocket(url); } catch { return; }
     this._spWs = ws;
-    ws.onopen = () => { this.spLive = true; this.scanSilentPayments({ silent: true }).catch(() => {}); };
+    ws.onopen = () => {
+      this.spLive = true;
+      this.scanSilentPayments({ silent: true }).catch(() => {}); // confirmed catch-up
+      // Pending (mempool) catch-up.
+      fetch(`${base}/mempool`).then((r) => r.json()).then((d) => this._scanSpMempool(d.items || [])).catch(() => {});
+    };
     ws.onmessage = (ev) => {
       let msg;
       try { msg = JSON.parse(typeof ev.data === 'string' ? ev.data : new TextDecoder().decode(ev.data)); } catch { return; }
-      if (msg && msg.type === 'block' && Array.isArray(msg.items)) this._scanSpItems(msg.items, msg.height).catch(() => {});
+      if (!msg || !Array.isArray(msg.items)) return;
+      if (msg.type === 'block') this._scanSpItems(msg.items, msg.height).catch(() => {});
+      else if (msg.type === 'mempool') this._scanSpMempool(msg.items).catch(() => {});
     };
     ws.onerror = () => { try { ws.close(); } catch {} };
     ws.onclose = () => {
@@ -407,28 +414,49 @@ export class Wallet {
     if (ws) { try { ws.onclose = null; ws.close(); } catch {} }
   }
 
-  // Scan a pushed block's items (no fetch) and fold any of ours into spUtxos. The
-  // block is confirmed (just mined), so matches are recorded confirmed; the
-  // backstop _refreshSpUtxos reconciles later spends.
+  // Scan a confirmed block's pushed items and upsert ours into spUtxos as
+  // confirmed (a previously-pending mempool entry is promoted to confirmed).
   async _scanSpItems(items, height) {
     const keys = this.silentPaymentKeys();
     if (!keys) return;
-    const have = new Set(this.spUtxos.map((u) => `${u.txid}:${u.vout}`));
-    let added = false;
+    let changed = false;
     for (const it of items) {
       const matches = silentPaymentScan({ scanPriv: keys.scanPriv, spendPub: keys.spendPub, tweak: hex.decode(it.tweak), outputs: it.outputs.map((o) => o.xonly) });
       for (const m of matches) {
         const o = it.outputs.find((o) => o.xonly === m.output);
-        if (have.has(`${it.txid}:${o.vout}`)) continue;
-        have.add(`${it.txid}:${o.vout}`);
-        this.spUtxos.push({ txid: it.txid, vout: o.vout, value: o.value, xonly: m.output, tweak: m.tweak, address: this._spAddress(m.output), confirmed: true });
-        added = true;
+        const existing = this.spUtxos.find((u) => u.txid === it.txid && u.vout === o.vout);
+        if (existing) { if (!existing.confirmed) { existing.confirmed = true; changed = true; } }
+        else { this.spUtxos.push({ txid: it.txid, vout: o.vout, value: o.value, xonly: m.output, tweak: m.tweak, address: this._spAddress(m.output), confirmed: true }); changed = true; }
       }
     }
     if (height && height > this.lastSpScan) this.lastSpScan = height;
-    if (added) this._recomputeBalanceFromChains();
+    if (changed) this._recomputeBalanceFromChains();
     this.saveCache();
-    if (added) this.emit();
+    if (changed) this.emit();
+  }
+
+  // Scan the current mempool's pushed items and rebuild our pending (unconfirmed)
+  // SP set — so payments show the moment they're broadcast. Confirmed entries are
+  // kept; the unconfirmed set is replaced, which also drops vanished/RBF'd ones.
+  async _scanSpMempool(items) {
+    const keys = this.silentPaymentKeys();
+    if (!keys) return;
+    const confirmed = this.spUtxos.filter((u) => u.confirmed);
+    const confirmedIds = new Set(confirmed.map((u) => `${u.txid}:${u.vout}`));
+    const pending = [];
+    for (const it of items) {
+      const matches = silentPaymentScan({ scanPriv: keys.scanPriv, spendPub: keys.spendPub, tweak: hex.decode(it.tweak), outputs: it.outputs.map((o) => o.xonly) });
+      for (const m of matches) {
+        const o = it.outputs.find((o) => o.xonly === m.output);
+        if (confirmedIds.has(`${it.txid}:${o.vout}`)) continue; // already confirmed
+        pending.push({ txid: it.txid, vout: o.vout, value: o.value, xonly: m.output, tweak: m.tweak, address: this._spAddress(m.output), confirmed: false });
+      }
+    }
+    const prevPending = this.spUtxos.filter((u) => !u.confirmed).length;
+    this.spUtxos = [...confirmed, ...pending];
+    if (pending.length !== prevPending || pending.length) this._recomputeBalanceFromChains();
+    this.saveCache();
+    this.emit();
   }
 
   node(chain, index) {

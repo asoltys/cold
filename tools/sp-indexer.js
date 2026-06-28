@@ -15,6 +15,7 @@
 
 import { Database } from 'bun:sqlite';
 import net from 'node:net';
+import http from 'node:http';
 import { inputPubKey, silentPaymentTweak } from '../src/silentpay.js';
 
 const RPC = process.env.CORE_RPC || 'http://127.0.0.1:18443';
@@ -27,16 +28,41 @@ const DB_PATH = process.env.SP_DB || ':memory:';
 
 const auth = 'Basic ' + Buffer.from(`${RPC_USER}:${RPC_PASS}`).toString('base64');
 let rpcId = 0;
-async function rpc(method, params = []) {
-  const res = await fetch(RPC, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', authorization: auth },
-    body: JSON.stringify({ jsonrpc: '1.0', id: ++rpcId, method, params }),
+// Serialize all RPC so the block sync and mempool poll don't hammer Core
+// concurrently (which was dropping sockets).
+let rpcLock = Promise.resolve();
+function rpc(method, params = [], retry = 2) {
+  const p = rpcLock.then(() => rpcCall(method, params, retry));
+  rpcLock = p.then(() => {}, () => {});
+  return p;
+}
+const RPC_URL = new URL(RPC);
+function rpcCall(method, params = [], retry = 2) {
+  return new Promise((resolve, reject) => {
+    const body = JSON.stringify({ jsonrpc: '1.0', id: ++rpcId, method, params });
+    const req = http.request({
+      hostname: RPC_URL.hostname, port: RPC_URL.port || 80, path: RPC_URL.pathname || '/', method: 'POST',
+      agent: false, // fresh connection each call — no keep-alive sockets to go stale
+      headers: { 'content-type': 'application/json', authorization: auth, 'content-length': Buffer.byteLength(body) },
+    }, (res) => {
+      let data = '';
+      res.on('data', (c) => (data += c));
+      res.on('end', () => {
+        try { const j = JSON.parse(data); if (j.error) reject(new Error(`rpc ${method}: ${j.error.message}`)); else resolve(j.result); }
+        catch (e) { reject(new Error(`rpc ${method}: ${e.message}`)); }
+      });
+    });
+    req.on('error', (e) => (retry > 0 ? resolve(rpcCall(method, params, retry - 1)) : reject(e)));
+    req.write(body);
+    req.end();
   });
-  if (!res.ok) throw new Error(`rpc ${method} HTTP ${res.status}`);
-  const j = await res.json();
-  if (j.error) throw new Error(`rpc ${method}: ${j.error.message}`);
-  return j.result;
+}
+
+// The scriptPubKey of a previous output (for mempool txs, whose getrawtransaction
+// doesn't carry prevouts). Cached within a mempool pass via the parent tx.
+async function prevoutScriptPubKey(txid, vout) {
+  const ptx = await rpc('getrawtransaction', [txid, true]);
+  return (ptx.vout[vout] && ptx.vout[vout].scriptPubKey.hex) || '';
 }
 
 // ---- persistent store (SQLite) --------------------------------------------
@@ -106,8 +132,58 @@ async function sync() {
       if (h % 100 === 0 || h === tip) console.log(`indexed height ${h}/${tip} (${items.length} sp-tx)`);
     }
     if (!live) { live = true; console.log('caught up — pushing new blocks over websocket'); }
+    await mempoolSync(); // blocks just changed the mempool — reconcile pending
   } catch (e) {
     console.error('sync error:', e.message);
+  }
+}
+
+// ---- mempool (unconfirmed) SP discovery -----------------------------------
+// So a payment shows the moment it's broadcast, not only once mined. We track
+// which mempool txs are SP-eligible (getrawtransaction verbosity 2 carries the
+// prevouts needed for the tweak) and push the set whenever it changes.
+const mempoolSeen = new Map(); // txid -> item | null (null = seen, not an SP tx)
+let mempoolItems = [];
+
+// Like scanTx but for a mempool txid: getrawtransaction has no prevouts, so we
+// fetch each input's prevout scriptPubKey (only for txs with a taproot output).
+async function scanMempoolTx(txid) {
+  const tx = await rpc('getrawtransaction', [txid, true]);
+  if (tx.vin.some((i) => i.coinbase)) return null;
+  const outputs = [];
+  for (const o of tx.vout) { const x = taprootXonly(o.scriptPubKey && o.scriptPubKey.hex); if (x) outputs.push({ vout: o.n, value: Math.round(o.value * 1e8), xonly: x }); }
+  if (!outputs.length) return null; // not SP-relevant — skip the prevout lookups
+  const inputs = [];
+  for (const i of tx.vin) {
+    let spk = '';
+    try { spk = await prevoutScriptPubKey(i.txid, i.vout); } catch {}
+    inputs.push({ txid: i.txid, vout: i.vout, pubkey: inputPubKey({ scriptSig: (i.scriptSig && i.scriptSig.hex) || '', witness: i.txinwitness || [], scriptPubKey: spk }) || undefined });
+  }
+  let tweak;
+  try { tweak = silentPaymentTweak(inputs); } catch { return null; }
+  if (!tweak) return null;
+  return { txid: tx.txid, tweak: Buffer.from(tweak).toString('hex'), outputs };
+}
+
+async function mempoolSync() {
+  try {
+    const txids = await rpc('getrawmempool', []);
+    const inPool = new Set(txids);
+    let changed = false;
+    for (const txid of txids) {
+      if (mempoolSeen.has(txid)) continue;
+      mempoolSeen.set(txid, null); // mark seen so we don't refetch
+      let it = null;
+      try { it = await scanMempoolTx(txid); } catch {}
+      if (it) { mempoolSeen.set(txid, it); changed = true; }
+    }
+    for (const txid of mempoolSeen.keys()) if (!inPool.has(txid)) { if (mempoolSeen.get(txid)) changed = true; mempoolSeen.delete(txid); }
+    if (changed) {
+      mempoolItems = [...mempoolSeen.values()].filter(Boolean);
+      if (live) server.publish('blocks', JSON.stringify({ type: 'mempool', items: mempoolItems }));
+    }
+  } catch (e) {
+    console.error('mempool sync error:', e.message);
   }
 }
 
@@ -144,6 +220,9 @@ const server = Bun.serve({
       for (const row of qScanFrom.all(Number(m[1]))) for (const it of JSON.parse(row.items)) items.push({ height: row.height, ...it });
       return json({ tip: indexed, items });
     }
+    // Current unconfirmed (mempool) SP-eligible txs — for the pending catch-up on
+    // connect; live updates arrive as {type:'mempool'} WS pushes.
+    if (p === '/mempool') return json({ items: mempoolItems });
     return json({ error: 'not found' }, 404);
   },
   websocket: {
@@ -211,3 +290,4 @@ if (process.env.SP_ZMQ) {
   console.log(`zmq: subscribed to hashblock at ${process.env.SP_ZMQ}`);
 }
 setInterval(sync, POLL_MS); // backstop (and the only trigger when SP_ZMQ is unset)
+setInterval(mempoolSync, Number(process.env.MEMPOOL_POLL_MS || 2500)); // unconfirmed SP discovery
