@@ -11,8 +11,64 @@
 
 import * as nip06 from 'nostr-tools/nip06';
 import * as nip44 from 'nostr-tools/nip44';
+import * as nip04 from 'nostr-tools/nip04';
 import { getPublicKey, finalizeEvent } from 'nostr-tools/pure';
+import { decode as nip19decode, npubEncode } from 'nostr-tools/nip19';
 import { Relay } from 'nostr-tools/relay';
+import { randomBytes } from '@noble/hashes/utils';
+import { base64urlnopad } from '@scure/base';
+
+// --- locking a gift to a recipient's Nostr key ---------------------------
+// An npub or 64-hex nostr pubkey → hex, or null if it isn't one.
+export function parseNostrPubkey(input) {
+  const s = (input || '').trim();
+  if (/^[0-9a-f]{64}$/i.test(s)) return s.toLowerCase();
+  try { const d = nip19decode(s); if (d.type === 'npub') return d.data; } catch {}
+  return null;
+}
+export function npubOf(pkHex) { try { return npubEncode(pkHex); } catch { return null; } }
+
+// Encrypt a payload under a fresh one-time code (32 random bytes → base64url).
+// The code travels to the recipient out-of-band (a nostr DM), so the public link
+// holding the ciphertext can't be claimed without it. Returns { code, ct }.
+export function encryptWithCode(plaintext) {
+  const key = randomBytes(32);
+  return { code: base64urlnopad.encode(key), ct: nip44.encrypt(plaintext, key) };
+}
+export function decryptWithCode(code, ct) {
+  return nip44.decrypt(ct, base64urlnopad.decode((code || '').trim()));
+}
+
+// Profiles live across the network, so look them up on popular relays (broader
+// than the sync relays).
+export const PROFILE_RELAYS = ['wss://relay.damus.io', 'wss://nos.lol', 'wss://relay.primal.net', 'wss://relay.coinos.io'];
+// Fetch a recipient's profile (name + picture) for a pubkey, newest across relays.
+export async function fetchNostrProfile(pubkeyHex, relays = PROFILE_RELAYS) {
+  const results = await Promise.allSettled(relays.map((url) => _fetchProfileFrom(url, pubkeyHex)));
+  let best = null;
+  for (const r of results) {
+    const v = r.status === 'fulfilled' ? r.value : null;
+    if (v && (!best || (v.created_at || 0) > (best.created_at || 0))) best = v;
+  }
+  if (!best) return null;
+  try {
+    const m = JSON.parse(best.content);
+    return { name: m.display_name || m.name || null, picture: m.picture || null, nip05: m.nip05 || null };
+  } catch { return null; }
+}
+async function _fetchProfileFrom(url, pk) {
+  let relay;
+  try { relay = await Relay.connect(url); } catch { return null; }
+  return new Promise((resolve) => {
+    let ev = null;
+    const done = () => { try { sub.close(); } catch {} try { relay.close(); } catch {} resolve(ev); };
+    const sub = relay.subscribe([{ kinds: [0], authors: [pk], limit: 1 }], {
+      onevent: (e) => { if (!ev || e.created_at > ev.created_at) ev = e; },
+      oneose: done,
+    });
+    setTimeout(done, 5000);
+  });
+}
 
 const DTAG = 'bitcoin-wallet';
 const SYNC_KEY = 'btc-wallet-sync';
@@ -110,6 +166,20 @@ export class NostrSync {
         await relay.publish(evt);
       })
     );
+  }
+
+  // Send an encrypted DM (NIP-04 kind 4) — used to deliver a locked gift's claim
+  // code. Best-effort across the broad relay set so the recipient's client sees
+  // it. Returns true if at least one relay accepted it.
+  async sendDM(recipientPkHex, text, relays = PROFILE_RELAYS) {
+    if (!this.sk) return false;
+    let evt;
+    try {
+      const content = await nip04.encrypt(this.sk, recipientPkHex, text);
+      evt = finalizeEvent({ kind: 4, created_at: Math.floor(Date.now() / 1000), tags: [['p', recipientPkHex]], content }, this.sk);
+    } catch { return false; }
+    const res = await Promise.allSettled((relays || PROFILE_RELAYS).map(async (url) => { const r = await this._connect(url); await r.publish(evt); }));
+    return res.some((x) => x.status === 'fulfilled');
   }
 
   // Fetch from every relay; return the newest decrypted state, or null.

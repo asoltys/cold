@@ -4,10 +4,10 @@
 // which rebuilds the active screen. Text inputs write back into `ui` on `input`
 // (without re-rendering) so their values survive structural re-renders.
 
-import { Wallet, newMnemonic, isValidMnemonic, accountXpubFor, cacheKeyFor, utxoId, previewGift, giftOutpoints, buildClaimTx, giftMinimum, parseExtendedKey, xpubToZpub, encryptVault, decryptVault } from './wallet.js';
+import { Wallet, newMnemonic, isValidMnemonic, accountXpubFor, cacheKeyFor, utxoId, previewGift, giftOutpoints, buildClaimTx, giftMinimum, parseExtendedKey, xpubToZpub, encryptVault, decryptVault, lockGift, previewLockedGift } from './wallet.js';
 import { qrSvg } from './qr.js';
 import { scanQr } from './scan.js';
-import { getSyncConfig, setSyncConfig } from './nostr.js';
+import { getSyncConfig, setSyncConfig, parseNostrPubkey, npubOf, fetchNostrProfile, decryptWithCode } from './nostr.js';
 import { dataSources, getSource, setSource, getNetwork, setNetwork, NETWORKS, getSpIndexerConfig, setSpIndexerConfig, spIndexerPresets } from './api.js';
 import { isSilentPaymentAddress } from './silentpay.js';
 import { t, LANGS, getLang, setLang, isRTL, loadLocale } from './i18n.js';
@@ -50,6 +50,12 @@ const ui = {
   pubkeyShown: false, // account public key revealed in Settings
   giftMode: false, // gift sub-view active on the Send page
   giftAmount: '', // gift-create amount input
+  giftLockNpub: '', // optional: lock the gift to this recipient nostr npub
+  giftLocked: false, // the just-created gift is locked to a nostr key
+  giftClaimCode: null, // the one-time claim code DM'd to the recipient (fallback)
+  giftDmStatus: null, // 'sending' | 'sent' | 'failed' — nostr DM of the claim code
+  claimLocked: null, // a locked gift being opened: { v, amount, to, ct }
+  claimCodeInput: '', // the claim code the recipient pastes from their nostr DM
   giftCode: null, // last-created gift PSBT code
   giftError: '',
   giftMax: false, // gift the whole spendable balance (no-change sweep)
@@ -252,7 +258,9 @@ function render() {
     try { selStart = a.selectionStart; selEnd = a.selectionEnd; } catch {}
   }
   const screen =
-    ui.screen === 'wallet'
+    ui.claimLocked
+      ? lockedGiftClaimView()
+    : ui.screen === 'wallet'
       ? walletScreen()
       : ui.screen === 'accounts'
         ? accountsScreen()
@@ -385,6 +393,30 @@ function download(filename, text, mime = 'application/json') {
   a.click();
   a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+// --- nostr profiles (avatar + name) — cached, lazily fetched, re-renders ----
+const _profileCache = new Map(); // pubkeyHex -> profile | null | 'loading'
+function nostrProfile(pkHex) {
+  if (_profileCache.has(pkHex)) return _profileCache.get(pkHex);
+  _profileCache.set(pkHex, 'loading');
+  fetchNostrProfile(pkHex).then((p) => { _profileCache.set(pkHex, p || null); render(); }).catch(() => { _profileCache.set(pkHex, null); render(); });
+  return 'loading';
+}
+// A row showing the recipient's avatar + name (or a shortened npub fallback).
+function profileChip(pkHex, { size = 30 } = {}) {
+  const p = nostrProfile(pkHex);
+  const npub = npubOf(pkHex) || pkHex;
+  const short = npub.slice(0, 12) + '…' + npub.slice(-4);
+  const avatar = (pic) =>
+    pic
+      ? h('img', { src: pic, style: `width:${size}px;height:${size}px;border-radius:50%;object-fit:cover;flex:0 0 auto`, onError: (e) => { e.target.style.visibility = 'hidden'; } })
+      : h('div', { style: `width:${size}px;height:${size}px;border-radius:50%;background:#9993;flex:0 0 auto` });
+  if (p === 'loading') return h('div', { class: 'row gap6', style: 'align-items:center' }, h('span', { class: 'spinner sm' }), h('span', { class: 'small muted' }, short));
+  const name = (p && p.name) || short;
+  return h('div', { class: 'row gap6', style: 'align-items:center;min-width:0' },
+    avatar(p && p.picture),
+    h('span', { class: p && p.name ? '' : 'small muted', style: 'overflow:hidden;text-overflow:ellipsis;white-space:nowrap' }, name));
 }
 
 function copyBtn(text, label = t('copy')) {
@@ -1406,7 +1438,7 @@ function settingsTab() {
 // Gift link: presign a chosen amount as a #gift= PSBT that whoever opens claims
 // into a fresh wallet only they control. The coin is reserved until claimed.
 function giftUrl() {
-  return `${location.origin}/g/${ui.giftCode}`;
+  return `${location.origin}/${ui.giftLocked ? 'lg' : 'g'}/${ui.giftCode}`;
 }
 function giftRate() {
   return (wallet.feeRates && wallet.feeRates.halfHourFee) || 5;
@@ -1442,9 +1474,22 @@ function createGiftLink() {
   }
   doCreateGift(amt, rate);
 }
+// Finalize a freshly-built gift. With a recipient npub it's a locked gift: the
+// claim payload is encrypted under a one-time code, the link carries only the
+// ciphertext, and the code is DM'd to the recipient over nostr. Without, it's a
+// plain bearer gift.
+function finishGift(g, fallbackAmt) {
+  const pk = ui.giftLockNpub.trim() ? parseNostrPubkey(ui.giftLockNpub) : null;
+  if (!pk) { ui.giftCode = g.code; ui.giftLocked = false; ui.giftClaimCode = null; ui.giftDmStatus = null; return; }
+  const { blob, claimCode } = lockGift(g.code, g.amount || fallbackAmt || 0, pk);
+  ui.giftCode = blob; ui.giftLocked = true; ui.giftClaimCode = claimCode; ui.giftDmStatus = 'sending';
+  const amount = fmtAmount(g.amount || fallbackAmt || 0) + ' ' + unitLabel();
+  const dm = t('giftDmText', { amount, link: giftUrl(), code: claimCode });
+  wallet.sendNostrDM(pk, dm).then((ok) => { ui.giftDmStatus = ok ? 'sent' : 'failed'; render(); }).catch(() => { ui.giftDmStatus = 'failed'; render(); });
+}
 function doCreateGift(amt, rate) {
   try {
-    ui.giftCode = wallet.createGift(amt, rate).code;
+    finishGift(wallet.createGift(amt, rate), amt);
     ui.giftError = '';
     ui.giftSplitOffer = null;
   } catch (e) {
@@ -1457,7 +1502,7 @@ function doCreateGift(amt, rate) {
 // everything minus their claim fee).
 function doCreateGiftAll(rate) {
   try {
-    ui.giftCode = wallet.createGiftAll(rate).code;
+    finishGift(wallet.createGiftAll(rate));
     ui.giftError = '';
     ui.giftMax = false;
     ui.giftSplitOffer = null;
@@ -1475,7 +1520,7 @@ async function doSplitForGift(amt) {
   ui.busy = true; ui.giftError = ''; render();
   try {
     const rate = (wallet.feeRates && wallet.feeRates.halfHourFee) || 5;
-    ui.giftCode = (await wallet.createGiftFromSplit(amt, rate)).code;
+    finishGift(await wallet.createGiftFromSplit(amt, rate), amt);
     ui.giftSplitOffer = null;
     ui.giftError = '';
   } catch (e) {
@@ -1493,14 +1538,23 @@ function giftCard() {
     h('h3', {}, t('giftLink')),
     ui.giftCode
       ? h('div', { class: 'col', style: 'align-items:center;gap:10px' },
-          // Uppercase the whole URL + alphanumeric mode → much smaller QR. The
-          // domain is case-insensitive and the base32 code is already uppercase;
-          // the opener parses /g/ and the code case-insensitively.
-          h('div', { html: qrSvg(giftUrl().toUpperCase(), { ec: 'L', mode: 'Alphanumeric' }) }),
+          ui.giftLocked && (() => {
+            const lk = previewLockedGift(ui.giftCode);
+            if (!lk) return null;
+            return h('div', { class: 'col gap6', style: 'width:100%;align-items:center' },
+              h('div', { class: 'row gap6', style: 'align-items:center' }, h('span', { class: 'small muted' }, t('giftLockedTo')), profileChip(lk.to)),
+              ui.giftDmStatus === 'sent' ? h('div', { class: 'small', style: 'color:var(--ok,#2a8)' }, t('giftDmSent'))
+                : ui.giftDmStatus === 'failed' ? h('div', { class: 'col gap6', style: 'align-items:center' }, h('div', { class: 'small err' }, t('giftDmFailed')), ui.giftClaimCode ? copyBtn(ui.giftClaimCode, t('giftCopyCode')) : null)
+                : h('div', { class: 'row gap6', style: 'align-items:center' }, h('span', { class: 'spinner sm' }), h('span', { class: 'small muted' }, t('giftDmSending'))));
+          })(),
+          // A bearer gift uppercases the URL for a smaller alphanumeric QR (the
+          // base32 code is case-insensitive). A locked gift's payload is
+          // case-sensitive base64url, so it uses a plain byte-mode QR.
+          h('div', { html: ui.giftLocked ? qrSvg(giftUrl()) : qrSvg(giftUrl().toUpperCase(), { ec: 'L', mode: 'Alphanumeric' }) }),
           h('div', { class: 'addr-box break', style: 'width:100%;font-size:12px' }, giftUrl()),
           h('div', { class: 'row gap6 wrap' },
             copyBtn(giftUrl(), t('copyLink')),
-            h('button', { class: 'btn-sm grow', onClick: () => { ui.giftCode = null; ui.giftAmount = ''; ui.giftMax = false; render(); } }, t('giftAnother'))
+            h('button', { class: 'btn-sm grow', onClick: () => { ui.giftCode = null; ui.giftAmount = ''; ui.giftMax = false; ui.giftLockNpub = ''; ui.giftLocked = false; ui.giftClaimCode = null; ui.giftDmStatus = null; render(); } }, t('giftAnother'))
           )
         )
       : ui.giftSplitOffer
@@ -1530,6 +1584,17 @@ function giftCard() {
             h('div', { style: 'display:flex;align-items:center' }, unitTag())
           ),
           h('div', { class: 'small faint' }, ui.giftMax ? t('giftAllNote') : t('giftMinNote', { n: fmtAmount(giftMinimum(giftRate())) + ' ' + unitLabel() })),
+          (() => {
+            const raw = ui.giftLockNpub.trim();
+            const pk = raw ? parseNostrPubkey(raw) : null;
+            return h('div', { class: 'col gap6' },
+              h('input', { type: 'text', class: 'mono-input', placeholder: t('giftLockPlaceholder'),
+                autocapitalize: 'none', autocomplete: 'off', spellcheck: 'false', value: ui.giftLockNpub,
+                onInput: (e) => { ui.giftLockNpub = e.target.value; render(); } }),
+              !raw ? h('div', { class: 'small faint' }, t('giftLockHint'))
+                : pk ? h('div', { class: 'row gap6', style: 'align-items:center' }, h('span', { class: 'small muted' }, t('giftLockTo')), profileChip(pk))
+                : h('div', { class: 'small err' }, t('giftLockInvalid')));
+          })(),
           ui.giftError && h('div', { class: 'notice err' }, ui.giftError),
           h('button', { class: 'btn-block', onClick: createGiftLink }, t('giftLinkReveal'))
         ),
@@ -1762,6 +1827,52 @@ function readGiftHash() {
   } catch {
     return null;
   }
+}
+
+// A gift locked to a nostr key: /lg/<base64url>. Returns the public preview
+// ({ amount, to, eph, ct }) — claimed by the recipient's own wallet, not a fresh
+// one, so we don't auto-create a wallet here.
+function readLockedGiftHash() {
+  try {
+    const m = location.pathname.match(/^\/lg\/([A-Za-z0-9_-]+)\/?$/);
+    if (!m) return null;
+    history.replaceState(null, '', '/');
+    return previewLockedGift(m[1]);
+  } catch {
+    return null;
+  }
+}
+
+// A locked gift opened from a link: the amount + recipient are public. The
+// recipient pastes the claim code from their nostr DM; that decrypts the payload,
+// then it's claimed into a fresh wallet exactly like a normal gift.
+function lockedGiftClaimView() {
+  const lk = ui.claimLocked;
+  return h('div', { class: 'col', style: 'gap:16px;padding:16px;max-width:460px;margin:0 auto;width:100%' },
+    h('div', { class: 'card col', style: 'gap:14px;align-items:center' },
+      h('h3', { style: 'margin:0' }, t('giftForYou')),
+      h('div', { class: 'amt' }, fmtAmount(lk.amount), ' ', unitTag()),
+      h('div', { class: 'row gap6', style: 'align-items:center' },
+        h('span', { class: 'small muted' }, t('giftLockedTo')),
+        profileChip(lk.to, { size: 36 })),
+      h('p', { class: 'small muted', style: 'text-align:center;margin:0' }, t('giftCodeHint')),
+      h('input', { type: 'text', class: 'mono-input', style: 'width:100%', placeholder: t('claimCodePlaceholder'),
+        autocapitalize: 'none', autocomplete: 'off', spellcheck: 'false', value: ui.claimCodeInput,
+        onInput: (e) => { ui.claimCodeInput = e.target.value; } }),
+      ui.claimError && h('div', { class: 'notice err' }, ui.claimError),
+      h('button', { class: 'btn-primary btn-block', onClick: submitLockedCode }, t('claimGift')),
+      h('button', { class: 'btn-ghost btn-block', onClick: () => { ui.claimLocked = null; ui.claimCodeInput = ''; ui.claimError = ''; render(); } }, t('dismiss'))
+    )
+  );
+}
+function submitLockedCode() {
+  const code = (ui.claimCodeInput || '').trim();
+  if (!code) return;
+  let payload = null;
+  try { payload = decryptWithCode(code, ui.claimLocked.ct); } catch {}
+  if (!payload || !previewGift(payload)) { ui.claimError = t('claimCodeWrong'); render(); return; }
+  ui.claimLocked = null; ui.claimCodeInput = ''; ui.claimError = '';
+  enterWallet(newMnemonic(), '', { gift: payload }); // fresh-wallet claim, like a normal gift
 }
 
 // Has this gift already been claimed? Its funding coin being spent — even by an
@@ -2107,6 +2218,14 @@ function accountSettingsScreen() {
               h('button', { class: 'btn-sm grow', onClick: () => { ui.pubkeyShown = false; render(); } }, t('hide'))))
         : h('button', { class: 'btn-block', onClick: () => { ui.pubkeyShown = true; render(); } }, t('showPublicKey'))
     ),
+    // Nostr address — share it so others can send you locked gifts.
+    (a.id === activeId && wallet.nostrNpub())
+      ? h('div', { class: 'card col' },
+          h('h3', {}, t('nostrKeyTitle')),
+          h('p', { class: 'small muted', style: 'margin:0' }, t('nostrKeyDesc')),
+          h('div', { class: 'addr-box break', style: 'font-size:12px' }, wallet.nostrNpub()),
+          copyBtn(wallet.nostrNpub(), t('copyKey')))
+      : null,
     // Auto-logout (bottom)
     h('div', { class: 'card col' },
       h('h3', {}, t('autolockTitle')),
@@ -3242,6 +3361,7 @@ document.addEventListener('visibilitychange', () => {
 loadLocale(getLang()).finally(() => {
   const code = readGiftHash();
   if (code) { enterWallet(newMnemonic(), '', { gift: code }); return; }
+  ui.claimLocked = readLockedGiftHash(); // locked gift → claim with your own wallet
   applyBootAutoLogout(); // clear an overdue session before it's restored
   if (!restoreAccountsState()) render();
 });

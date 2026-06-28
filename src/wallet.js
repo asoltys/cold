@@ -23,7 +23,7 @@ import { concatBytes } from '@scure/btc-signer/utils.js';
 
 import { Api, pool, getBackend, explorerWeb, electrumCandidates, spIndexerUrl } from './api.js';
 import { ElectrumApi } from './electrum.js';
-import { NostrSync, getSyncConfig } from './nostr.js';
+import { NostrSync, getSyncConfig, encryptWithCode, npubOf } from './nostr.js';
 import { isSilentPaymentAddress, decodeSilentPaymentAddress, silentPaymentScripts, silentPaymentPlaceholder, deriveSilentPaymentKeys, encodeSilentPaymentAddress, silentPaymentScan, silentPaymentOutputPrivKey, silentPaymentCandidate, bloomHas } from './silentpay.js';
 import { schnorr } from '@noble/curves/secp256k1';
 
@@ -1628,6 +1628,14 @@ export class Wallet {
     return this._buildGiftPsbt(sel, gift);
   }
 
+  // Our nostr identity (used to DM a locked gift's claim code to the recipient).
+  nostrPubkey() { return (this.nostr && this.nostr.pk) || null; }
+  nostrNpub() { const pk = this.nostrPubkey(); return pk ? npubOf(pk) : null; }
+  // Send a nostr DM (e.g. a locked gift's claim code) to a recipient pubkey.
+  async sendNostrDM(recipientPkHex, text) {
+    return this.nostr && this.nostr.sk ? this.nostr.sendDM(recipientPkHex, text) : false;
+  }
+
   // Split + gift in one shot, with no confirmation wait: broadcast a self-send
   // that carves out a gift+dust coin, then build the gift spending that
   // still-unconfirmed carve-out. The funding and the claim form a chain that
@@ -2560,6 +2568,28 @@ export function buildClaimTx(code, toAddress, feeRate, net) {
   tx.addOutputAddress(toAddress, out, net);
   tx.finalize();
   return { hex: tx.hex, txid: tx.id, amount: Number(out), fee: Number(fee) };
+}
+
+// A gift locked to a recipient's nostr key. The amount + recipient pubkey are
+// public (anyone can see what it is and who it's for), but the claim payload (the
+// gift code) is NIP-44-encrypted to the recipient via an ephemeral key — so the
+// link can be shared openly yet only the recipient's nostr key can claim it.
+const LOCKED_GIFT_VERSION = 1;
+// Encrypt the gift's claim payload under a one-time code. The code is delivered
+// to the recipient via a nostr DM; the public link carries only the ciphertext.
+// Returns { blob (for the /lg/ link), claimCode (to DM) }.
+export function lockGift(code, amount, recipientPkHex) {
+  const { code: claimCode, ct } = encryptWithCode(code);
+  const blob = base64urlnopad.encode(new TextEncoder().encode(JSON.stringify({ v: LOCKED_GIFT_VERSION, amount, to: recipientPkHex, ct })));
+  return { blob, claimCode };
+}
+// The public fields of a locked-gift blob (or null). Decryption needs the code.
+export function previewLockedGift(blob) {
+  try {
+    const o = JSON.parse(new TextDecoder().decode(base64urlnopad.decode(blob)));
+    if (o.v === LOCKED_GIFT_VERSION && typeof o.amount === 'number' && o.to && o.ct) return o;
+  } catch {}
+  return null;
 }
 
 function firstUnused(chain) {
