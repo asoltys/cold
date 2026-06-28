@@ -304,6 +304,38 @@ export class Wallet {
     return { confirmed, pending, count: this.spUtxos.length };
   }
 
+  // Received silent payments as history rows (one per tx; multiple outputs to us
+  // sum into one received entry) so they appear in history like normal payments.
+  spTxRows() {
+    const byTx = new Map();
+    for (const u of this.spUtxos) {
+      const e = byTx.get(u.txid) || { txid: u.txid, net: 0, confirmed: true, firstSeen: u.firstSeen || Date.now() };
+      e.net += u.value;
+      if (!u.confirmed) e.confirmed = false;
+      e.firstSeen = Math.min(e.firstSeen, u.firstSeen || e.firstSeen);
+      byTx.set(u.txid, e);
+    }
+    return [...byTx.values()].map((e) => ({
+      txid: e.txid, net: e.net, fee: 0, vsize: 0, sp: true,
+      confirmed: e.confirmed,
+      blockTime: e.confirmed ? Math.floor(e.firstSeen / 1000) : 0,
+      blockHeight: 0,
+      firstSeen: e.firstSeen,
+    }));
+  }
+
+  // History for display: BIP84 txs + silent-payment receipts, newest first. (SP
+  // receipts pay one-time taproot keys, never our BIP84 addresses, so no overlap.)
+  get history() {
+    const rows = [...this.txs, ...this.spTxRows()];
+    rows.sort((a, b) => {
+      if (a.confirmed !== b.confirmed) return a.confirmed ? 1 : -1; // pending first
+      if (a.confirmed) return (b.blockTime || 0) - (a.blockTime || 0);
+      return (b.firstSeen || 0) - (a.firstSeen || 0);
+    });
+    return rows;
+  }
+
   // The taproot address for an x-only output key (for backend UTXO lookups).
   _spAddress(xonly) {
     return btc.Address(this.netCfg.net).encode(btc.OutScript.decode(btc.OutScript.encode({ type: 'tr', pubkey: hex.decode(xonly) })));
@@ -357,7 +389,7 @@ export class Wallet {
         try {
           const us = await this.api.addressUtxos(address);
           const u = us.find((x) => x.txid === f.txid && x.vout === f.vout);
-          if (u) this.spUtxos.push({ ...f, address, confirmed: !!(u.status && u.status.confirmed) });
+          if (u) this.spUtxos.push({ ...f, address, confirmed: !!(u.status && u.status.confirmed), firstSeen: Date.now() });
         } catch {}
       }
       await this._refreshSpUtxos();
@@ -440,7 +472,7 @@ export class Wallet {
         const o = it.outputs.find((o) => o.xonly === m.output);
         const existing = this.spUtxos.find((u) => u.txid === it.txid && u.vout === o.vout);
         if (existing) { if (!existing.confirmed) { existing.confirmed = true; changed = true; } }
-        else { this.spUtxos.push({ txid: it.txid, vout: o.vout, value: o.value, xonly: m.output, tweak: m.tweak, address: this._spAddress(m.output), confirmed: true }); changed = true; }
+        else { this.spUtxos.push({ txid: it.txid, vout: o.vout, value: o.value, xonly: m.output, tweak: m.tweak, address: this._spAddress(m.output), confirmed: true, firstSeen: Date.now() }); changed = true; }
       }
     }
     if (height && height > this.lastSpScan) this.lastSpScan = height;
@@ -457,13 +489,15 @@ export class Wallet {
     if (!keys) return;
     const confirmed = this.spUtxos.filter((u) => u.confirmed);
     const confirmedIds = new Set(confirmed.map((u) => `${u.txid}:${u.vout}`));
+    const priorSeen = new Map(this.spUtxos.map((u) => [`${u.txid}:${u.vout}`, u.firstSeen]));
     const pending = [];
     for (const it of items) {
       const matches = silentPaymentScan({ scanPriv: keys.scanPriv, spendPub: keys.spendPub, tweak: hex.decode(it.tweak), outputs: it.outputs.map((o) => o.xonly) });
       for (const m of matches) {
         const o = it.outputs.find((o) => o.xonly === m.output);
-        if (confirmedIds.has(`${it.txid}:${o.vout}`)) continue; // already confirmed
-        pending.push({ txid: it.txid, vout: o.vout, value: o.value, xonly: m.output, tweak: m.tweak, address: this._spAddress(m.output), confirmed: false });
+        const id = `${it.txid}:${o.vout}`;
+        if (confirmedIds.has(id)) continue; // already confirmed
+        pending.push({ txid: it.txid, vout: o.vout, value: o.value, xonly: m.output, tweak: m.tweak, address: this._spAddress(m.output), confirmed: false, firstSeen: priorSeen.get(id) || Date.now() });
       }
     }
     const prevPending = this.spUtxos.filter((u) => !u.confirmed).length;

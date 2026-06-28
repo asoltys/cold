@@ -2224,53 +2224,26 @@ function receiveTab() {
     );
   }
 
+  // One card with a toggle between the standard address and the silent-payment
+  // address (shown only when SP is available).
   const fresh = wallet.freshReceive();
   const spAddr = wallet.silentPaymentsAvailable() ? wallet.silentPaymentAddress() : null;
+  const sp = spAddr && ui.receiveType === 'sp';
+  const addr = sp ? spAddr : fresh.address;
   return h(
     'div',
-    { class: 'col', style: 'gap:16px' },
-    h('div', { class: 'card col', style: 'align-items:center;gap:14px' },
-      h('div', { html: qrSvg(fresh.address) }),
-      h('div', { class: 'addr-box', style: 'width:100%' }, fresh.address),
-      copyBtn(fresh.address, t('copyAddress'))
-    ),
-    spAddr ? silentPaymentReceiveCard(spAddr) : null
+    { class: 'card col', style: 'align-items:center;gap:14px' },
+    spAddr
+      ? h('div', { class: 'seg', style: 'display:flex;width:100%' },
+          h('button', { type: 'button', class: (!sp ? 'active ' : '') + 'grow', onClick: () => { ui.receiveType = 'address'; render(); } }, t('receiveAddressTab')),
+          h('button', { type: 'button', class: (sp ? 'active ' : '') + 'grow', onClick: () => { ui.receiveType = 'sp'; render(); } }, t('receiveSpTab'))
+        )
+      : null,
+    h('div', { html: qrSvg(addr) }),
+    h('div', { class: 'addr-box' + (sp ? ' break' : ''), style: 'width:100%' + (sp ? ';font-size:12px' : '') }, addr),
+    copyBtn(addr, t('copyAddress')),
+    sp ? h('p', { class: 'small muted', style: 'margin:0;text-align:center' }, t('spReceiveDesc')) : null
   );
-}
-
-// Reusable silent-payment receive address (sp1…/tsp1…) + on-device scan. The
-// address is static and reusable; senders derive a unique on-chain output each
-// time, so there's no address reuse and nothing links the payments.
-function silentPaymentReceiveCard(spAddr) {
-  const bal = wallet.spBalance();
-  return h(
-    'div',
-    { class: 'card col', style: 'gap:12px' },
-    h('div', { class: 'row between' },
-      h('h3', { style: 'margin:0' }, t('spReceiveTitle')),
-      h('span', { class: 'small muted' }, 'BIP-352')
-    ),
-    h('p', { class: 'small muted', style: 'margin:0' }, t('spReceiveDesc')),
-    h('div', { style: 'align-self:center' }, h('div', { html: qrSvg(spAddr) })),
-    h('div', { class: 'addr-box break', style: 'width:100%;font-size:12px' }, spAddr),
-    copyBtn(spAddr, t('copyAddress')),
-    h('div', { class: 'row between', style: 'align-items:center' },
-      h('span', { class: 'small muted' },
-        wallet.spScanning
-          ? t('spScanning')
-          : bal.count
-            ? t('spReceived', { amount: fmtAmount(bal.confirmed + bal.pending) + ' ' + unitLabel(), n: bal.count })
-            : t('spWatching')),
-      h('button', { class: 'linklike small', disabled: wallet.spScanning, onClick: doSpScan }, t('spRescan'))
-    )
-  );
-}
-
-// Auto-scanning runs on the poll loop; this is a manual full rescan.
-function doSpScan() {
-  if (wallet.spScanning || wallet.offline) return;
-  wallet.scanSilentPayments({ rescan: true }).catch(() => {}).finally(render);
-  render();
 }
 
 // Silent-payment tweak indexer picker (per network) — the endpoint used to scan
@@ -2609,7 +2582,6 @@ function recipientRow(s, r, i) {
   const syncCheck = () => {
     const a = r.address.trim();
     const nodes = addrVerifyNodes(a);
-    if (a && isSilentPaymentAddress(a)) nodes.push(h('span', { class: 'small faint', style: 'margin-left:6px' }, '· ' + t('silentPaymentNote')));
     check.replaceChildren(...nodes);
     check.style.display = a ? '' : 'none';
   };
@@ -3037,14 +3009,15 @@ function giftsAllView(gifts) {
 
 function historyTab() {
   if (ui.bump) return bumpView();
+  const txs = wallet.history; // BIP84 txs + silent-payment receipts, newest first
   if (ui.txDetail) {
-    const tx = wallet.txs.find((x) => x.txid === ui.txDetail);
+    const tx = txs.find((x) => x.txid === ui.txDetail);
     if (tx) return txDetailView(tx);
     ui.txDetail = null;
   }
   if (wallet.offline)
     return h('div', { class: 'card' }, h('p', { class: 'muted center', style: 'margin:0' }, t('historyOffline')));
-  if ((wallet.scanning && !wallet.loaded) || (wallet.historyLoading && !wallet.txs.length))
+  if ((wallet.scanning && !wallet.loaded) || (wallet.historyLoading && !txs.length))
     return h(
       'div',
       { class: 'card center col', style: 'align-items:center;gap:10px' },
@@ -3055,15 +3028,15 @@ function historyTab() {
   // on-chain history; they aren't transactions until claimed or revoked.
   const gifts = wallet.loaded ? wallet.outstandingGifts() : [];
   if (ui.giftsAll && gifts.length) return giftsAllView(gifts);
-  if (!wallet.txs.length && !gifts.length)
+  if (!txs.length && !gifts.length)
     return h('div', { class: 'card' }, h('p', { class: 'muted center', style: 'margin:0' }, t('noTxYet')));
 
   // Show at most 3 gifts inline; the rest live behind "View all". Transactions
   // paginate 10 at a time.
   const giftsHead = gifts.slice(0, 3);
-  const txPages = Math.ceil(wallet.txs.length / PAGE_SIZE);
+  const txPages = Math.ceil(txs.length / PAGE_SIZE);
   const txPage = Math.min(ui.txPage, Math.max(0, txPages - 1));
-  const txSlice = wallet.txs.slice(txPage * PAGE_SIZE, txPage * PAGE_SIZE + PAGE_SIZE);
+  const txSlice = txs.slice(txPage * PAGE_SIZE, txPage * PAGE_SIZE + PAGE_SIZE);
   return h(
     'div',
     { class: 'card' },
@@ -3074,7 +3047,7 @@ function historyTab() {
     gifts.length > 3
       ? h('button', { class: 'btn-sm btn-block', style: 'margin-top:8px', onClick: () => { ui.giftsAll = true; ui.giftsPage = 0; ui.revokeId = null; render(); } }, t('viewAllGifts', { n: gifts.length }))
       : null,
-    pager(txPage, wallet.txs.length, (p) => { ui.txPage = p; render(); }),
+    pager(txPage, txs.length, (p) => { ui.txPage = p; render(); }),
     wallet.historyLoading
       ? h(
           'div',
@@ -3093,8 +3066,8 @@ function historyTab() {
 async function openTx(txid) {
   ui.txDetail = txid;
   render();
-  const tx = wallet.txs.find((t) => t.txid === txid);
-  if (!tx || tx.fee || wallet.offline) return;
+  const tx = wallet.history.find((t) => t.txid === txid);
+  if (!tx || tx.sp || tx.fee || wallet.offline) return;
   try {
     const full = await wallet.api.getTx(txid);
     if (!full || ui.txDetail !== txid) return;
