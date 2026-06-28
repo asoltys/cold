@@ -23,7 +23,7 @@ import { concatBytes } from '@scure/btc-signer/utils.js';
 
 import { Api, pool, getBackend, explorerWeb, electrumCandidates, spIndexerUrl } from './api.js';
 import { ElectrumApi } from './electrum.js';
-import { NostrSync, getSyncConfig, encryptWithCode, npubOf } from './nostr.js';
+import { NostrSync, getSyncConfig, encryptGiftPayload, npubOf } from './nostr.js';
 import { isSilentPaymentAddress, decodeSilentPaymentAddress, silentPaymentScripts, silentPaymentPlaceholder, deriveSilentPaymentKeys, encodeSilentPaymentAddress, silentPaymentScan, silentPaymentOutputPrivKey, silentPaymentCandidate, bloomHas } from './silentpay.js';
 import { schnorr } from '@noble/curves/secp256k1';
 
@@ -2579,8 +2579,8 @@ const LOCKED_GIFT_VERSION = 1;
 // to the recipient via a nostr DM; the public link carries only the ciphertext.
 // Returns { blob (for the /lg/ link), claimCode (to DM) }.
 export function lockGift(code, amount, recipientPkHex) {
-  const { code: claimCode, ct } = encryptWithCode(code);
-  const blob = base64urlnopad.encode(new TextEncoder().encode(JSON.stringify({ v: LOCKED_GIFT_VERSION, amount, to: recipientPkHex, ct })));
+  const { code: claimCode, ctCode, eph, ctKey } = encryptGiftPayload(code, recipientPkHex);
+  const blob = base64urlnopad.encode(new TextEncoder().encode(JSON.stringify({ v: LOCKED_GIFT_VERSION, amount, to: recipientPkHex, ct: ctCode, eph, ctKey })));
   return { blob, claimCode };
 }
 // The public fields of a locked-gift blob (or null). Decryption needs the code.

@@ -1848,6 +1848,9 @@ function readLockedGiftHash() {
 // then it's claimed into a fresh wallet exactly like a normal gift.
 function lockedGiftClaimView() {
   const lk = ui.claimLocked;
+  // NIP-07: if a nostr browser extension is present, the recipient can decrypt
+  // in-place — no code needed.
+  const hasExt = !!(typeof globalThis !== 'undefined' && globalThis.nostr && lk.eph && lk.ctKey);
   return h('div', { class: 'col', style: 'gap:16px;padding:16px;max-width:460px;margin:0 auto;width:100%' },
     h('div', { class: 'card col', style: 'gap:14px;align-items:center' },
       h('h3', { style: 'margin:0' }, t('giftForYou')),
@@ -1855,15 +1858,32 @@ function lockedGiftClaimView() {
       h('div', { class: 'row gap6', style: 'align-items:center' },
         h('span', { class: 'small muted' }, t('giftLockedTo')),
         profileChip(lk.to, { size: 36 })),
-      h('p', { class: 'small muted', style: 'text-align:center;margin:0' }, t('giftCodeHint')),
+      ui.claimError && h('div', { class: 'notice err' }, ui.claimError),
+      hasExt ? h('button', { class: 'btn-primary btn-block', disabled: ui.busy, onClick: claimViaExtension }, ui.busy ? h('span', { class: 'spinner' }) : t('claimWithExtension')) : null,
+      hasExt ? h('div', { class: 'small faint', style: 'text-align:center' }, t('orEnterCode')) : h('p', { class: 'small muted', style: 'text-align:center;margin:0' }, t('giftCodeHint')),
       h('input', { type: 'text', class: 'mono-input', style: 'width:100%', placeholder: t('claimCodePlaceholder'),
         autocapitalize: 'none', autocomplete: 'off', spellcheck: 'false', value: ui.claimCodeInput,
         onInput: (e) => { ui.claimCodeInput = e.target.value; } }),
-      ui.claimError && h('div', { class: 'notice err' }, ui.claimError),
-      h('button', { class: 'btn-primary btn-block', onClick: submitLockedCode }, t('claimGift')),
+      h('button', { class: (hasExt ? '' : 'btn-primary ') + 'btn-block', onClick: submitLockedCode }, t('claimGift')),
       h('button', { class: 'btn-ghost btn-block', onClick: () => { ui.claimLocked = null; ui.claimCodeInput = ''; ui.claimError = ''; render(); } }, t('dismiss'))
     )
   );
+}
+async function claimViaExtension() {
+  const ext = typeof globalThis !== 'undefined' && globalThis.nostr;
+  if (!ext) return;
+  ui.busy = true; ui.claimError = ''; render();
+  try {
+    const pk = await ext.getPublicKey();
+    if (pk !== ui.claimLocked.to) { ui.claimError = t('extWrongAccount'); ui.busy = false; render(); return; }
+    if (!ext.nip44 || !ext.nip44.decrypt) { ui.claimError = t('extNoNip44'); ui.busy = false; render(); return; }
+    const payload = await ext.nip44.decrypt(ui.claimLocked.eph, ui.claimLocked.ctKey);
+    if (!payload || !previewGift(payload)) { ui.claimError = t('extDecryptFailed'); ui.busy = false; render(); return; }
+    ui.busy = false; ui.claimLocked = null; ui.claimCodeInput = ''; ui.claimError = '';
+    enterWallet(newMnemonic(), '', { gift: payload }); // fresh-wallet claim
+  } catch {
+    ui.busy = false; ui.claimError = t('extDecryptFailed'); render();
+  }
 }
 function submitLockedCode() {
   const code = (ui.claimCodeInput || '').trim();

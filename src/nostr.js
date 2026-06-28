@@ -12,7 +12,7 @@
 import * as nip06 from 'nostr-tools/nip06';
 import * as nip44 from 'nostr-tools/nip44';
 import * as nip04 from 'nostr-tools/nip04';
-import { getPublicKey, finalizeEvent } from 'nostr-tools/pure';
+import { getPublicKey, finalizeEvent, generateSecretKey } from 'nostr-tools/pure';
 import { decode as nip19decode, npubEncode } from 'nostr-tools/nip19';
 import { Relay } from 'nostr-tools/relay';
 import { randomBytes } from '@noble/hashes/utils';
@@ -28,12 +28,19 @@ export function parseNostrPubkey(input) {
 }
 export function npubOf(pkHex) { try { return npubEncode(pkHex); } catch { return null; } }
 
-// Encrypt a payload under a fresh one-time code (32 random bytes → base64url).
-// The code travels to the recipient out-of-band (a nostr DM), so the public link
-// holding the ciphertext can't be claimed without it. Returns { code, ct }.
-export function encryptWithCode(plaintext) {
-  const key = randomBytes(32);
-  return { code: base64urlnopad.encode(key), ct: nip44.encrypt(plaintext, key) };
+// Encrypt a gift payload two ways: (1) under a fresh one-time code, delivered to
+// the recipient out-of-band via a nostr DM — the manual path; and (2) to the
+// recipient's nostr pubkey via an ephemeral key, so a NIP-07 browser extension
+// can decrypt it in-place with no code. Both decrypt to the same payload.
+export function encryptGiftPayload(plaintext, recipientPkHex) {
+  const codeKey = randomBytes(32);
+  const ephSk = generateSecretKey();
+  return {
+    code: base64urlnopad.encode(codeKey),
+    ctCode: nip44.encrypt(plaintext, codeKey),
+    eph: getPublicKey(ephSk),
+    ctKey: nip44.encrypt(plaintext, nip44.getConversationKey(ephSk, recipientPkHex)),
+  };
 }
 export function decryptWithCode(code, ct) {
   return nip44.decrypt(ct, base64urlnopad.decode((code || '').trim()));
