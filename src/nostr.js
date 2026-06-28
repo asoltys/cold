@@ -11,7 +11,6 @@
 
 import * as nip06 from 'nostr-tools/nip06';
 import * as nip44 from 'nostr-tools/nip44';
-import * as nip04 from 'nostr-tools/nip04';
 import { wrapEvent as nip17WrapEvent } from 'nostr-tools/nip17';
 import { getPublicKey, finalizeEvent, generateSecretKey } from 'nostr-tools/pure';
 import { decode as nip19decode, npubEncode } from 'nostr-tools/nip19';
@@ -136,23 +135,20 @@ export class NostrSync {
     await Promise.allSettled(pool.publish(this.relays, evt));
   }
 
-  // Deliver an encrypted DM (a locked gift's claim code) to a recipient. Sends it
-  // BOTH ways so any client sees it: NIP-04 (kind 4 — older clients like Amethyst)
-  // and NIP-17 (kind 1059 gift wrap — newer clients like Jumble, which ignore
-  // NIP-04). Goes to the recipient's published inbox relays (NIP-17/65) plus a
-  // broad fallback. Returns true if ≥1 relay accepted ≥1 of them.
+  // Deliver an encrypted DM (a locked gift's claim code) as a NIP-17 gift wrap
+  // (kind 1059) — the modern standard every current client supports. Goes to the
+  // recipient's published inbox relays (NIP-17/65) plus a broad fallback. Returns
+  // true if ≥1 relay accepted it.
   async sendDM(recipientPkHex, text, relays = null) {
     if (!this.sk) return false;
-    const events = [];
-    try { events.push(finalizeEvent({ kind: 4, created_at: Math.floor(Date.now() / 1000), tags: [['p', recipientPkHex]], content: await nip04.encrypt(this.sk, recipientPkHex, text) }, this.sk)); } catch {}
-    try { events.push(nip17WrapEvent(this.sk, { publicKey: recipientPkHex }, text)); } catch {}
-    if (!events.length) return false;
+    let evt;
+    try { evt = nip17WrapEvent(this.sk, { publicKey: recipientPkHex }, text); } catch { return false; }
     let targets = relays;
     if (!targets) {
       const inbox = await fetchInboxRelays(recipientPkHex);
       targets = [...new Set([...inbox, ...PROFILE_RELAYS])].slice(0, 8); // recipient's inbox + safety net
     }
-    const res = await Promise.allSettled(events.flatMap((evt) => pool.publish(targets, evt)));
+    const res = await Promise.allSettled(pool.publish(targets, evt));
     return res.some((x) => x.status === 'fulfilled');
   }
 
