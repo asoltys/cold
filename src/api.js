@@ -112,12 +112,12 @@ function nk(base, net) { return net === 'mainnet' ? base : `${base}:${net}`; }
 // outputs, so self-hosting is the privacy-max option. Per network; an empty URL
 // means SP receiving is unavailable on that network.
 const SP_INDEXER_PRESETS_BY_NET = {
-  mainnet: [{ id: 'custom', label: 'Custom', url: '' }], // a hosted default goes here once we run one
+  mainnet: [{ id: 'coinos', label: 'coinos', url: 'https://halwallet.app/sp' }, { id: 'custom', label: 'Custom', url: '' }],
   testnet: [{ id: 'custom', label: 'Custom', url: '' }],
   mutinynet: [{ id: 'custom', label: 'Custom', url: '' }],
   regtest: [{ id: 'local', label: 'Local (localhost:8888)', url: 'http://localhost:8888' }, { id: 'custom', label: 'Custom', url: '' }],
 };
-const SP_INDEXER_DEFAULT = { mainnet: 'custom', testnet: 'custom', mutinynet: 'custom', regtest: 'local' };
+const SP_INDEXER_DEFAULT = { mainnet: 'coinos', testnet: 'custom', mutinynet: 'custom', regtest: 'local' };
 const SP_INDEXER_KEY = 'btc-wallet-sp-indexer';
 export function spIndexerPresets(net = getNetwork()) { return SP_INDEXER_PRESETS_BY_NET[net] || SP_INDEXER_PRESETS_BY_NET.mainnet; }
 export function getSpIndexerConfig(net = getNetwork()) {
