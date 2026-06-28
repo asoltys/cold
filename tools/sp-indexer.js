@@ -25,6 +25,10 @@ const PORT = Number(process.env.SP_PORT || 8888);
 const START = Number(process.env.START_HEIGHT || 0);
 const POLL_MS = Number(process.env.POLL_MS || 2000);
 const DB_PATH = process.env.SP_DB || ':memory:';
+// Mempool (unconfirmed) discovery is great for fast feedback but adds RPC load on
+// Core (a getrawtransaction + prevout lookups per new taproot-output tx). On by
+// default; set SP_MEMPOOL=0 to disable (e.g. to spare a busy production node).
+const MEMPOOL = process.env.SP_MEMPOOL !== '0';
 
 const auth = 'Basic ' + Buffer.from(`${RPC_USER}:${RPC_PASS}`).toString('base64');
 let rpcId = 0;
@@ -132,7 +136,7 @@ async function sync() {
       if (h % 100 === 0 || h === tip) console.log(`indexed height ${h}/${tip} (${items.length} sp-tx)`);
     }
     if (!live) { live = true; console.log('caught up — pushing new blocks over websocket'); }
-    await mempoolSync(); // blocks just changed the mempool — reconcile pending
+    if (MEMPOOL) await mempoolSync(); // blocks just changed the mempool — reconcile pending
   } catch (e) {
     console.error('sync error:', e.message);
   }
@@ -290,4 +294,4 @@ if (process.env.SP_ZMQ) {
   console.log(`zmq: subscribed to hashblock at ${process.env.SP_ZMQ}`);
 }
 setInterval(sync, POLL_MS); // backstop (and the only trigger when SP_ZMQ is unset)
-setInterval(mempoolSync, Number(process.env.MEMPOOL_POLL_MS || 2500)); // unconfirmed SP discovery
+if (MEMPOOL) setInterval(mempoolSync, Number(process.env.MEMPOOL_POLL_MS || 2500)); // unconfirmed SP discovery
