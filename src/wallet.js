@@ -282,7 +282,35 @@ export class Wallet {
     else if (this.xprv) { const n = HDKey.fromExtendedKey(this.xprv); if (n.depth === 0) master = n; }
     this._spKeys = master ? deriveSilentPaymentKeys(master, coin) : null;
     this._spKeysKey = ck;
+    this._spScanCache = new Map(); // per-tweak scan results are keyed to these keys
+    this._spCandCache = new Map();
     return this._spKeys;
+  }
+
+  // Scan one tweak's outputs for our payments, memoized by tweak — the EC
+  // point-multiplication is the cost, and a tweak's outcome never changes, so
+  // repeated mempool pushes (which re-send the same tweaks) stay cheap.
+  _spScan(tweakHex, outputs) {
+    const keys = this.silentPaymentKeys(); // resets the caches if keys changed
+    if (!keys) return [];
+    let m = this._spScanCache.get(tweakHex);
+    if (m) return m;
+    if (this._spScanCache.size > 100000) this._spScanCache.clear(); // bound memory over long sessions
+    m = silentPaymentScan({ scanPriv: keys.scanPriv, spendPub: keys.spendPub, tweak: hex.decode(tweakHex), outputs });
+    this._spScanCache.set(tweakHex, m);
+    return m;
+  }
+
+  // Our candidate key for a tweak (for the Bloom pre-filter), memoized likewise.
+  _spCandidate(tweakHex) {
+    const keys = this.silentPaymentKeys();
+    if (!keys) return null;
+    let c = this._spCandCache.get(tweakHex);
+    if (c) return c;
+    if (this._spCandCache.size > 100000) this._spCandCache.clear(); // bound memory over long sessions
+    c = silentPaymentCandidate({ scanPriv: keys.scanPriv, spendPub: keys.spendPub, tweak: hex.decode(tweakHex) });
+    this._spCandCache.set(tweakHex, c);
+    return c;
   }
 
   // Our silent-payment address (sp1…/tsp1…), or null if this wallet can't do SP.
@@ -363,16 +391,20 @@ export class Wallet {
       const tip = res.tip || 0;
       const have = new Set(this.spUtxos.map((u) => `${u.txid}:${u.vout}`));
       const found = [];
+      let scanned = 0;
       for (const block of res.blocks || []) {
+        // Yield to the event loop periodically — the candidate math is an EC
+        // multiply per tweak and a big catch-up would otherwise freeze the UI.
+        if (++scanned % 8 === 0) await new Promise((r) => setTimeout(r, 0));
         let hit = false;
         for (const tw of block.tweaks) {
-          const cand = silentPaymentCandidate({ scanPriv: keys.scanPriv, spendPub: keys.spendPub, tweak: hex.decode(tw) });
+          const cand = this._spCandidate(tw);
           if (bloomHas(block.filter, cand)) { hit = true; break; }
         }
         if (!hit) continue;
         const blk = await (await fetch(`${indexer}/block/${block.height}`)).json();
         for (const it of blk.items || []) {
-          const matches = silentPaymentScan({ scanPriv: keys.scanPriv, spendPub: keys.spendPub, tweak: hex.decode(it.tweak), outputs: it.outputs.map((o) => o.xonly) });
+          const matches = this._spScan(it.tweak, it.outputs.map((o) => o.xonly));
           for (const m of matches) {
             const o = it.outputs.find((o) => o.xonly === m.output);
             const id = `${it.txid}:${o.vout}`;
@@ -467,7 +499,7 @@ export class Wallet {
     if (!keys) return;
     let changed = false;
     for (const it of items) {
-      const matches = silentPaymentScan({ scanPriv: keys.scanPriv, spendPub: keys.spendPub, tweak: hex.decode(it.tweak), outputs: it.outputs.map((o) => o.xonly) });
+      const matches = this._spScan(it.tweak, it.outputs.map((o) => o.xonly));
       for (const m of matches) {
         const o = it.outputs.find((o) => o.xonly === m.output);
         const existing = this.spUtxos.find((u) => u.txid === it.txid && u.vout === o.vout);
@@ -485,26 +517,46 @@ export class Wallet {
   // SP set — so payments show the moment they're broadcast. Confirmed entries are
   // kept; the unconfirmed set is replaced, which also drops vanished/RBF'd ones.
   async _scanSpMempool(items) {
-    const keys = this.silentPaymentKeys();
-    if (!keys) return;
-    const confirmed = this.spUtxos.filter((u) => u.confirmed);
-    const confirmedIds = new Set(confirmed.map((u) => `${u.txid}:${u.vout}`));
-    const priorSeen = new Map(this.spUtxos.map((u) => [`${u.txid}:${u.vout}`, u.firstSeen]));
-    const pending = [];
-    for (const it of items) {
-      const matches = silentPaymentScan({ scanPriv: keys.scanPriv, spendPub: keys.spendPub, tweak: hex.decode(it.tweak), outputs: it.outputs.map((o) => o.xonly) });
-      for (const m of matches) {
-        const o = it.outputs.find((o) => o.xonly === m.output);
-        const id = `${it.txid}:${o.vout}`;
-        if (confirmedIds.has(id)) continue; // already confirmed
-        pending.push({ txid: it.txid, vout: o.vout, value: o.value, xonly: m.output, tweak: m.tweak, address: this._spAddress(m.output), confirmed: false, firstSeen: priorSeen.get(id) || Date.now() });
+    // Coalesce: pushes arrive faster than a cold (mainnet) scan completes, so
+    // keep only the latest set and never run two scans at once.
+    this._spMempoolLatest = items;
+    if (this._spMempoolBusy) return;
+    this._spMempoolBusy = true;
+    try {
+      if (!this.silentPaymentKeys()) return;
+      while (this._spMempoolLatest) {
+        const cur = this._spMempoolLatest;
+        this._spMempoolLatest = null;
+        const priorSeen = new Map(this.spUtxos.map((u) => [`${u.txid}:${u.vout}`, u.firstSeen]));
+        const confirmedIds = new Set(this.spUtxos.filter((u) => u.confirmed).map((u) => `${u.txid}:${u.vout}`));
+        const pending = [];
+        let i = 0;
+        for (const it of cur) {
+          // Yield periodically so a large first scan doesn't block the UI (cached
+          // tweaks are cheap, so steady-state pushes barely pause here).
+          if (++i % 50 === 0) await new Promise((r) => setTimeout(r, 0));
+          const matches = this._spScan(it.tweak, it.outputs.map((o) => o.xonly));
+          for (const m of matches) {
+            const o = it.outputs.find((o) => o.xonly === m.output);
+            const id = `${it.txid}:${o.vout}`;
+            if (confirmedIds.has(id)) continue;
+            pending.push({ txid: it.txid, vout: o.vout, value: o.value, xonly: m.output, tweak: m.tweak, address: this._spAddress(m.output), confirmed: false, firstSeen: priorSeen.get(id) || Date.now() });
+          }
+        }
+        // Re-read confirmed (a block push may have landed during a yield) and drop
+        // any pending that just confirmed, so an outpoint never appears twice.
+        const confNow = this.spUtxos.filter((u) => u.confirmed);
+        const confNowIds = new Set(confNow.map((u) => `${u.txid}:${u.vout}`));
+        const prevPending = this.spUtxos.length - confNow.length;
+        const freshPending = pending.filter((p) => !confNowIds.has(`${p.txid}:${p.vout}`));
+        this.spUtxos = [...confNow, ...freshPending];
+        if (freshPending.length !== prevPending || freshPending.length) this._recomputeBalanceFromChains();
+        this.saveCache();
+        this.emit();
       }
+    } finally {
+      this._spMempoolBusy = false;
     }
-    const prevPending = this.spUtxos.filter((u) => !u.confirmed).length;
-    this.spUtxos = [...confirmed, ...pending];
-    if (pending.length !== prevPending || pending.length) this._recomputeBalanceFromChains();
-    this.saveCache();
-    this.emit();
   }
 
   node(chain, index) {
