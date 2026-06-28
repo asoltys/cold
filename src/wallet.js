@@ -316,6 +316,74 @@ export class Wallet {
     return c;
   }
 
+  // Spawn (once) the scanning worker and keep its keys current. Returns null if
+  // workers are unavailable or the embedded bundle is missing — callers then fall
+  // back to scanning on the main thread (still cached + yielding).
+  _ensureSpWorker() {
+    if (this._spWorkerFailed || typeof Worker === 'undefined') return null;
+    const keys = this.silentPaymentKeys();
+    if (!keys) return null;
+    if (!this._spWorker) {
+      try {
+        const b64 = globalThis.__SP_WORKER__;
+        if (!b64) { this._spWorkerFailed = true; return null; }
+        const bytes = Uint8Array.from(atob(b64), (ch) => ch.charCodeAt(0));
+        const w = new Worker(URL.createObjectURL(new Blob([bytes], { type: 'text/javascript' })));
+        this._spPending = new Map();
+        this._spReqId = 0;
+        w.onmessage = (e) => { const p = this._spPending.get(e.data.id); if (p) { this._spPending.delete(e.data.id); e.data.error ? p.rej(new Error(e.data.error)) : p.res(e.data); } };
+        w.onerror = () => { this._spWorkerFailed = true; try { w.terminate(); } catch {} this._spWorker = null; for (const p of this._spPending.values()) p.rej(new Error('sp worker error')); this._spPending.clear(); };
+        this._spWorker = w;
+        this._spWorkerKeysSig = null;
+      } catch { this._spWorkerFailed = true; return null; }
+    }
+    if (this._spWorkerKeysSig !== this._spKeysKey) {
+      this._spWorkerKeysSig = this._spKeysKey;
+      this._spWorker.postMessage({ id: ++this._spReqId, op: 'keys', scanPriv: keys.scanPriv, spendPub: keys.spendPub });
+    }
+    return this._spWorker;
+  }
+
+  _spCall(op, data) {
+    return new Promise((res, rej) => {
+      const id = ++this._spReqId;
+      this._spPending.set(id, { res, rej });
+      this._spWorker.postMessage({ id, op, ...data });
+      setTimeout(() => { if (this._spPending.has(id)) { this._spPending.delete(id); rej(new Error('sp worker timeout')); } }, 30000);
+    });
+  }
+
+  // Block heights whose Bloom filter might hold one of our outputs (worker if
+  // available, else a cached + yielding main-thread loop).
+  async _spHitBlocks(blocks) {
+    if (!blocks.length) return new Set();
+    const w = this._ensureSpWorker();
+    if (w) { try { return new Set((await this._spCall('candidates', { blocks })).hits || []); } catch {} }
+    const hits = new Set();
+    let i = 0;
+    for (const b of blocks) {
+      if (++i % 8 === 0) await new Promise((r) => setTimeout(r, 0));
+      for (const tw of b.tweaks) { if (bloomHas(b.filter, this._spCandidate(tw))) { hits.add(b.height); break; } }
+    }
+    return hits;
+  }
+
+  // Full-scan items → our resolved utxos {txid,vout,value,xonly,tweak} (worker if
+  // available, else a cached + yielding main-thread loop).
+  async _spScanItems(items) {
+    if (!items.length) return [];
+    const w = this._ensureSpWorker();
+    if (w) { try { return (await this._spCall('scan', { items })).found || []; } catch {} }
+    const found = [];
+    let i = 0;
+    for (const it of items) {
+      if (++i % 50 === 0) await new Promise((r) => setTimeout(r, 0));
+      const matches = this._spScan(it.tweak, it.outputs.map((o) => o.xonly));
+      for (const m of matches) { const o = it.outputs.find((x) => x.xonly === m.output); if (o) found.push({ txid: it.txid, vout: o.vout, value: o.value, xonly: m.output, tweak: m.tweak }); }
+    }
+    return found;
+  }
+
   // Our silent-payment address (sp1…/tsp1…), or null if this wallet can't do SP.
   silentPaymentAddress() {
     const k = this.silentPaymentKeys();
@@ -402,27 +470,15 @@ export class Wallet {
       const tip = res.tip || 0;
       const have = new Set(this.spUtxos.map((u) => `${u.txid}:${u.vout}`));
       const found = [];
-      let scanned = 0;
+      const hits = await this._spHitBlocks(res.blocks || []);
       for (const block of res.blocks || []) {
-        // Yield to the event loop periodically — the candidate math is an EC
-        // multiply per tweak and a big catch-up would otherwise freeze the UI.
-        if (++scanned % 8 === 0) await new Promise((r) => setTimeout(r, 0));
-        let hit = false;
-        for (const tw of block.tweaks) {
-          const cand = this._spCandidate(tw);
-          if (bloomHas(block.filter, cand)) { hit = true; break; }
-        }
-        if (!hit) continue;
+        if (!hits.has(block.height)) continue;
         const blk = await (await fetch(`${indexer}/block/${block.height}`)).json();
-        for (const it of blk.items || []) {
-          const matches = this._spScan(it.tweak, it.outputs.map((o) => o.xonly));
-          for (const m of matches) {
-            const o = it.outputs.find((o) => o.xonly === m.output);
-            const id = `${it.txid}:${o.vout}`;
-            if (have.has(id)) continue;
-            have.add(id);
-            found.push({ txid: it.txid, vout: o.vout, value: o.value, xonly: m.output, tweak: m.tweak });
-          }
+        for (const f of await this._spScanItems(blk.items || [])) {
+          const id = `${f.txid}:${f.vout}`;
+          if (have.has(id)) continue;
+          have.add(id);
+          found.push(f);
         }
       }
       if (tip > this.lastSpScan) this.lastSpScan = tip;
@@ -509,14 +565,10 @@ export class Wallet {
     const keys = this.silentPaymentKeys();
     if (!keys) return;
     let changed = false;
-    for (const it of items) {
-      const matches = this._spScan(it.tweak, it.outputs.map((o) => o.xonly));
-      for (const m of matches) {
-        const o = it.outputs.find((o) => o.xonly === m.output);
-        const existing = this.spUtxos.find((u) => u.txid === it.txid && u.vout === o.vout);
-        if (existing) { if (!existing.confirmed) { existing.confirmed = true; changed = true; } }
-        else { this.spUtxos.push({ txid: it.txid, vout: o.vout, value: o.value, xonly: m.output, tweak: m.tweak, address: this._spAddress(m.output), confirmed: true, firstSeen: Date.now() }); changed = true; }
-      }
+    for (const f of await this._spScanItems(items)) {
+      const existing = this.spUtxos.find((u) => u.txid === f.txid && u.vout === f.vout);
+      if (existing) { if (!existing.confirmed) { existing.confirmed = true; changed = true; } }
+      else { this.spUtxos.push({ txid: f.txid, vout: f.vout, value: f.value, xonly: f.xonly, tweak: f.tweak, address: this._spAddress(f.xonly), confirmed: true, firstSeen: Date.now() }); changed = true; }
     }
     if (height && height > this.lastSpScan) this.lastSpScan = height;
     if (changed) this._recomputeBalanceFromChains();
@@ -541,18 +593,10 @@ export class Wallet {
         const priorSeen = new Map(this.spUtxos.map((u) => [`${u.txid}:${u.vout}`, u.firstSeen]));
         const confirmedIds = new Set(this.spUtxos.filter((u) => u.confirmed).map((u) => `${u.txid}:${u.vout}`));
         const pending = [];
-        let i = 0;
-        for (const it of cur) {
-          // Yield periodically so a large first scan doesn't block the UI (cached
-          // tweaks are cheap, so steady-state pushes barely pause here).
-          if (++i % 50 === 0) await new Promise((r) => setTimeout(r, 0));
-          const matches = this._spScan(it.tweak, it.outputs.map((o) => o.xonly));
-          for (const m of matches) {
-            const o = it.outputs.find((o) => o.xonly === m.output);
-            const id = `${it.txid}:${o.vout}`;
-            if (confirmedIds.has(id)) continue;
-            pending.push({ txid: it.txid, vout: o.vout, value: o.value, xonly: m.output, tweak: m.tweak, address: this._spAddress(m.output), confirmed: false, firstSeen: priorSeen.get(id) || Date.now() });
-          }
+        for (const f of await this._spScanItems(cur)) {
+          const id = `${f.txid}:${f.vout}`;
+          if (confirmedIds.has(id)) continue;
+          pending.push({ txid: f.txid, vout: f.vout, value: f.value, xonly: f.xonly, tweak: f.tweak, address: this._spAddress(f.xonly), confirmed: false, firstSeen: priorSeen.get(id) || Date.now() });
         }
         // Re-read confirmed (a block push may have landed during a yield) and drop
         // any pending that just confirmed, so an outpoint never appears twice.

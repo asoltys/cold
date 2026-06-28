@@ -121,6 +121,21 @@ export async function buildJsQr({ minify = true } = {}) {
   return result.outputs[0].text();
 }
 
+// The silent-payment scanning worker, bundled separately (its own global scope)
+// and embedded as base64 so the single-file app can spawn it from a Blob URL.
+export async function buildSpWorker({ minify = true } = {}) {
+  const result = await Bun.build({
+    entrypoints: ['./src/sp-worker.js'],
+    target: 'browser',
+    minify,
+  });
+  if (!result.success) {
+    for (const log of result.logs) console.error(log);
+    throw new Error('sp-worker bundle failed');
+  }
+  return result.outputs[0].text();
+}
+
 export async function buildHtml({ minify = true, pwa = minify } = {}) {
   const result = await Bun.build({
     entrypoints: ['./src/app.js'],
@@ -134,6 +149,7 @@ export async function buildHtml({ minify = true, pwa = minify } = {}) {
   let js = await result.outputs[0].text();
   // Guard against a literal </script> inside the bundle closing our tag early.
   js = js.replaceAll('</script', '<\\/script');
+  const workerB64 = Buffer.from(await buildSpWorker({ minify })).toString('base64');
   const css = await Bun.file('./src/style.css').text();
 
   return `<!doctype html>
@@ -149,6 +165,7 @@ ${pwa ? PWA_HEAD : ''}<style>${css}</style>
 </head>
 <body>
 <div id="app"></div>
+<script>globalThis.__SP_WORKER__=${JSON.stringify(workerB64)}</script>
 <script>${js}</script>
 ${pwa ? SW_REGISTER + '\n' : ''}</body>
 </html>`;
