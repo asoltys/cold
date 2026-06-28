@@ -1549,6 +1549,32 @@ export class Wallet {
     }));
   }
 
+  // Persistent gift records (per account): the shareable link/code + amount, so a
+  // gift's link/QR can be re-viewed later and a claimed one identified in history.
+  _giftRecordsKey() { return this._cacheKey() + ':giftrec'; }
+  giftRecords() {
+    if (!this._giftRecords) { try { this._giftRecords = JSON.parse(localStorage.getItem(this._giftRecordsKey()) || '{}'); } catch { this._giftRecords = {}; } }
+    return this._giftRecords;
+  }
+  _saveGiftRecords() { try { localStorage.setItem(this._giftRecordsKey(), JSON.stringify(this.giftRecords())); } catch {} }
+  recordGift({ code, locked, amount, claimCode, outpoints }) {
+    if (!outpoints || !outpoints.length) return;
+    this.giftRecords()[outpoints[0]] = { id: outpoints[0], code, locked: !!locked, amount, claimCode: claimCode || null, outpoints, created: Date.now(), revoked: false };
+    this._saveGiftRecords();
+  }
+  giftLink(id) { return this.giftRecords()[id] || null; }
+  markGiftRevoked(id) { const r = this.giftRecords()[id]; if (r) { r.revoked = true; this._saveGiftRecords(); } }
+  // Gifts whose coin has been spent and weren't revoked by us → claimed. (Only
+  // once scanned, so an un-synced wallet doesn't mislabel everything as claimed.)
+  claimedGifts() {
+    if (!this.loaded) return [];
+    const live = new Set(this.utxos.map((u) => utxoId(u)));
+    return Object.values(this.giftRecords())
+      .filter((r) => !r.revoked && r.outpoints && !r.outpoints.some((o) => live.has(o)))
+      .map((r) => ({ id: r.id, amount: r.amount, locked: r.locked, created: r.created }))
+      .sort((a, b) => (b.created || 0) - (a.created || 0));
+  }
+
   // Best-fit coin selection for a gift of `gift` sats (needs gift + a dust
   // change): the smallest single confirmed coin that covers it — one input and
   // the least value locked until claim — else the fewest large coins. Returns

@@ -57,6 +57,7 @@ const ui = {
   claimLocked: null, // a locked gift being opened: { v, amount, to, ct }
   claimCodeInput: '', // the claim code the recipient pastes from their nostr DM
   consolidateError: null, // error from a coin-consolidation attempt
+  viewGift: null, // re-viewing a previously created gift's link/QR { code, locked, amount, claimCode }
   giftCode: null, // last-created gift PSBT code
   giftError: '',
   giftMax: false, // gift the whole spendable balance (no-change sweep)
@@ -261,6 +262,8 @@ function render() {
   const screen =
     ui.claimLocked
       ? lockedGiftClaimView()
+    : ui.viewGift
+      ? viewGiftView()
     : ui.screen === 'wallet'
       ? walletScreen()
       : ui.screen === 'accounts'
@@ -1510,13 +1513,18 @@ function createGiftLink() {
 // ciphertext, and the code is DM'd to the recipient over nostr. Without, it's a
 // plain bearer gift.
 function finishGift(g, fallbackAmt) {
+  const amount = g.amount || fallbackAmt || 0;
   const pk = ui.giftLockNpub.trim() ? parseNostrPubkey(ui.giftLockNpub) : null;
-  if (!pk) { ui.giftCode = g.code; ui.giftLocked = false; ui.giftClaimCode = null; ui.giftDmStatus = null; return; }
-  const { blob, claimCode } = lockGift(g.code, g.amount || fallbackAmt || 0, pk);
+  if (!pk) {
+    ui.giftCode = g.code; ui.giftLocked = false; ui.giftClaimCode = null; ui.giftDmStatus = null;
+    wallet.recordGift({ code: g.code, locked: false, amount, outpoints: g.reserved });
+    return;
+  }
+  const { blob, claimCode } = lockGift(g.code, amount, pk);
   ui.giftCode = blob; ui.giftLocked = true; ui.giftClaimCode = claimCode; ui.giftDmStatus = 'sending';
-  const amount = fmtAmount(g.amount || fallbackAmt || 0) + ' ' + unitLabel();
-  const dm = t('giftDmText', { amount, link: giftUrl(), code: claimCode });
-  wallet.sendNostrDM(pk, dm).then((ok) => { ui.giftDmStatus = ok ? 'sent' : 'failed'; render(); }).catch(() => { ui.giftDmStatus = 'failed'; render(); });
+  wallet.recordGift({ code: blob, locked: true, amount, claimCode, outpoints: g.reserved });
+  const dmText = t('giftDmText', { amount: fmtAmount(amount) + ' ' + unitLabel(), link: giftUrl(), code: claimCode });
+  wallet.sendNostrDM(pk, dmText).then((ok) => { ui.giftDmStatus = ok ? 'sent' : 'failed'; render(); }).catch(() => { ui.giftDmStatus = 'failed'; render(); });
 }
 function doCreateGift(amt, rate) {
   try {
@@ -1682,6 +1690,7 @@ async function doRevoke(id) {
   try {
     const rate = (wallet.feeRates && wallet.feeRates.fastestFee) || 10;
     await wallet.revokeGift(id, rate);
+    wallet.markGiftRevoked(id); // we took it back — don't later mislabel it as claimed
     ui.revokeId = null;
     toast(t('giftRevoked'));
     wallet.scan().catch(() => {});
@@ -1880,6 +1889,29 @@ function readLockedGiftHash() {
   } catch {
     return null;
   }
+}
+
+// Re-view a previously created gift's link + QR (from its stored record), so the
+// sender can re-share an unclaimed gift. For a locked gift, also surfaces the
+// claim code that was DM'd, in case it needs re-sending.
+function viewGiftView() {
+  const g = ui.viewGift; // { code, locked, amount, claimCode }
+  const url = `${location.origin}/${g.locked ? 'lg' : 'g'}/${g.code}`;
+  let svg = null;
+  try { svg = g.locked ? qrSvg(url) : qrSvg(url.toUpperCase(), { ec: 'L', mode: 'Alphanumeric' }); } catch {}
+  return h('div', { class: 'col', style: 'gap:16px;padding:16px;max-width:460px;margin:0 auto;width:100%' },
+    h('div', { class: 'card col', style: 'gap:12px;align-items:center' },
+      h('h3', { style: 'margin:0' }, t('giftView')),
+      g.amount != null ? h('div', { class: 'amt' }, fmtAmount(g.amount), ' ', unitTag()) : null,
+      svg ? h('div', { html: svg }) : h('div', { class: 'small faint', style: 'text-align:center;padding:8px' }, t('giftQrTooLong')),
+      h('div', { class: 'addr-box break', style: 'width:100%;font-size:12px' }, url),
+      copyBtn(url, t('copyLink')),
+      g.locked && g.claimCode
+        ? h('div', { class: 'col gap6', style: 'width:100%;align-items:center' }, h('div', { class: 'small muted' }, t('giftCodeLabel')), copyBtn(g.claimCode, t('giftCopyCode')))
+        : null,
+      h('button', { class: 'btn-ghost btn-block', onClick: () => { ui.viewGift = null; render(); } }, t('back'))
+    )
+  );
 }
 
 // A locked gift opened from a link: the amount + recipient are public. The
@@ -3179,16 +3211,20 @@ function giftHistoryItem(g) {
       ui.busy ? null : h('button', { class: 'btn-ghost btn-block', onClick: () => { ui.revokeId = null; render(); } }, t('back'))
     );
   }
+  const amt = g.value != null ? g.value : g.amount;
+  const rec = g.claimed ? null : wallet.giftLink(g.id);
   return h('div', { class: 'item' },
     h('div', { class: 'ico out' }, '🎁'),
     h('div', { class: 'grow' },
       h('div', { class: 'row gap6' }, t('giftHistoryTitle'),
-        h('span', { class: 'tag pending' }, g.reserved ? t('giftUnclaimedTag') : t('giftReclaimedTag'))),
-      g.reserved ? h('div', { class: 'small faint' }, t('lockedInGifts')) : null
+        h('span', { class: 'tag ' + (g.claimed ? 'conf' : 'pending') }, g.claimed ? t('giftClaimedTag') : g.reserved ? t('giftUnclaimedTag') : t('giftReclaimedTag'))),
+      !g.claimed && g.reserved ? h('div', { class: 'small faint' }, t('lockedInGifts')) : null
     ),
     h('div', { style: 'text-align:right' },
-      g.value != null ? h('div', { class: 'amount' }, fmtAmount(g.value)) : null,
-      h('button', { class: 'btn-sm', style: 'margin-top:4px', onClick: () => { ui.revokeId = g.id; render(); } }, t('giftCancel'))
+      amt != null ? h('div', { class: 'amount' }, fmtAmount(amt)) : null,
+      g.claimed ? null : h('div', { class: 'row gap6', style: 'justify-content:flex-end;margin-top:4px' },
+        rec ? h('button', { class: 'btn-sm', onClick: () => { ui.viewGift = rec; render(); } }, t('giftView')) : null,
+        h('button', { class: 'btn-sm', onClick: () => { ui.revokeId = g.id; render(); } }, t('giftCancel')))
     )
   );
 }
@@ -3265,7 +3301,9 @@ function historyTab() {
     );
   // Outstanding sent gifts (reserved/reclaimed but unclaimed) sit above the
   // on-chain history; they aren't transactions until claimed or revoked.
-  const gifts = wallet.loaded ? wallet.outstandingGifts() : [];
+  const gifts = wallet.loaded
+    ? [...wallet.outstandingGifts(), ...wallet.claimedGifts().map((c) => ({ ...c, claimed: true }))]
+    : [];
   if (ui.giftsAll && gifts.length) return giftsAllView(gifts);
   if (!txs.length && !gifts.length)
     return h('div', { class: 'card' }, h('p', { class: 'muted center', style: 'margin:0' }, t('noTxYet')));
