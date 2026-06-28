@@ -946,13 +946,14 @@ export class Wallet {
       if (res.has(utxoId(u))) return s;
       if (u.confirmed || u.chain === 1) return s + u.value;
       return s;
-    }, 0);
+    }, 0) + this.spBalance().confirmed; // confirmed silent-payment receipts are spendable
   }
   // Unconfirmed incoming receives (not our change, not gift-locked) — shown as a
-  // separate pending line, kept out of the spendable headline.
+  // separate pending line, kept out of the spendable headline. Includes pending
+  // (mempool) silent-payment receipts.
   get pendingIncoming() {
     const res = this.reservedSet();
-    return this.utxos.reduce((s, u) => s + ((!u.confirmed && u.chain === 0 && !res.has(utxoId(u))) ? u.value : 0), 0);
+    return this.utxos.reduce((s, u) => s + ((!u.confirmed && u.chain === 0 && !res.has(utxoId(u))) ? u.value : 0), 0) + this.spBalance().pending;
   }
 
   _recomputeBalanceFromChains() {
