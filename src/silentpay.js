@@ -69,17 +69,24 @@ export function decodeSilentPaymentAddress(addr) {
 
 // Derive the one-time taproot output scripts for a set of silent-payment outputs
 // that this transaction's inputs are funding.
-//   inputs:  [{ txid (display hex), vout, priv (Uint8Array 32) }] — ALL eligible
-//            (P2WPKH) inputs of the tx; the derivation commits to every one.
+//   inputs:  [{ txid (display hex), vout, priv (Uint8Array 32), taproot? }] — ALL
+//            eligible inputs of the tx; the derivation commits to every one. Set
+//            taproot:true for P2TR inputs (e.g. our own silent-payment coins) so
+//            their key is taken with even Y, per BIP-352.
 //   outputs: [{ scan, spend }] — one entry per desired output (repeat the same
 //            recipient to pay it multiple times; the k counter is handled here).
 // Returns a taproot scriptPubKey (Uint8Array) for each entry, in order.
 export function silentPaymentScripts(inputs, outputs) {
   if (!inputs.length) throw new Error('Silent payment needs at least one input.');
 
-  // a = Σ input private keys (mod n); A = a·G
+  // a = Σ input private keys (mod n); A = a·G. A taproot input contributes the
+  // key for its even-Y x-only pubkey, so negate when the key gives odd Y.
   let a = 0n;
-  for (const i of inputs) a = modN(a + toInt(i.priv));
+  for (const i of inputs) {
+    let d = toInt(i.priv);
+    if (i.taproot && Number(G.multiply(d).toRawBytes(true)[0]) === 0x03) d = modN(-d);
+    a = modN(a + d);
+  }
   if (a === 0n) throw new Error('Silent payment input key sum is zero.');
   const A = G.multiply(a);
 

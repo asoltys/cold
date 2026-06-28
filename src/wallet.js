@@ -1177,12 +1177,11 @@ export class Wallet {
     // signed by sign() with the per-output key. Excluded when paying an sp1…
     // recipient (funding an SP send from a taproot input needs BIP-352 even-Y
     // key handling we don't do yet), so those sends use BIP84 coins.
-    const payingSp = recipients.some((r) => isSilentPaymentAddress(r.address));
-    const spPool = payingSp
-      ? []
-      : coinIds
-        ? this.spUtxos.filter((u) => coinIds.includes(utxoId(u)))
-        : this.spUtxos.slice();
+    // Confirmed SP coins are spendable like any other coin — including to fund a
+    // silent payment. Unconfirmed ones are excluded (the sender's tx could be
+    // replaced, invalidating our spend).
+    const confirmedSp = this.spUtxos.filter((u) => u.confirmed);
+    const spPool = coinIds ? confirmedSp.filter((u) => coinIds.includes(utxoId(u))) : confirmedSp.slice();
     if (!pool_.length && !spPool.length) throw new Error('No spendable coins selected.');
 
     const inputs = [
@@ -1287,13 +1286,22 @@ export class Wallet {
   // actual inputs per BIP-352.
   _applySilentPayments(tx, spOuts) {
     const byOutpoint = new Map();
-    for (const u of this.utxos) byOutpoint.set(utxoId(u), u);
+    for (const u of this.utxos) byOutpoint.set(utxoId(u), { u, sp: false });
+    for (const u of this.spUtxos) byOutpoint.set(utxoId(u), { u, sp: true });
+    const spKeys = this.silentPaymentKeys();
     const inputs = [];
     for (let i = 0; i < tx.inputsLength; i++) {
       const inp = tx.getInput(i);
-      const u = byOutpoint.get(`${hex.encode(inp.txid)}:${inp.index}`);
-      if (!u) throw new Error('Missing key for a silent payment input.');
-      inputs.push({ txid: u.txid, vout: u.vout, priv: this.node(u.chain, u.index).privateKey });
+      const e = byOutpoint.get(`${hex.encode(inp.txid)}:${inp.index}`);
+      if (!e) throw new Error('Missing key for a silent payment input.');
+      // Our own SP coins can fund a silent payment too — they're taproot inputs
+      // whose key is d = spend_priv + t_k (committed to with even Y by the script).
+      if (e.sp) {
+        if (!spKeys) throw new Error('Missing keys for a silent payment input.');
+        inputs.push({ txid: e.u.txid, vout: e.u.vout, priv: silentPaymentOutputPrivKey(spKeys.spendPriv, hex.decode(e.u.tweak)), taproot: true });
+      } else {
+        inputs.push({ txid: e.u.txid, vout: e.u.vout, priv: this.node(e.u.chain, e.u.index).privateKey });
+      }
     }
     const scripts = silentPaymentScripts(inputs, spOuts.map((s) => ({ scan: s.scan, spend: s.spend })));
     spOuts.forEach((s, k) => {
