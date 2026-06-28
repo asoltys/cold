@@ -1577,6 +1577,29 @@ export class Wallet {
     return sel ? sel.reduce((s, u) => s + u.value, 0) : null;
   }
 
+  // The coins a gift of this amount would lock: total value + how many inputs.
+  // A high input count means a costly-to-claim gift (each input adds to the
+  // claimer's fee) — the UI uses it to recommend splitting/consolidating first.
+  giftCoinSummary(amountSats) {
+    const sel = this._selectGiftCoins(BigInt(Math.round(amountSats)));
+    return sel ? { lock: sel.reduce((s, u) => s + u.value, 0), count: sel.length } : null;
+  }
+
+  // Number of unreserved spendable coins (for the consolidate prompt/action).
+  spendableCoinCount() {
+    return this.utxos.filter((u) => !this.isReserved(utxoId(u)) && (u.confirmed || u.chain === 1)).length;
+  }
+
+  // Merge all unreserved spendable coins into one, via a max self-send. Leaves
+  // the wallet with a single coin so future sends/gifts use one input.
+  async consolidate(feeRate) {
+    const rate = Math.max(1, Math.round(feeRate));
+    const draft = this.buildTx({ recipients: [{ address: this.freshReceive().address }], feeRate: rate, sendMax: true });
+    const hex = this.sign(draft.tx);
+    await this.broadcast(hex);
+    return { txid: draft.tx.id, inputs: draft.inputsCount };
+  }
+
   // Build a signed gift from already-chosen coins. If the gift leaves a viable
   // (>= dust) change, output0 is that change back to us, cryptographically fixed
   // by signing input0 SIGHASH_SINGLE (the rest SIGHASH_NONE) — so our change is

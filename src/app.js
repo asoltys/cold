@@ -56,6 +56,7 @@ const ui = {
   giftDmStatus: null, // 'sending' | 'sent' | 'failed' — nostr DM of the claim code
   claimLocked: null, // a locked gift being opened: { v, amount, to, ct }
   claimCodeInput: '', // the claim code the recipient pastes from their nostr DM
+  consolidateError: null, // error from a coin-consolidation attempt
   giftCode: null, // last-created gift PSBT code
   giftError: '',
   giftMax: false, // gift the whole spendable balance (no-change sweep)
@@ -1428,10 +1429,38 @@ function settingsTab() {
         : h('button', { onClick: () => { ui.addrScan = true; ui.addrScanPage = 0; render(); } }, t('rescanAddresses'))
     ),
     networkCard(),
+    consolidateCard(),
     explorerCard(),
     spIndexerCard(),
     wallet.watchOnly || !wallet.mnemonic ? null : syncCard()
   );
+}
+
+// Merge many small coins into one. Useful after lots of small receives/gifts —
+// keeps future sends/gifts to a single input (cheaper, smaller gift QR).
+function consolidateCard() {
+  if (wallet.watchOnly) return null;
+  const n = wallet.spendableCoinCount ? wallet.spendableCoinCount() : 0;
+  if (n < 2) return null;
+  return h('div', { class: 'card col' },
+    h('h3', {}, t('consolidateTitle')),
+    h('p', { class: 'small muted', style: 'margin:0' }, t('consolidateDesc', { n })),
+    ui.consolidateError && h('div', { class: 'notice err' }, ui.consolidateError),
+    h('button', { class: 'btn-block', disabled: ui.busy || wallet.offline, onClick: doConsolidate }, ui.busy ? h('span', { class: 'spinner' }) : t('consolidateAction', { n })));
+}
+async function doConsolidate() {
+  if (wallet.offline) { ui.consolidateError = t('scanOffline'); render(); return; }
+  ui.busy = true; ui.consolidateError = ''; render();
+  try {
+    const rate = (wallet.feeRates && wallet.feeRates.halfHourFee) || 5;
+    await wallet.consolidate(rate);
+    toast(t('consolidateDone'));
+    wallet.scan().catch(() => {});
+  } catch (e) {
+    ui.consolidateError = e.message || t('consolidateFailed');
+  }
+  ui.busy = false;
+  render();
 }
 
 
@@ -1454,20 +1483,22 @@ function createGiftLink() {
   // A specific-amount gift must leave us a dust change output (the gift PSBT
   // commits one). If the amount is so close to the balance that no dust change
   // is possible, point the user at Max to gift the whole balance instead.
-  const lock = wallet.giftLockPreview(amt);
-  if (lock == null) {
+  const summary = wallet.giftCoinSummary(amt);
+  if (summary == null) {
     ui.giftError = t('giftNeedsHeadroom', { n: fmtAmount(Math.max(0, spendable - 294)) + ' ' + unitLabel() });
     render();
     return;
   }
-  // Creating the gift now locks the whole source coin until it's claimed. If
-  // best-fit can't find a near-exact coin, a pre-split would shrink the locked
-  // change down to a dust pad (294) — worth offering only when the liquidity it
-  // frees exceeds the split's own fee (otherwise you'd pay more than you regain).
+  const lock = summary.lock;
+  // Offer to split/consolidate into one coin first when it would free meaningful
+  // change OR when the gift would otherwise bundle several coins — a many-input
+  // gift is costly to claim (each input adds to the claimer's fee) and its link
+  // can outgrow a QR. Splitting absorbs the fragmentation into the funding tx and
+  // leaves the claimer a clean single-input gift.
   const splitFee = Math.ceil((11 + 68 + 31 * 2) * Math.max(1, Math.round(rate)));
   const freed = lock - amt - 294;
-  if (freed > splitFee && !wallet.offline) {
-    ui.giftSplitOffer = { amt, lock, freed, fee: splitFee };
+  if ((freed > splitFee || summary.count >= 3) && !wallet.offline) {
+    ui.giftSplitOffer = { amt, lock, freed: Math.max(0, freed), fee: splitFee, count: summary.count };
     ui.giftError = '';
     render();
     return;
@@ -1566,15 +1597,18 @@ function giftCard() {
       ? (() => {
           const o = ui.giftSplitOffer;
           const u = ' ' + unitLabel();
+          const manyCoins = (o.count || 0) >= 3;
           return h('div', { class: 'col gap6' },
             h('div', { class: 'small muted' },
-              t('giftSplitExplain', { lock: fmtAmount(o.lock) + u, change: fmtAmount(o.lock - o.amt) + u, fee: fmtAmount(o.fee) + u })),
+              manyCoins
+                ? t('giftConsolidateExplain', { count: o.count, fee: fmtAmount(o.fee) + u })
+                : t('giftSplitExplain', { lock: fmtAmount(o.lock) + u, change: fmtAmount(o.lock - o.amt) + u, fee: fmtAmount(o.fee) + u })),
             ui.giftError && h('div', { class: 'notice err' }, ui.giftError),
             ui.busy
               ? h('button', { class: 'btn-primary btn-block', disabled: true }, h('span', { class: 'spinner' }))
               : h('div', { class: 'col gap6' },
-                  h('button', { class: 'btn-primary btn-block', onClick: () => doSplitForGift(o.amt) }, t('giftSplitFirst')),
-                  h('button', { class: 'btn-block', onClick: () => doCreateGift(o.amt, giftRate()) }, t('giftLockWhole', { n: fmtAmount(o.lock) + u })),
+                  h('button', { class: 'btn-primary btn-block', onClick: () => doSplitForGift(o.amt) }, manyCoins ? t('giftConsolidateFirst') : t('giftSplitFirst')),
+                  h('button', { class: 'btn-block', onClick: () => doCreateGift(o.amt, giftRate()) }, manyCoins ? t('giftUseManyCoins', { count: o.count }) : t('giftLockWhole', { n: fmtAmount(o.lock) + u })),
                   h('button', { class: 'linklike small', style: 'align-self:center', onClick: () => { ui.giftSplitOffer = null; render(); } }, t('back'))
                 )
           );
