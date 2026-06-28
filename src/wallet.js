@@ -158,8 +158,11 @@ export class Wallet {
   }
 
   // --- setup --------------------------------------------------------------
-  load({ mnemonic = '', passphrase = '', xpub = '', xprv = '', netName = 'mainnet', offline = false }) {
+  load({ mnemonic = '', passphrase = '', xpub = '', xprv = '', netName = 'mainnet', offline = false, spFresh = false }) {
     this.stopRealtime();
+    // A freshly-generated wallet can't have received silent payments before it
+    // existed, so we start its SP watermark at the current tip (no history scan).
+    this._spFresh = spFresh;
     this.mnemonic = (mnemonic || '').trim().replace(/\s+/g, ' ');
     this.passphrase = passphrase;
     this.xpub = xpub || '';
@@ -377,6 +380,14 @@ export class Wallet {
     const indexer = spIndexerUrl(this.netName);
     if (!keys || !indexer || this.offline) return { unavailable: true };
     if (this._spScanBusy) return { busy: true };
+    // Fresh wallet, never scanned: set the watermark to the current tip instead of
+    // scanning all history (nothing predates the wallet). New blocks + mempool
+    // arrive via the live push from here on.
+    if (this._spFresh && !this.lastSpScan && !rescan) {
+      this._spFresh = false;
+      try { this.lastSpScan = (await (await fetch(`${indexer}/height`)).json()).height || 0; this.saveCache(); } catch {}
+      return { fresh: true };
+    }
     this._spScanBusy = true;
     // Only a manual scan shows the visible "Scanning…" state; auto-scans are
     // invisible (setting spScanning for them left the card stuck on "Scanning…").

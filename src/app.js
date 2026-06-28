@@ -542,7 +542,7 @@ function createPane() {
       ),
       h(
         'button',
-        { class: 'btn-block', onClick: () => openWallet(ui.draftMnemonic) },
+        { class: 'btn-block', onClick: () => openWallet(ui.draftMnemonic, { generated: true }) },
         t('skipVerification')
       )
     );
@@ -595,11 +595,11 @@ function createPane() {
           if (hasPass && ui.confirmPass !== ui.passphrase) {
             ui.unlockError = t('passphraseMismatch'); render(); return;
           }
-          openWallet(ui.draftMnemonic);
+          openWallet(ui.draftMnemonic, { generated: true });
         },
       }, t('openWallet'))
     ),
-    h('button', { class: 'btn-block', onClick: () => openWallet(ui.draftMnemonic) }, t('skipVerification'))
+    h('button', { class: 'btn-block', onClick: () => openWallet(ui.draftMnemonic, { generated: true }) }, t('skipVerification'))
   );
 }
 
@@ -657,11 +657,11 @@ function optionsPanel() {
 
 // Import accepts a recovery phrase, an xpub/zpub (watch-only), or an xprv/zprv
 // (full spending). Classify the pasted text and open the right kind of wallet.
-async function openWallet(input) {
+async function openWallet(input, opts = {}) {
   ui.unlockError = '';
   const raw = (input || '').trim();
   const m = raw.replace(/\s+/g, ' ');
-  if (isValidMnemonic(m)) { await enterWallet(m, ui.passphrase); return; }
+  if (isValidMnemonic(m)) { await enterWallet(m, ui.passphrase, { generated: opts.generated }); return; }
   let pk;
   try { pk = parseExtendedKey(raw); } catch { ui.unlockError = t('invalidImport'); render(); return; }
   const acc = pk.kind === 'xpub'
@@ -693,7 +693,7 @@ async function activateAccount(acc, opts = {}) {
   const netName = getNetwork();
   if (acc.type === 'watch') wallet.load({ xpub: acc.xpub, netName, offline: false });
   else if (acc.xprv) wallet.load({ xprv: acc.xprv, netName, offline: false });
-  else wallet.load({ mnemonic: acc.mnemonic, passphrase: acc.passphrase || '', netName, offline: false });
+  else wallet.load({ mnemonic: acc.mnemonic, passphrase: acc.passphrase || '', netName, offline: false, spFresh: !!opts.generated });
   // Record the account-level xpub so this wallet survives a session wipe as a
   // watch-only entry (see the durable account directory) — you keep seeing your
   // balance/history and re-enter the seed to spend again.
