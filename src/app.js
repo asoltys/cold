@@ -2480,8 +2480,7 @@ function receiveTab() {
       : null,
     h('div', { html: qrSvg(addr) }),
     h('div', { class: 'addr-box' + (sp ? ' break' : ''), style: 'width:100%' + (sp ? ';font-size:12px' : '') }, addr),
-    copyBtn(addr, t('copyAddress')),
-    sp ? h('p', { class: 'small muted', style: 'margin:0;text-align:center' }, t('spReceiveDesc')) : null
+    copyBtn(addr, t('copyAddress'))
   );
 }
 
