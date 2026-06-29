@@ -2597,20 +2597,26 @@ function swapListView() {
 function swapTab() {
   // Pull the selected provider's real reverse-swap limits (min/max) once, to bound
   // the amount instead of guessing — providers + networks differ.
-  if (!ui.swapLimits && !ui._swapLimitsLoading) {
+  if (!ui.swapLimits && !ui._swapLimitsLoading && !wallet.watchOnly) {
     ui._swapLimitsLoading = true;
     swaps.reverseLimits().then((l) => { ui.swapLimits = l; ui._swapLimitsLoading = false; render(); }).catch(() => { ui._swapLimitsLoading = false; });
   }
   const lim = ui.swapLimits;
   return h('div', { class: 'col', style: 'gap:12px' },
-    h('div', { class: 'card col' },
-      h('h3', {}, '⚡ Receive over Lightning'),
-      h('p', { class: 'small muted', style: 'margin:0' }, 'Get a Lightning invoice; when paid, the sats are swapped on-chain into this wallet — non-custodial (you hold the preimage and claim on-chain).'),
-      h('label', { class: 'field' },
-        h('span', { class: 'lab' }, 'Amount (sats)'),
-        h('input', { type: 'number', inputmode: 'numeric', placeholder: lim ? String(lim.min) : '100000', value: ui.swapReverseAmt || '', onInput: (e) => { ui.swapReverseAmt = e.target.value; } }),
-        lim ? h('span', { class: 'small muted' }, `Min ${lim.min.toLocaleString()} · max ${lim.max.toLocaleString()} sats`) : null),
-      h('button', { disabled: !!ui.swapBusy, onClick: doReverse }, ui.swapBusy ? '…' : 'Create invoice')),
+    // Swaps need the private key (to derive the preimage and claim on-chain), so a
+    // watch-only wallet can't do them — prompt to re-enter the seed instead.
+    wallet.watchOnly
+      ? h('div', { class: 'card col' },
+          h('h3', {}, '⚡ Lightning swaps'),
+          h('p', { class: 'small muted', style: 'margin:0' }, 'Re-enter your recovery phrase to send or receive over Lightning — swaps need your keys to claim on-chain.'))
+      : h('div', { class: 'card col' },
+        h('h3', {}, '⚡ Receive over Lightning'),
+        h('p', { class: 'small muted', style: 'margin:0' }, 'Get a Lightning invoice; when paid, the sats are swapped on-chain into this wallet — non-custodial (you hold the preimage and claim on-chain).'),
+        h('label', { class: 'field' },
+          h('span', { class: 'lab' }, 'Amount (sats)'),
+          h('input', { type: 'number', inputmode: 'numeric', placeholder: lim ? String(lim.min) : '100000', value: ui.swapReverseAmt || '', onInput: (e) => { ui.swapReverseAmt = e.target.value; } }),
+          lim ? h('span', { class: 'small muted' }, `Min ${lim.min.toLocaleString()} · max ${lim.max.toLocaleString()} sats`) : null),
+        h('button', { disabled: !!ui.swapBusy, onClick: doReverse }, ui.swapBusy ? '…' : 'Create invoice')),
     wallet.watchOnly ? null : h('div', { class: 'card col' },
       h('h3', {}, '⚡ Pay a Lightning invoice'),
       h('p', { class: 'small muted', style: 'margin:0' }, 'Pay a bolt11 from your on-chain balance: funds a swap that Boltz pays over Lightning.'),
