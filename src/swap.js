@@ -250,6 +250,22 @@ export class SwapManager {
   _stop(id) { const t = this.timers.get(id); if (t) clearInterval(t); this.timers.delete(id); }
   _spendFee() { return Math.max(250, Math.ceil(170 * this.feeRate)); } // ~1-input taproot spend
 
+  // The selected provider's reverse-swap limits (sat), fetched + cached per API.
+  // Lets the UI bound the amount to what the provider actually accepts instead of
+  // a hardcoded guess (providers + networks differ). Falls back conservatively.
+  async reverseLimits() {
+    const api = this.getApi();
+    if (this._revLim && this._revLimApi === api) return this._revLim;
+    let lim = { min: 25000, max: 25000000 };
+    try {
+      const res = await boltzReq(api, '/v2/swap/reverse');
+      const b = res && res.BTC && res.BTC.BTC && res.BTC.BTC.limits;
+      if (b && b.minimal) lim = { min: b.minimal, max: b.maximal };
+    } catch {}
+    this._revLim = lim; this._revLimApi = api;
+    return lim;
+  }
+
   // REVERSE: hal receives over Lightning. Returns a record whose `.invoice`
   // (bolt11) the user has someone pay; hal then claims the lockup on-chain.
   async startReverse(amountSat) {

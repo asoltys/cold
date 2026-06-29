@@ -1719,6 +1719,7 @@ function changeNetwork(net) {
   if (net === getNetwork()) return;
   setNetwork(net);
   swaps.network = net;
+  ui.swapLimits = null; // limits differ per network's provider
   const acc = accounts.find((a) => a.id === activeId);
   if (acc) activateAccount(acc); else render();
 }
@@ -1733,7 +1734,7 @@ function boltzProviderCard() {
     { class: 'card col' },
     h('h3', {}, '⚡ Swap provider'),
     h('p', { class: 'small muted', style: 'margin:0' }, 'Boltz-compatible provider for Lightning swaps. Non-custodial: a provider can fail a swap but never take your funds.'),
-    h('select', { onChange: (e) => { setBoltzProviderId(e.target.value); render(); } },
+    h('select', { onChange: (e) => { setBoltzProviderId(e.target.value); ui.swapLimits = null; render(); } },
       BOLTZ_PRESETS.map((p) => h('option', { value: p.id, selected: p.id === id }, p.label))),
     id === 'custom'
       ? h('div', { class: 'col', style: 'gap:8px' },
@@ -1742,7 +1743,7 @@ function boltzProviderCard() {
             h('input', {
               type: 'text', class: 'mono-input', placeholder: 'https://api.example.com',
               autocapitalize: 'none', autocomplete: 'off', spellcheck: 'false', value: custom.api,
-              onChange: (e) => { setBoltzCustom({ api: e.target.value.trim(), ws: custom.ws }); render(); },
+              onChange: (e) => { setBoltzCustom({ api: e.target.value.trim(), ws: custom.ws }); ui.swapLimits = null; render(); },
             })),
           h('label', { class: 'field' },
             h('span', { class: 'lab' }, 'WebSocket URL (optional)'),
@@ -2536,7 +2537,8 @@ function balanceCard() {
 
 async function doReverse() {
   const amt = parseInt((ui.swapReverseAmt || '').trim(), 10);
-  if (!amt || amt < 50000) { ui.swapError = 'Enter at least 50,000 sats'; return render(); }
+  const lim = ui.swapLimits || (ui.swapLimits = await swaps.reverseLimits());
+  if (!amt || amt < lim.min || amt > lim.max) { ui.swapError = `Enter ${lim.min.toLocaleString()}–${lim.max.toLocaleString()} sats`; return render(); }
   ui.swapError = ''; ui.swapBusy = true; render();
   try { await swaps.startReverse(amt); ui.swapReverseAmt = ''; }
   catch (e) { ui.swapError = e.message; }
@@ -2593,13 +2595,21 @@ function swapListView() {
 }
 
 function swapTab() {
+  // Pull the selected provider's real reverse-swap limits (min/max) once, to bound
+  // the amount instead of guessing — providers + networks differ.
+  if (!ui.swapLimits && !ui._swapLimitsLoading) {
+    ui._swapLimitsLoading = true;
+    swaps.reverseLimits().then((l) => { ui.swapLimits = l; ui._swapLimitsLoading = false; render(); }).catch(() => { ui._swapLimitsLoading = false; });
+  }
+  const lim = ui.swapLimits;
   return h('div', { class: 'col', style: 'gap:12px' },
     h('div', { class: 'card col' },
       h('h3', {}, '⚡ Receive over Lightning'),
       h('p', { class: 'small muted', style: 'margin:0' }, 'Get a Lightning invoice; when paid, the sats are swapped on-chain into this wallet — non-custodial (you hold the preimage and claim on-chain).'),
       h('label', { class: 'field' },
         h('span', { class: 'lab' }, 'Amount (sats)'),
-        h('input', { type: 'number', inputmode: 'numeric', placeholder: '100000', value: ui.swapReverseAmt || '', onInput: (e) => { ui.swapReverseAmt = e.target.value; } })),
+        h('input', { type: 'number', inputmode: 'numeric', placeholder: lim ? String(lim.min) : '100000', value: ui.swapReverseAmt || '', onInput: (e) => { ui.swapReverseAmt = e.target.value; } }),
+        lim ? h('span', { class: 'small muted' }, `Min ${lim.min.toLocaleString()} · max ${lim.max.toLocaleString()} sats`) : null),
       h('button', { disabled: !!ui.swapBusy, onClick: doReverse }, ui.swapBusy ? '…' : 'Create invoice')),
     wallet.watchOnly ? null : h('div', { class: 'card col' },
       h('h3', {}, '⚡ Pay a Lightning invoice'),
