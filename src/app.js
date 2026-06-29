@@ -3321,7 +3321,7 @@ async function doLnPay() {
 }
 
 // Lightning send review: itemized cost (amount + Boltz fee + network fee → total),
-// then a success card once funded. Boltz pays the invoice after the lockup confirms.
+// then a success card once funded. The provider pays the invoice after it confirms.
 function lnSendReview() {
   const u = ' ' + unitLabel();
   if (ui.lnSent) {

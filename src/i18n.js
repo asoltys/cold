@@ -364,7 +364,7 @@ const STR = {
     lnPayTotal: 'Total',
     lnPayConfirm: 'Pay',
     lnPaySentTitle: 'Lightning payment sent',
-    lnPaySentBody: 'The invoice is paid once the on-chain lockup confirms.',
+    lnPaySentBody: 'The swap provider pays the invoice once the on-chain lockup confirms.',
     spScan: 'Scan for silent payments',
     spScanning: 'Scanning…',
     spWatching: 'Watching for payments',
