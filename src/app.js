@@ -2834,6 +2834,8 @@ function sendTab() {
   }
   if (ui.sendResult) return sendResultView();
   if (ui.broadcastTx) return broadcastConfirmView();
+  if (ui.lnSent || ui.lnSend) return lnSendReview();
+  if (ui.lnSendBusy) return h('div', { class: 'card col', style: 'align-items:center;gap:14px;padding:32px 14px' }, h('span', { class: 'spinner' }), h('p', { class: 'muted', style: 'margin:0' }, t('lnQuoting')));
   if (ui.draft) return reviewView();
   if (ui.giftMode) return giftView();
   return sendForm();
@@ -3282,6 +3284,10 @@ function reviewSend() {
   ui.sendError = '';
   try {
     const s = ui.send;
+    // A bolt11 invoice in the recipient field → pay it over Lightning via a Boltz
+    // submarine swap, shown with an itemized cost. To the user it's just a payment.
+    const lnTarget = s.recipients.length === 1 ? (s.recipients[0].address || '').trim().replace(/^lightning:/i, '') : '';
+    if (isLnInvoice(lnTarget)) { startLnSend(lnTarget); return; }
     const feeRate = currentFeeRate();
     let coinIds = null;
     if (s.manual) {
@@ -3309,6 +3315,54 @@ function reviewSend() {
     ui.sendError = e.message;
   }
   render();
+}
+
+// A bolt11 Lightning invoice (any network prefix); long ln-prefixed bech32 string.
+function isLnInvoice(t) { t = (t || '').trim(); return /^ln[a-z0-9]+$/i.test(t) && t.length > 50; }
+
+// Quote a submarine swap for a pasted invoice, then show the itemized cost.
+async function startLnSend(invoice) {
+  ui.sendError = ''; ui.lnSend = null; ui.lnSent = null; ui.lnSendBusy = true; render();
+  try { ui.lnSend = await swaps.quoteSubmarine(invoice); }
+  catch (e) { ui.sendError = e.message; }
+  ui.lnSendBusy = false; render();
+}
+
+async function doLnPay() {
+  if (!ui.lnSend) return;
+  ui.sendError = ''; ui.lnSendBusy = true; render();
+  try { const rec = await swaps.fundQuotedSubmarine(ui.lnSend); ui.lnSent = { amount: ui.lnSend.invoiceAmount, id: rec.id }; }
+  catch (e) { ui.sendError = e.message; }
+  ui.lnSendBusy = false; render();
+}
+
+// Lightning send review: itemized cost (amount + Boltz fee + network fee → total),
+// then a success card once funded. Boltz pays the invoice after the lockup confirms.
+function lnSendReview() {
+  const u = ' ' + unitLabel();
+  if (ui.lnSent) {
+    return h('div', { class: 'col', style: 'gap:16px' },
+      h('div', { class: 'card col', style: 'align-items:center;text-align:center;gap:8px' },
+        h('div', { class: 'check-badge' }, '⚡'),
+        h('h2', { style: 'margin:0' }, t('lnPaySentTitle')),
+        ui.lnSent.amount ? h('div', { class: 'amount-pos', style: 'font-size:18px' }, fmtAmount(ui.lnSent.amount) + u) : null,
+        h('p', { class: 'muted', style: 'margin:0' }, t('lnPaySentBody'))),
+      h('button', { class: 'btn-primary btn-block', onClick: () => { ui.lnSent = null; ui.lnSend = null; ui.send = blankSend(); ui.tab = 'history'; render(); } }, t('done')));
+  }
+  const q = ui.lnSend;
+  const row = (label, sats, bold) => h('div', { class: 'row', style: 'justify-content:space-between' + (bold ? ';font-weight:600' : '') },
+    h('span', { class: bold ? '' : 'small muted' }, label), h('span', {}, fmtAmount(sats) + u));
+  return h('div', { class: 'col', style: 'gap:12px' },
+    h('div', { class: 'card col', style: 'gap:10px' },
+      h('h3', { style: 'margin:0' }, t('lnPayTitle')),
+      q.invoiceAmount != null ? row(t('lnPayAmount'), q.invoiceAmount) : null,
+      q.boltzFee != null ? row(t('lnPayBoltzFee'), q.boltzFee) : null,
+      row(t('lnPayNetworkFee'), q.networkFee),
+      h('div', { style: 'border-top:1px solid var(--line, #ddd);margin:2px 0' }),
+      row(t('lnPayTotal'), q.total, true)),
+    ui.sendError ? h('div', { class: 'notice err' }, ui.sendError) : null,
+    h('button', { class: 'btn-primary btn-block', disabled: !!ui.lnSendBusy, onClick: doLnPay }, ui.lnSendBusy ? h('span', { class: 'spinner' }) : t('lnPayConfirm')),
+    h('button', { class: 'btn-ghost btn-block', onClick: () => { ui.lnSend = null; ui.sendError = ''; render(); } }, t('back')));
 }
 
 function reviewView() {

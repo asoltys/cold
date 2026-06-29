@@ -312,6 +312,14 @@ export class SwapManager {
   // SUBMARINE: hal spends over Lightning. Funds the lockup from the wallet;
   // Boltz pays the invoice + claims. On failure, refund after the timeout.
   async startSubmarine(invoice) {
+    return this.fundQuotedSubmarine(await this.quoteSubmarine(invoice));
+  }
+
+  // Quote a submarine swap WITHOUT committing funds: ask Boltz for the lockup
+  // amount + build (but don't broadcast) the funding tx, so the UI can show an
+  // itemized cost (amount + Boltz fee + on-chain network fee) before the user
+  // pays. Returns everything fundQuotedSubmarine() needs.
+  async quoteSubmarine(invoice) {
     const w = this.wallet, net = this.network;
     const dec = decodeBolt11(invoice);
     const idx = w.nextSwapIndex();
@@ -319,11 +327,23 @@ export class SwapManager {
     const res = await boltzReq(this.getApi(), '/v2/swap/submarine', { invoice, from: 'BTC', to: 'BTC', refundPublicKey: bytesToHex(node.publicKey) });
     const d = swapP2TR({ kind: 'submarine', preimageHash160: ripemd160(dec.paymentHash), boltzPub33: hexToBytes(res.claimPublicKey), halPub33: node.publicKey, lockTime: res.timeoutBlockHeight, network: net });
     if (d.address !== res.address) throw new Error('lockup address mismatch — not funding');
-    const rec = { id: res.id, kind: 'submarine', swapIndex: idx, status: 'funding', network: net, paymentHash: bytesToHex(dec.paymentHash), lockupAddress: res.address, expectedAmount: res.expectedAmount, claimPublicKey: res.claimPublicKey, timeoutBlockHeight: res.timeoutBlockHeight, createdAt: Date.now() };
-    this._save(rec);
     const draft = w.buildTx({ recipients: [{ address: res.address, amount: res.expectedAmount }], feeRate: this.feeRate });
-    const fundTxid = await w.broadcast(w.sign(draft.tx));
-    if (w.applySentTx) w.applySentTx(draft.tx);
+    const invoiceAmount = dec.amountMsat ? Number(dec.amountMsat / 1000n) : null;
+    return {
+      invoice, id: res.id, swapIndex: idx, lockupAddress: res.address, expectedAmount: res.expectedAmount,
+      claimPublicKey: res.claimPublicKey, timeoutBlockHeight: res.timeoutBlockHeight, paymentHash: bytesToHex(dec.paymentHash),
+      invoiceAmount, networkFee: draft.fee, boltzFee: invoiceAmount != null ? res.expectedAmount - invoiceAmount : null,
+      total: res.expectedAmount + draft.fee, _draft: draft,
+    };
+  }
+
+  // Broadcast the funding tx for a previously-quoted submarine swap + watch it.
+  async fundQuotedSubmarine(q) {
+    const w = this.wallet, net = this.network;
+    const rec = { id: q.id, kind: 'submarine', swapIndex: q.swapIndex, status: 'funding', network: net, paymentHash: q.paymentHash, lockupAddress: q.lockupAddress, expectedAmount: q.expectedAmount, claimPublicKey: q.claimPublicKey, timeoutBlockHeight: q.timeoutBlockHeight, invoiceAmount: q.invoiceAmount, createdAt: Date.now() };
+    this._save(rec);
+    const fundTxid = await w.broadcast(w.sign(q._draft.tx));
+    if (w.applySentTx) w.applySentTx(q._draft.tx);
     rec.fundTxid = fundTxid; rec.status = 'paying'; this._save(rec);
     this._watchSubmarine(rec.id);
     return rec;
