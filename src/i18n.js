@@ -347,6 +347,7 @@ const STR = {
     spReceiveTitle: 'Silent payment address',
     spReceiveDesc: "A reusable address that can't be tracked.",
     receiveAddressTab: 'Address',
+    receiveOver: 'Receive over',
     receiveLnTab: 'Lightning',
     receiveSpTab: 'Silent payment',
     lnReceiveIntro: 'Receive over Lightning — paid into this wallet on-chain, non-custodial.',

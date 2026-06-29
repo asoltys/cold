@@ -2545,15 +2545,6 @@ async function doReverse() {
   ui.swapBusy = false; render();
 }
 
-async function doSubmarine() {
-  const inv = (ui.swapInvoice || '').trim().toLowerCase().replace(/^lightning:/, '');
-  if (!inv.startsWith('ln')) { ui.swapError = 'Paste a bolt11 invoice'; return render(); }
-  ui.swapError = ''; ui.swapBusy = true; render();
-  try { await swaps.startSubmarine(inv); ui.swapInvoice = ''; }
-  catch (e) { ui.swapError = e.message; }
-  ui.swapBusy = false; render();
-}
-
 async function doRefund(id) {
   ui.swapError = ''; ui.swapBusy = true; render();
   try { await swaps.refundSubmarine(id); }
@@ -2594,30 +2585,11 @@ function swapListView() {
   );
 }
 
-function swapTab() {
-  // Receiving over Lightning now lives under Receive → Lightning; this tab keeps
-  // paying an invoice (a submarine swap) + the in-flight swap list for now.
-  return h('div', { class: 'col', style: 'gap:12px' },
-    wallet.watchOnly
-      ? h('div', { class: 'card col' },
-          h('h3', {}, '⚡ Pay over Lightning'),
-          h('p', { class: 'small muted', style: 'margin:0' }, 'Re-enter your recovery phrase to pay over Lightning — swaps need your keys to claim on-chain.'))
-      : h('div', { class: 'card col' },
-        h('h3', {}, '⚡ Pay a Lightning invoice'),
-        h('p', { class: 'small muted', style: 'margin:0' }, 'Pay a bolt11 from your on-chain balance: funds a swap that Boltz pays over Lightning.'),
-        h('textarea', { rows: 3, class: 'mono-input', placeholder: 'lnbcrt1…', value: ui.swapInvoice || '', onInput: (e) => { ui.swapInvoice = e.target.value; } }),
-        h('button', { disabled: !!ui.swapBusy, onClick: doSubmarine }, ui.swapBusy ? '…' : 'Pay invoice')),
-    ui.swapError ? h('div', { class: 'notice err' }, ui.swapError) : null,
-    swapListView()
-  );
-}
-
 function tabsBar() {
   const tabs = [
     ['receive', t('tabReceive')],
     // Watch-only wallets show Send too — it prompts to load the seed to spend.
     ['send', t('tabSend')],
-    ['swap', '⚡ Swap'],
     ['history', t('tabHistory')],
     ['settings', t('tabSettings')],
   ];
@@ -2643,7 +2615,6 @@ function tabContent() {
   switch (ui.tab) {
     case 'receive': return receiveTab();
     case 'send': return sendTab();
-    case 'swap': return swapTab();
     case 'history': return historyTab();
     case 'settings': return settingsTab();
   }
@@ -2696,12 +2667,16 @@ function receiveTab() {
   let mode = ui.receiveType || 'address';
   if (mode === 'sp' && !spAddr) mode = 'address';
   if (mode === 'ln' && !canLn) mode = 'address';
-  const seg = (spAddr || canLn)
-    ? h('div', { class: 'seg', style: 'display:flex;width:100%' },
-        h('button', { type: 'button', class: (mode === 'address' ? 'active ' : '') + 'grow', onClick: () => { ui.receiveType = 'address'; render(); } }, t('receiveAddressTab')),
-        canLn ? h('button', { type: 'button', class: (mode === 'ln' ? 'active ' : '') + 'grow', onClick: () => { ui.receiveType = 'ln'; render(); } }, t('receiveLnTab')) : null,
-        spAddr ? h('button', { type: 'button', class: (mode === 'sp' ? 'active ' : '') + 'grow', onClick: () => { ui.receiveType = 'sp'; render(); } }, t('receiveSpTab')) : null
-      )
+  // A compact dropdown (not a 3-button segmented control) so it fits on mobile and
+  // scales if more address types are added.
+  const opts = [['address', t('receiveAddressTab')]];
+  if (canLn) opts.push(['ln', t('receiveLnTab')]);
+  if (spAddr) opts.push(['sp', t('receiveSpTab')]);
+  const seg = opts.length > 1
+    ? h('label', { class: 'field', style: 'width:100%' },
+        h('span', { class: 'lab' }, t('receiveOver')),
+        h('select', { onChange: (e) => { ui.receiveType = e.target.value; render(); } },
+          opts.map(([id, label]) => h('option', { value: id, selected: mode === id }, label))))
     : null;
   if (mode === 'ln') {
     return h('div', { class: 'card col', style: 'align-items:center;gap:14px' }, seg, ...lnReceiveContent());
@@ -2874,6 +2849,10 @@ function handleScanned(raw) {
   const text = raw.trim();
   const s = ui.send;
   ui.sendError = '';
+
+  // A scanned bolt11 (optionally lightning:-prefixed) → pay it over Lightning.
+  const lnInv = text.replace(/^lightning:/i, '');
+  if (isLnInvoice(lnInv)) { startLnSend(lnInv); return; }
 
   if (/^bitcoin:/i.test(text)) {
     const { address, amount } = parseBip21(text);
@@ -3101,17 +3080,24 @@ function recipientRow(s, r, i) {
     check.style.display = a ? '' : 'none';
   };
 
+  // A pasted/typed/scanned bolt11 → jump straight to the Lightning confirmation
+  // (a submarine swap), so its baked-in amount is used and the amount field skipped.
+  const tryLn = (v) => {
+    const inv = (v || '').trim().replace(/^lightning:/i, '');
+    if (s.recipients.length === 1 && !ui.lnSendBusy && !ui.lnSend && isLnInvoice(inv)) { startLnSend(inv); return true; }
+    return false;
+  };
   const addrInput = h('input', {
     type: 'text', class: 'mono-input grow', placeholder: 'bc1q…',
     autocapitalize: 'none', autocomplete: 'off', spellcheck: 'false', value: r.address,
-    onInput: (e) => { r.address = e.target.value; syncCheck(); },
+    onInput: (e) => { r.address = e.target.value; syncCheck(); tryLn(e.target.value); },
   });
   const row = h(
     'div',
     { class: 'col gap6' },
     h('div', { class: 'input-group' },
       addrInput,
-      pasteBtn((text) => { addrInput.value = text; r.address = text; syncCheck(); }),
+      pasteBtn((text) => { addrInput.value = text; r.address = text; syncCheck(); tryLn(text); }),
       i === 0 && canScan() && h('button', {
         type: 'button', class: 'btn-sm', title: t('scanQr'), onClick: scanIntoSend,
         html: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3"/></svg>',
@@ -3601,8 +3587,10 @@ function historyTab() {
     ? [...wallet.outstandingGifts(), ...wallet.claimedGifts().map((c) => ({ ...c, claimed: true }))]
     : [];
   if (ui.giftsAll && gifts.length) return giftsAllView(gifts);
+  // In-flight / recent Lightning swaps (formerly the Swap tab) sit above history.
+  const swapsCard = swapListView();
   if (!txs.length && !gifts.length)
-    return h('div', { class: 'card' }, h('p', { class: 'muted center', style: 'margin:0' }, t('noTxYet')));
+    return swapsCard || h('div', { class: 'card' }, h('p', { class: 'muted center', style: 'margin:0' }, t('noTxYet')));
 
   // Show at most 3 gifts inline; the rest live behind "View all". Transactions
   // paginate 10 at a time.
@@ -3610,7 +3598,7 @@ function historyTab() {
   const txPages = Math.ceil(txs.length / PAGE_SIZE);
   const txPage = Math.min(ui.txPage, Math.max(0, txPages - 1));
   const txSlice = txs.slice(txPage * PAGE_SIZE, txPage * PAGE_SIZE + PAGE_SIZE);
-  return h(
+  const historyCard = h(
     'div',
     { class: 'card' },
     h('div', { class: 'list' },
@@ -3630,6 +3618,7 @@ function historyTab() {
         )
       : null
   );
+  return swapsCard ? h('div', { class: 'col', style: 'gap:12px' }, swapsCard, historyCard) : historyCard;
 }
 
 // Open a tx's detail view, lazily fetching its fee/details if we don't have them
