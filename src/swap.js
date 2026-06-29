@@ -331,7 +331,11 @@ export class SwapManager {
 
   _watchSubmarine(id) {
     if (this.timers.has(id)) return;
-    const done = new Set(['transaction.claimed', 'invoice.settled']);
+    // For a submarine swap the success moment is invoice.paid — Boltz has paid the
+    // Lightning invoice (the whole point). It then claims its on-chain lockup
+    // (transaction.claim.pending → claimed), often deferred to a later batch, but
+    // our funds are already gone to the LN destination, so we're done either way.
+    const done = new Set(['invoice.paid', 'transaction.claim.pending', 'transaction.claimed', 'invoice.settled']);
     const bad = new Set(['invoice.failedToPay', 'swap.expired', 'transaction.lockupFailed', 'transaction.refunded']);
     const tick = async () => {
       const rec = this._get(id);
