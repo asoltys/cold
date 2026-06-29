@@ -2573,7 +2573,7 @@ function swapListView() {
       (s.kind === 'submarine' && s.status === 'success')
         ? h('div', { class: 'small', style: 'color:#36d36b' }, 'Invoice paid ✓') : null,
       (s.kind === 'submarine' && ['funding', 'paying'].includes(s.status))
-        ? h('div', { class: 'small faint' }, 'Funding lockup / waiting for Boltz to pay…') : null,
+        ? h('div', { class: 'small faint' }, 'Funding lockup / waiting for the swap to settle…') : null,
       (s.kind === 'submarine' && s.status === 'refundable')
         ? h('div', { class: 'col', style: 'gap:4px' },
             h('div', { class: 'small', style: 'color:#e0a13a' }, 'Payment failed — refundable after timeout block ' + s.timeoutBlockHeight),
