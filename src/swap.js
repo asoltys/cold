@@ -276,13 +276,25 @@ export class SwapManager {
   // (bolt11) the user has someone pay; hal then claims the lockup on-chain.
   async startReverse(amountSat) {
     const w = this.wallet, net = this.network;
-    const idx = w.nextSwapIndex();
-    const node = w.swapNode(idx);
-    const preimage = sha256(node.privateKey);
-    const res = await boltzReq(this.getApi(), '/v2/swap/reverse', {
-      invoiceAmount: amountSat, from: 'BTC', to: 'BTC',
-      claimPublicKey: bytesToHex(node.publicKey), preimageHash: bytesToHex(sha256(preimage)),
-    });
+    let idx, node, preimage, res;
+    // Our preimage is deterministic per swap index. If a prior attempt burned this
+    // index at Boltz ("swap with this preimage exists"), nextSwapIndex has advanced,
+    // so just retry with the next one.
+    for (let attempt = 0; ; attempt++) {
+      idx = w.nextSwapIndex();
+      node = w.swapNode(idx);
+      preimage = sha256(node.privateKey);
+      try {
+        res = await boltzReq(this.getApi(), '/v2/swap/reverse', {
+          invoiceAmount: amountSat, from: 'BTC', to: 'BTC',
+          claimPublicKey: bytesToHex(node.publicKey), preimageHash: bytesToHex(sha256(preimage)),
+        });
+        break;
+      } catch (e) {
+        if (attempt < 5 && /preimage|already exist/i.test(String(e?.message || e))) continue;
+        throw e;
+      }
+    }
     const d = swapP2TR({ kind: 'reverse', preimageHash160: hash160(preimage), boltzPub33: hexToBytes(res.refundPublicKey), halPub33: node.publicKey, lockTime: res.timeoutBlockHeight, network: net });
     if (d.address !== res.lockupAddress) throw new Error('lockup address mismatch — not paying');
     if (bytesToHex(decodeBolt11(res.invoice).paymentHash) !== bytesToHex(sha256(preimage))) throw new Error('invoice hash mismatch');

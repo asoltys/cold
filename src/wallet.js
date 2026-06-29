@@ -1537,8 +1537,19 @@ export class Wallet {
   saveSwaps(list) {
     try { localStorage.setItem(this._swapKey(), JSON.stringify(list)); } catch {}
   }
+  _swapIdxKey() { return this._cacheKey() + ':swapidx'; }
+  // Reserve the next swap index: monotonic + persisted on every call. A reverse/
+  // submarine attempt that fails AFTER Boltz created the swap (a later validation
+  // throw, a dropped response) still burns its index, so a retry can't reuse the
+  // same deterministic preimage (Boltz rejects "swap with this preimage exists").
+  // Seeded from saved swaps so existing wallets don't regress.
   nextSwapIndex() {
-    return this.loadSwaps().reduce((m, s) => Math.max(m, (s.swapIndex ?? -1) + 1), 0);
+    const fromSaved = this.loadSwaps().reduce((m, s) => Math.max(m, (s.swapIndex ?? -1) + 1), 0);
+    let stored = 0;
+    try { stored = parseInt(localStorage.getItem(this._swapIdxKey()) || '0', 10) || 0; } catch {}
+    const idx = Math.max(fromSaved, stored);
+    try { localStorage.setItem(this._swapIdxKey(), String(idx + 1)); } catch {}
+    return idx;
   }
   // Deterministic swap keypair on a dedicated chain (2) so swap keys never
   // collide with receive (0) / change (1). Returns the HDKey node (has
