@@ -11,8 +11,72 @@
 
 import * as nip06 from 'nostr-tools/nip06';
 import * as nip44 from 'nostr-tools/nip44';
-import { getPublicKey, finalizeEvent } from 'nostr-tools/pure';
-import { Relay } from 'nostr-tools/relay';
+import { wrapEvent as nip17WrapEvent } from 'nostr-tools/nip17';
+import { getPublicKey, finalizeEvent, generateSecretKey } from 'nostr-tools/pure';
+import { decode as nip19decode, npubEncode } from 'nostr-tools/nip19';
+import { SimplePool } from 'nostr-tools/pool';
+import { randomBytes } from '@noble/hashes/utils';
+import { base64urlnopad } from '@scure/base';
+
+// One shared pool for all relay I/O — it manages connection lifecycles (and the
+// CLOSE-after-EOSE handshake) cleanly, so we never send on a half-closed socket.
+const pool = new SimplePool();
+
+// --- locking a gift to a recipient's Nostr key ---------------------------
+// An npub or 64-hex nostr pubkey → hex, or null if it isn't one.
+export function parseNostrPubkey(input) {
+  const s = (input || '').trim();
+  if (/^[0-9a-f]{64}$/i.test(s)) return s.toLowerCase();
+  try { const d = nip19decode(s); if (d.type === 'npub') return d.data; } catch {}
+  return null;
+}
+export function npubOf(pkHex) { try { return npubEncode(pkHex); } catch { return null; } }
+
+// Encrypt a gift payload two ways: (1) under a fresh one-time code, delivered to
+// the recipient out-of-band via a nostr DM — the manual path; and (2) to the
+// recipient's nostr pubkey via an ephemeral key, so a NIP-07 browser extension
+// can decrypt it in-place with no code. Both decrypt to the same payload.
+export function encryptGiftPayload(plaintext, recipientPkHex) {
+  const codeKey = randomBytes(32);
+  const ephSk = generateSecretKey();
+  return {
+    code: base64urlnopad.encode(codeKey),
+    ctCode: nip44.encrypt(plaintext, codeKey),
+    eph: getPublicKey(ephSk),
+    ctKey: nip44.encrypt(plaintext, nip44.getConversationKey(ephSk, recipientPkHex)),
+  };
+}
+export function decryptWithCode(code, ct) {
+  return nip44.decrypt(ct, base64urlnopad.decode((code || '').trim()));
+}
+
+// Profiles live across the network, so look them up on popular relays (broader
+// than the sync relays).
+export const PROFILE_RELAYS = ['wss://relay.damus.io', 'wss://nos.lol', 'wss://relay.primal.net', 'wss://relay.coinos.io'];
+// Fetch a recipient's profile (name + picture) for a pubkey, newest across relays.
+export async function fetchNostrProfile(pubkeyHex, relays = PROFILE_RELAYS) {
+  let events;
+  try { events = await pool.querySync(relays, { kinds: [0], authors: [pubkeyHex] }, { maxWait: 5000 }); } catch { return null; }
+  const best = events.sort((a, b) => b.created_at - a.created_at)[0];
+  if (!best) return null;
+  try {
+    const m = JSON.parse(best.content);
+    return { name: m.display_name || m.name || null, picture: m.picture || null, nip05: m.nip05 || null };
+  } catch { return null; }
+}
+
+// Where to deliver a DM to a pubkey: prefer their NIP-17 DM relay list (kind
+// 10050), else their NIP-65 read relays (kind 10002), else [] (caller falls back).
+export async function fetchInboxRelays(pubkeyHex, relays = PROFILE_RELAYS) {
+  let events;
+  try { events = await pool.querySync(relays, { kinds: [10002, 10050], authors: [pubkeyHex] }, { maxWait: 5000 }); } catch { return []; }
+  const newest = (kind) => events.filter((e) => e.kind === kind).sort((a, b) => b.created_at - a.created_at)[0];
+  const dm = newest(10050);
+  if (dm) { const r = dm.tags.filter((t) => t[0] === 'relay' && t[1]).map((t) => t[1]); if (r.length) return r; }
+  const nip65 = newest(10002);
+  if (nip65) { const r = nip65.tags.filter((t) => t[0] === 'r' && t[1] && (!t[2] || t[2] === 'read')).map((t) => t[1]); if (r.length) return r; }
+  return [];
+}
 
 const DTAG = 'bitcoin-wallet';
 const SYNC_KEY = 'btc-wallet-sync';
@@ -46,7 +110,6 @@ export class NostrSync {
     this.pk = null;
     this.ck = null; // self conversation key for NIP-44
     this.relays = DEFAULT_SYNC_RELAYS;
-    this._conns = new Map(); // url -> Relay
   }
 
   load(mnemonic, passphrase = '') {
@@ -55,40 +118,10 @@ export class NostrSync {
     this.ck = nip44.getConversationKey(this.sk, this.pk);
   }
 
-  unload() {
-    this.sk = this.pk = this.ck = null;
-    this._closeAll();
-  }
+  unload() { this.sk = this.pk = this.ck = null; }
 
-  _closeAll() {
-    for (const r of this._conns.values()) {
-      try {
-        r.close();
-      } catch {}
-    }
-    this._conns.clear();
-  }
-
-  // Point at a new relay list, closing connections that are no longer used.
   setRelays(relays) {
-    const next = Array.isArray(relays) && relays.length ? relays : DEFAULT_SYNC_RELAYS;
-    for (const url of [...this._conns.keys()]) {
-      if (!next.includes(url)) {
-        try {
-          this._conns.get(url).close();
-        } catch {}
-        this._conns.delete(url);
-      }
-    }
-    this.relays = next;
-  }
-
-  async _connect(url) {
-    const existing = this._conns.get(url);
-    if (existing && existing.connected) return existing;
-    const r = await Relay.connect(url);
-    this._conns.set(url, r);
-    return r;
+    this.relays = Array.isArray(relays) && relays.length ? relays : DEFAULT_SYNC_RELAYS;
   }
 
   // Encrypt + publish the latest state to every relay (best-effort).
@@ -97,56 +130,36 @@ export class NostrSync {
     let evt;
     try {
       const content = nip44.encrypt(JSON.stringify(stateObj), this.ck);
-      evt = finalizeEvent(
-        { kind: 30078, created_at: Math.floor(Date.now() / 1000), tags: [['d', DTAG]], content },
-        this.sk
-      );
-    } catch {
-      return;
-    }
-    await Promise.allSettled(
-      this.relays.map(async (url) => {
-        const relay = await this._connect(url);
-        await relay.publish(evt);
-      })
-    );
+      evt = finalizeEvent({ kind: 30078, created_at: Math.floor(Date.now() / 1000), tags: [['d', DTAG]], content }, this.sk);
+    } catch { return; }
+    await Promise.allSettled(pool.publish(this.relays, evt));
   }
 
-  // Fetch from every relay; return the newest decrypted state, or null.
+  // Deliver an encrypted DM (a locked gift's claim code) as a NIP-17 gift wrap
+  // (kind 1059) — the modern standard every current client supports. Goes to the
+  // recipient's published inbox relays (NIP-17/65) plus a broad fallback. Returns
+  // true if ≥1 relay accepted it.
+  async sendDM(recipientPkHex, text, relays = null) {
+    if (!this.sk) return false;
+    let evt;
+    try { evt = nip17WrapEvent(this.sk, { publicKey: recipientPkHex }, text); } catch { return false; }
+    let targets = relays;
+    if (!targets) {
+      const inbox = await fetchInboxRelays(recipientPkHex);
+      targets = [...new Set([...inbox, ...PROFILE_RELAYS])].slice(0, 8); // recipient's inbox + safety net
+    }
+    const res = await Promise.allSettled(pool.publish(targets, evt));
+    return res.some((x) => x.status === 'fulfilled');
+  }
+
+  // Fetch the newest decrypted state across relays, or null.
   async fetch() {
     if (!this.sk) return null;
-    const results = await Promise.allSettled(this.relays.map((url) => this._fetchOne(url)));
-    let best = null;
-    for (const res of results) {
-      const v = res.status === 'fulfilled' ? res.value : null;
-      if (v && (!best || (v.savedAt || 0) > (best.savedAt || 0))) best = v;
+    let events;
+    try { events = await pool.querySync(this.relays, { kinds: [30078], authors: [this.pk], '#d': [DTAG] }, { maxWait: 6000 }); } catch { return null; }
+    for (const e of events.sort((a, b) => b.created_at - a.created_at)) {
+      try { const v = JSON.parse(nip44.decrypt(e.content, this.ck)); if (v) return v; } catch {}
     }
-    return best;
-  }
-
-  async _fetchOne(url) {
-    const relay = await this._connect(url);
-    return new Promise((resolve) => {
-      let result = null;
-      const sub = relay.subscribe([{ kinds: [30078], authors: [this.pk], '#d': [DTAG], limit: 1 }], {
-        onevent: (e) => {
-          try {
-            result = JSON.parse(nip44.decrypt(e.content, this.ck));
-          } catch {}
-        },
-        oneose: () => {
-          try {
-            sub.close();
-          } catch {}
-          resolve(result);
-        },
-      });
-      setTimeout(() => {
-        try {
-          sub.close();
-        } catch {}
-        resolve(result);
-      }, 6000);
-    });
+    return null;
   }
 }

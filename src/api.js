@@ -50,58 +50,90 @@ export function setNetwork(net) {
 // live (so there are no duplicate URL fields elsewhere). Each network has its own
 // Electrum servers and block explorers; the selection is stored per network, so
 // switching networks remembers each one's choice. 'custom' points at your node.
-const ELECTRUM_PRESETS_BY_NET = {
+// One unified list of data sources per network. Each entry knows its type —
+// electrum (an Electrum-over-WS server: data + instant push) or esplora (a block
+// explorer's REST API: data only, polled). The UI shows a single list; the wallet
+// derives the backend from the selected source's type. A custom source's type is
+// detected from its URL scheme (ws/wss → electrum, http/https → esplora).
+const DATA_SOURCES_BY_NET = {
   mainnet: [
-    { id: 'coinos', label: 'coinos', url: 'wss://halwallet.app/electrum' },
-    { id: 'blockstream', label: 'blockstream.info', url: 'wss://blockstream.info/electrum-websocket/' },
-    { id: 'electroncash', label: 'btc.electroncash.dk', url: 'wss://btc.electroncash.dk:60004' },
-    { id: 'blackie', label: 'blackie.c3-soft.com', url: 'wss://blackie.c3-soft.com:57004' },
-    { id: 'jochen', label: 'electrum.jochen-hoenicke.de', url: 'wss://electrum.jochen-hoenicke.de:50010' },
-    { id: 'mempoolguide', label: 'mempool.guide', url: 'wss://mempool.guide/electrum-websocket/' },
-    { id: 'custom', label: 'Custom (your node)', url: '' },
+    { id: 'coinos', label: 'coinos', type: 'electrum', url: 'wss://electrum.coinos.io' },
+    { id: 'mempool', label: 'mempool.space', type: 'esplora', base: 'https://mempool.space/api', web: 'https://mempool.space', kind: 'mempool' },
+    { id: 'blockstream', label: 'blockstream.info', type: 'esplora', base: 'https://blockstream.info/api', web: 'https://blockstream.info', kind: 'esplora' },
+    { id: 'electroncash', label: 'btc.electroncash.dk', type: 'electrum', url: 'wss://btc.electroncash.dk:60004' },
+    { id: 'jochen', label: 'electrum.jochen-hoenicke.de', type: 'electrum', url: 'wss://electrum.jochen-hoenicke.de:50010' },
+    { id: 'mempoolguide', label: 'mempool.guide', type: 'electrum', url: 'wss://mempool.guide/electrum-websocket/' },
+    { id: 'custom', label: 'Custom', type: 'auto', url: '' },
   ],
   testnet: [
-    { id: 'blockstream', label: 'blockstream.info', url: 'wss://blockstream.info/testnet/electrum-websocket/' },
-    { id: 'custom', label: 'Custom (your node)', url: '' },
+    { id: 'mempool', label: 'mempool.space', type: 'esplora', base: 'https://mempool.space/testnet/api', web: 'https://mempool.space/testnet', kind: 'mempool' },
+    { id: 'blockstream', label: 'blockstream.info', type: 'esplora', base: 'https://blockstream.info/testnet/api', web: 'https://blockstream.info/testnet', kind: 'esplora' },
+    { id: 'blockstreamel', label: 'blockstream.info (Electrum)', type: 'electrum', url: 'wss://blockstream.info/testnet/electrum-websocket/' },
+    { id: 'custom', label: 'Custom', type: 'auto', url: '' },
   ],
   mutinynet: [
-    { id: 'custom', label: 'Custom (your node)', url: '' },
+    { id: 'mutinynet', label: 'mutinynet.com', type: 'esplora', base: 'https://mutinynet.com/api', web: 'https://mutinynet.com', kind: 'esplora' },
+    { id: 'custom', label: 'Custom', type: 'auto', url: '' },
   ],
   regtest: [
-    { id: 'local', label: 'Local Fulcrum', url: 'ws://localhost:50003' },
-    { id: 'custom', label: 'Custom', url: '' },
+    { id: 'local', label: 'Local Fulcrum', type: 'electrum', url: 'ws://localhost:50003' },
+    { id: 'localesplora', label: 'Local Esplora', type: 'esplora', base: 'http://localhost:3000', web: 'http://localhost:3000', kind: 'esplora' },
+    { id: 'custom', label: 'Custom', type: 'auto', url: '' },
   ],
 };
-const EXPLORER_PRESETS_BY_NET = {
-  mainnet: [
-    { id: 'mempool', label: 'mempool.space', base: 'https://mempool.space/api', web: 'https://mempool.space', kind: 'mempool' },
-    { id: 'blockstream', label: 'blockstream.info', base: 'https://blockstream.info/api', web: 'https://blockstream.info', kind: 'esplora' },
-    { id: 'custom', label: 'Custom', base: '', web: '', kind: 'esplora' },
-  ],
-  testnet: [
-    { id: 'mempool', label: 'mempool.space', base: 'https://mempool.space/testnet/api', web: 'https://mempool.space/testnet', kind: 'mempool' },
-    { id: 'blockstream', label: 'blockstream.info', base: 'https://blockstream.info/testnet/api', web: 'https://blockstream.info/testnet', kind: 'esplora' },
-    { id: 'custom', label: 'Custom', base: '', web: '', kind: 'esplora' },
-  ],
-  mutinynet: [
-    { id: 'mutinynet', label: 'mutinynet.com', base: 'https://mutinynet.com/api', web: 'https://mutinynet.com', kind: 'esplora' },
-    { id: 'custom', label: 'Custom', base: '', web: '', kind: 'esplora' },
-  ],
-  regtest: [
-    { id: 'local', label: 'Local (localhost:3000)', base: 'http://localhost:3000', web: 'http://localhost:3000', kind: 'esplora' },
-    { id: 'custom', label: 'Custom', base: '', web: '', kind: 'esplora' },
-  ],
-};
-// Per-network defaults: the mode + server a network starts on before any choice.
+const DATA_SOURCE_DEFAULT = { mainnet: 'coinos', testnet: 'mempool', mutinynet: 'mutinynet', regtest: 'local' };
+export function dataSources(net = getNetwork()) { return DATA_SOURCES_BY_NET[net] || DATA_SOURCES_BY_NET.mainnet; }
+const detectType = (url) => (/^wss?:\/\//i.test((url || '').trim()) ? 'electrum' : 'esplora');
+
+// Old per-network defaults (mode + server id) — kept only so the one-time
+// migration from the old split electrum/explorer settings can read them.
 const NET_DEFAULTS = {
   mainnet: { mode: 'electrum', electrum: 'coinos', explorer: 'mempool' },
-  testnet: { mode: 'explorer', electrum: 'blockstream', explorer: 'mempool' },
-  mutinynet: { mode: 'explorer', electrum: 'custom', explorer: 'mutinynet' },
-  regtest: { mode: 'electrum', electrum: 'local', explorer: 'local' },
+  testnet: { mode: 'esplora', electrum: 'blockstreamel', explorer: 'mempool' },
+  mutinynet: { mode: 'esplora', electrum: 'custom', explorer: 'mutinynet' },
+  regtest: { mode: 'electrum', electrum: 'local', explorer: 'localesplora' },
 };
-export function electrumPresets(net = getNetwork()) { return ELECTRUM_PRESETS_BY_NET[net] || ELECTRUM_PRESETS_BY_NET.mainnet; }
-export function explorerPresets(net = getNetwork()) { return EXPLORER_PRESETS_BY_NET[net] || EXPLORER_PRESETS_BY_NET.mainnet; }
 function netDefaults(net) { return NET_DEFAULTS[net] || NET_DEFAULTS.mainnet; }
+// Internal filtered views (electrum fallover list + esplora host resolution).
+export function electrumPresets(net = getNetwork()) { return dataSources(net).filter((x) => x.type === 'electrum'); }
+export function explorerPresets(net = getNetwork()) { return dataSources(net).filter((x) => x.type === 'esplora'); }
+
+// The selected data source, resolved to a full entry. Migrates from the old split
+// settings the first time (until the user picks a source, which writes SOURCE_KEY).
+const SOURCE_KEY = 'btc-wallet-source';
+export function getSource(net = getNetwork()) {
+  let sel = null;
+  try { sel = JSON.parse(localStorage.getItem(nk(SOURCE_KEY, net)) || 'null'); } catch {}
+  if (!sel || !sel.id) sel = migrateSource(net);
+  const list = dataSources(net);
+  if (sel.id === 'custom') {
+    const url = (sel.url || '').trim();
+    const type = detectType(url);
+    if (type === 'electrum') return { id: 'custom', label: 'Custom', type, url };
+    const base = url.replace(/\/+$/, '');
+    return { id: 'custom', label: 'Custom', type, url, base, web: base.replace(/\/api$/, ''), kind: 'esplora' };
+  }
+  return list.find((x) => x.id === sel.id) || list.find((x) => x.id === DATA_SOURCE_DEFAULT[net]) || list[0];
+}
+export function setSource({ id, url }, net = getNetwork()) {
+  try { localStorage.setItem(nk(SOURCE_KEY, net), JSON.stringify({ id, url: url || '' })); } catch {}
+}
+function migrateSource(net) {
+  const list = dataSources(net);
+  const has = (id) => list.some((x) => x.id === id);
+  try {
+    if (getDataMode(net) === 'electrum') {
+      const ec = getElectrumServerConfig(net);
+      if (ec.server === 'custom' && ec.url) return { id: 'custom', url: ec.url };
+      if (has(ec.server)) return { id: ec.server };
+    } else {
+      const xc = getExplorerConfig(net);
+      if (xc.server === 'custom' && xc.url) return { id: 'custom', url: xc.url };
+      if (has(xc.server)) return { id: xc.server };
+    }
+  } catch {}
+  return { id: DATA_SOURCE_DEFAULT[net] || list[0].id };
+}
 // Per-network storage keys: mainnet keeps the bare key (backward compat), others
 // get a ":<net>" suffix.
 function nk(base, net) { return net === 'mainnet' ? base : `${base}:${net}`; }
@@ -144,19 +176,53 @@ const deriveBoltzWs = (api) => api ? api.replace(/^http/, 'ws').replace(/\/+$/, 
 export function getBoltzApi() { return getBoltzProvider().api; }
 export function getBoltzWs() { const p = getBoltzProvider(); return p.ws || deriveBoltzWs(p.api); }
 
+// Silent-payment (BIP-352) tweak indexer — a separate, optional endpoint used
+// only for SP receiving. It serves public tweak/UTXO data (the scan key never
+// leaves the device), but a public one can observe which blocks hold your
+// outputs, so self-hosting is the privacy-max option. Per network; an empty URL
+// means SP receiving is unavailable on that network.
+const SP_INDEXER_PRESETS_BY_NET = {
+  mainnet: [{ id: 'coinos', label: 'coinos', url: 'https://sp.coinos.io' }, { id: 'custom', label: 'Custom', url: '' }],
+  testnet: [{ id: 'custom', label: 'Custom', url: '' }],
+  mutinynet: [{ id: 'custom', label: 'Custom', url: '' }],
+  regtest: [{ id: 'local', label: 'Local (localhost:8888)', url: 'http://localhost:8888' }, { id: 'custom', label: 'Custom', url: '' }],
+};
+const SP_INDEXER_DEFAULT = { mainnet: 'coinos', testnet: 'custom', mutinynet: 'custom', regtest: 'local' };
+const SP_INDEXER_KEY = 'btc-wallet-sp-indexer';
+export function spIndexerPresets(net = getNetwork()) { return SP_INDEXER_PRESETS_BY_NET[net] || SP_INDEXER_PRESETS_BY_NET.mainnet; }
+export function getSpIndexerConfig(net = getNetwork()) {
+  try {
+    const c = JSON.parse(localStorage.getItem(nk(SP_INDEXER_KEY, net)) || 'null');
+    if (c && c.server) return { server: c.server, url: c.url || '' };
+  } catch {}
+  return { server: SP_INDEXER_DEFAULT[net] || 'custom', url: '' };
+}
+export function setSpIndexerConfig({ server, url }, net = getNetwork()) {
+  try { localStorage.setItem(nk(SP_INDEXER_KEY, net), JSON.stringify({ server, url: url || '' })); } catch {}
+}
+// The resolved indexer base URL for a network, or '' if none is configured.
+export function spIndexerUrl(net = getNetwork()) {
+  const cfg = getSpIndexerConfig(net);
+  if (cfg.server === 'custom') return cfg.url.trim().replace(/\/+$/, '');
+  const p = spIndexerPresets(net).find((x) => x.id === cfg.server);
+  return p && p.url ? p.url.replace(/\/+$/, '') : '';
+}
+// SP receiving is available only when an indexer is configured for this network.
+export function spReceiveEnabled(net = getNetwork()) { return !!spIndexerUrl(net); }
+
 // Resolve the configured explorer to the host list the Api tries in order.
 function resolveHosts(net) {
-  const cfg = getExplorerConfig(net);
-  const presets = explorerPresets(net);
-  const mk = (p) => ({ base: p.base, kind: p.kind, web: p.web, cooldownUntil: 0 });
-  if (cfg.server === 'custom' && cfg.url) {
-    const base = cfg.url.trim().replace(/\/+$/, '');
-    return [{ base, kind: 'esplora', web: base.replace(/\/api$/, ''), cooldownUntil: 0 }];
+  const src = getSource(net);
+  const mk = (p) => ({ base: p.base, kind: p.kind || 'esplora', web: p.web || (p.base || '').replace(/\/api$/, ''), cooldownUntil: 0 });
+  if (src.type === 'esplora' && src.base) {
+    // Mainnet silently fails mempool.space over to blockstream.info.
+    if (net === 'mainnet' && src.id === 'mempool') { const bs = dataSources(net).find((x) => x.id === 'blockstream'); return bs ? [mk(src), mk(bs)] : [mk(src)]; }
+    return [mk(src)];
   }
-  const p = presets.find((x) => x.id === cfg.server && x.base) || presets.find((x) => x.base) || presets[0];
-  // Mainnet silently fails mempool.space over to blockstream.info.
-  if (net === 'mainnet' && p.id === 'mempool') return [mk(p), mk(presets.find((x) => x.id === 'blockstream'))];
-  return [mk(p)];
+  // Electrum (or an empty custom) selected: no esplora data host, but tx links
+  // still need a web base, so use the network's default explorer host.
+  const def = dataSources(net).find((x) => x.type === 'esplora');
+  return [def ? mk(def) : { base: '', kind: 'esplora', web: 'https://mempool.space', cooldownUntil: 0 }];
 }
 
 // The "data source" setting (stored per network) picks where chain data +
@@ -180,7 +246,7 @@ export function setDataMode(m, net = getNetwork()) {
 }
 
 export function getBackend() {
-  return getDataMode() === 'electrum' ? 'electrum' : 'esplora';
+  return getSource().type === 'electrum' ? 'electrum' : 'esplora';
 }
 // The legacy coinos watcher shim is retired (coinos is a full Electrum server
 // now); 'explorer' mode polls for payments instead of subscribing.
@@ -204,12 +270,10 @@ export function setElectrumServerConfig({ server, url }, net = getNetwork()) {
 // didn't pick.
 const PUBLIC_ELECTRUM = (net) => electrumPresets(net).filter((x) => x.url).map((x) => x.url);
 export function electrumCandidates(net = getNetwork()) {
-  const cfg = getElectrumServerConfig(net);
-  const presets = electrumPresets(net);
-  if (cfg.server === 'custom') return cfg.url.trim() ? [cfg.url.trim()] : [];
-  const primary = (presets.find((x) => x.id === cfg.server) || presets[0]).url;
-  if (!primary) return [];
-  return [primary, ...PUBLIC_ELECTRUM(net).filter((u) => u !== primary)];
+  const src = getSource(net);
+  if (src.type !== 'electrum' || !src.url) return [];
+  if (src.id === 'custom') return [src.url]; // your node — don't fall over to public servers
+  return [src.url, ...PUBLIC_ELECTRUM(net).filter((u) => u !== src.url)];
 }
 export function resolveElectrumUrl() {
   return electrumCandidates()[0] || null;

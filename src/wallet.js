@@ -21,10 +21,11 @@ import * as btc from '@scure/btc-signer';
 import { p2wpkh } from '@scure/btc-signer/payment';
 import { concatBytes } from '@scure/btc-signer/utils.js';
 
-import { Api, pool, getBackend, explorerWeb, electrumCandidates } from './api.js';
+import { Api, pool, getBackend, explorerWeb, electrumCandidates, spIndexerUrl } from './api.js';
 import { ElectrumApi } from './electrum.js';
-import { NostrSync, getSyncConfig } from './nostr.js';
-import { isSilentPaymentAddress, decodeSilentPaymentAddress, silentPaymentScripts, silentPaymentPlaceholder } from './silentpay.js';
+import { NostrSync, getSyncConfig, encryptGiftPayload, npubOf } from './nostr.js';
+import { isSilentPaymentAddress, decodeSilentPaymentAddress, silentPaymentScripts, silentPaymentPlaceholder, deriveSilentPaymentKeys, encodeSilentPaymentAddress, silentPaymentScan, silentPaymentOutputPrivKey, silentPaymentCandidate, bloomHas } from './silentpay.js';
+import { schnorr } from '@noble/curves/secp256k1';
 
 // No look-ahead: stop scanning a chain at the first unused address. This wallet
 // only ever exposes ONE unused address at a time (freshReceive = first unused;
@@ -37,6 +38,11 @@ const GAP_LIMIT = 1;
 const USED_HIT_DELAY_MS = 500;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// Silent-payment catch-up dust limit (sats): the indexer drops tweaks for txs
+// whose taproot outputs are all below this, cutting the candidate math on a big
+// scan. 0 = receive everything (default, so no small payment is ever missed).
+const SP_DUST_LIMIT = 0;
 
 const NETS = {
   mainnet: { net: btc.NETWORK, coin: 0 },
@@ -102,6 +108,12 @@ export class Wallet {
     this.feeRates = null;
     this.confirmed = 0;
     this.pending = 0;
+    // Silent-payment (BIP-352) receiving: outputs we found by scanning the
+    // indexer. Kept in their own bucket (one-time taproot keys, not BIP84
+    // addresses); { txid, vout, value, confirmed, tweak, xonly, address }.
+    this.spUtxos = [];
+    this.lastSpScan = 0; // highest block height scanned for silent payments
+    this.spScanning = false;
 
     this.scanning = false;
     this.loaded = false; // true once a scan/snapshot has populated balances once
@@ -146,8 +158,11 @@ export class Wallet {
   }
 
   // --- setup --------------------------------------------------------------
-  load({ mnemonic = '', passphrase = '', xpub = '', xprv = '', netName = 'mainnet', offline = false }) {
+  load({ mnemonic = '', passphrase = '', xpub = '', xprv = '', netName = 'mainnet', offline = false, spFresh = false }) {
     this.stopRealtime();
+    // A freshly-generated wallet can't have received silent payments before it
+    // existed, so we start its SP watermark at the current tip (no history scan).
+    this._spFresh = spFresh;
     this.mnemonic = (mnemonic || '').trim().replace(/\s+/g, ' ');
     this.passphrase = passphrase;
     this.xpub = xpub || '';
@@ -178,6 +193,8 @@ export class Wallet {
     this.txs = [];
     this.confirmed = 0;
     this.pending = 0;
+    this.spUtxos = [];
+    this.lastSpScan = 0;
     this.loaded = false;
     this.nextReceiveIndex = 0;
     this.nextChangeIndex = 0;
@@ -253,6 +270,349 @@ export class Wallet {
   // The account-level extended public key (xpub / zpub) for export → watch-only.
   accountXpub() {
     return this.account().publicExtendedKey;
+  }
+
+  // BIP-352 scan/spend keys, derived from the master seed (m/352' paths) — so
+  // they need the mnemonic (or a depth-0 master xprv); watch-only and account-
+  // level imported keys can't do silent payments. Cached per account.
+  silentPaymentKeys() {
+    if (this.watchOnly) return null;
+    const coin = NETS[this.netName].coin;
+    const ck = `sp|${this.netName}|${this.mnemonic}|${this.passphrase}|${this.xprv}`;
+    if (this._spKeys && this._spKeysKey === ck) return this._spKeys;
+    let master = null;
+    if (this.mnemonic) master = HDKey.fromMasterSeed(mnemonicToSeedSync(this.mnemonic, this.passphrase));
+    else if (this.xprv) { const n = HDKey.fromExtendedKey(this.xprv); if (n.depth === 0) master = n; }
+    this._spKeys = master ? deriveSilentPaymentKeys(master, coin) : null;
+    this._spKeysKey = ck;
+    this._spScanCache = new Map(); // per-tweak scan results are keyed to these keys
+    this._spCandCache = new Map();
+    return this._spKeys;
+  }
+
+  // Scan one tweak's outputs for our payments, memoized by tweak — the EC
+  // point-multiplication is the cost, and a tweak's outcome never changes, so
+  // repeated mempool pushes (which re-send the same tweaks) stay cheap.
+  _spScan(tweakHex, outputs) {
+    const keys = this.silentPaymentKeys(); // resets the caches if keys changed
+    if (!keys) return [];
+    let m = this._spScanCache.get(tweakHex);
+    if (m) return m;
+    if (this._spScanCache.size > 100000) this._spScanCache.clear(); // bound memory over long sessions
+    m = silentPaymentScan({ scanPriv: keys.scanPriv, spendPub: keys.spendPub, tweak: hex.decode(tweakHex), outputs });
+    this._spScanCache.set(tweakHex, m);
+    return m;
+  }
+
+  // Our candidate key for a tweak (for the Bloom pre-filter), memoized likewise.
+  _spCandidate(tweakHex) {
+    const keys = this.silentPaymentKeys();
+    if (!keys) return null;
+    let c = this._spCandCache.get(tweakHex);
+    if (c) return c;
+    if (this._spCandCache.size > 100000) this._spCandCache.clear(); // bound memory over long sessions
+    c = silentPaymentCandidate({ scanPriv: keys.scanPriv, spendPub: keys.spendPub, tweak: hex.decode(tweakHex) });
+    this._spCandCache.set(tweakHex, c);
+    return c;
+  }
+
+  // Spawn (once) the scanning worker and keep its keys current. Returns null if
+  // workers are unavailable or the embedded bundle is missing — callers then fall
+  // back to scanning on the main thread (still cached + yielding).
+  _ensureSpWorker() {
+    if (this._spWorkerFailed || typeof Worker === 'undefined') return null;
+    const keys = this.silentPaymentKeys();
+    if (!keys) return null;
+    if (!this._spWorker) {
+      try {
+        const b64 = globalThis.__SP_WORKER__;
+        if (!b64) { this._spWorkerFailed = true; return null; }
+        const bytes = Uint8Array.from(atob(b64), (ch) => ch.charCodeAt(0));
+        const w = new Worker(URL.createObjectURL(new Blob([bytes], { type: 'text/javascript' })));
+        this._spPending = new Map();
+        this._spReqId = 0;
+        w.onmessage = (e) => { const p = this._spPending.get(e.data.id); if (p) { this._spPending.delete(e.data.id); e.data.error ? p.rej(new Error(e.data.error)) : p.res(e.data); } };
+        w.onerror = () => { this._spWorkerFailed = true; try { w.terminate(); } catch {} this._spWorker = null; for (const p of this._spPending.values()) p.rej(new Error('sp worker error')); this._spPending.clear(); };
+        this._spWorker = w;
+        this._spWorkerKeysSig = null;
+      } catch { this._spWorkerFailed = true; return null; }
+    }
+    if (this._spWorkerKeysSig !== this._spKeysKey) {
+      this._spWorkerKeysSig = this._spKeysKey;
+      this._spWorker.postMessage({ id: ++this._spReqId, op: 'keys', scanPriv: keys.scanPriv, spendPub: keys.spendPub });
+    }
+    return this._spWorker;
+  }
+
+  _spCall(op, data) {
+    return new Promise((res, rej) => {
+      const id = ++this._spReqId;
+      this._spPending.set(id, { res, rej });
+      this._spWorker.postMessage({ id, op, ...data });
+      setTimeout(() => { if (this._spPending.has(id)) { this._spPending.delete(id); rej(new Error('sp worker timeout')); } }, 30000);
+    });
+  }
+
+  // Block heights whose Bloom filter might hold one of our outputs (worker if
+  // available, else a cached + yielding main-thread loop).
+  async _spHitBlocks(blocks) {
+    if (!blocks.length) return new Set();
+    const w = this._ensureSpWorker();
+    if (w) { try { return new Set((await this._spCall('candidates', { blocks })).hits || []); } catch {} }
+    const hits = new Set();
+    let i = 0;
+    for (const b of blocks) {
+      if (++i % 8 === 0) await new Promise((r) => setTimeout(r, 0));
+      for (const tw of b.tweaks) { if (bloomHas(b.filter, this._spCandidate(tw))) { hits.add(b.height); break; } }
+    }
+    return hits;
+  }
+
+  // Full-scan items → our resolved utxos {txid,vout,value,xonly,tweak} (worker if
+  // available, else a cached + yielding main-thread loop).
+  async _spScanItems(items) {
+    if (!items.length) return [];
+    const w = this._ensureSpWorker();
+    if (w) { try { return (await this._spCall('scan', { items })).found || []; } catch {} }
+    const found = [];
+    let i = 0;
+    for (const it of items) {
+      if (++i % 50 === 0) await new Promise((r) => setTimeout(r, 0));
+      const matches = this._spScan(it.tweak, it.outputs.map((o) => o.xonly));
+      for (const m of matches) { const o = it.outputs.find((x) => x.xonly === m.output); if (o) found.push({ txid: it.txid, vout: o.vout, value: o.value, xonly: m.output, tweak: m.tweak }); }
+    }
+    return found;
+  }
+
+  // Our silent-payment address (sp1…/tsp1…), or null if this wallet can't do SP.
+  silentPaymentAddress() {
+    const k = this.silentPaymentKeys();
+    return k ? encodeSilentPaymentAddress(k.scanPub, k.spendPub, { testnet: this.netName !== 'mainnet' }) : null;
+  }
+
+  // Is SP receiving available here? (we can derive keys AND an indexer is set)
+  silentPaymentsAvailable() {
+    return !!(this.silentPaymentKeys() && spIndexerUrl(this.netName));
+  }
+
+  // Total received via silent payments: { confirmed, pending, count } over the
+  // unspent SP outputs we've found.
+  spBalance() {
+    let confirmed = 0, pending = 0;
+    for (const u of this.spUtxos) { if (u.confirmed) confirmed += u.value; else pending += u.value; }
+    return { confirmed, pending, count: this.spUtxos.length };
+  }
+
+  // Received silent payments as history rows (one per tx; multiple outputs to us
+  // sum into one received entry) so they appear in history like normal payments.
+  spTxRows() {
+    const byTx = new Map();
+    for (const u of this.spUtxos) {
+      const e = byTx.get(u.txid) || { txid: u.txid, net: 0, confirmed: true, firstSeen: u.firstSeen || Date.now() };
+      e.net += u.value;
+      if (!u.confirmed) e.confirmed = false;
+      e.firstSeen = Math.min(e.firstSeen, u.firstSeen || e.firstSeen);
+      byTx.set(u.txid, e);
+    }
+    return [...byTx.values()].map((e) => ({
+      txid: e.txid, net: e.net, fee: 0, vsize: 0, sp: true,
+      confirmed: e.confirmed,
+      blockTime: e.confirmed ? Math.floor(e.firstSeen / 1000) : 0,
+      blockHeight: 0,
+      firstSeen: e.firstSeen,
+    }));
+  }
+
+  // History for display: BIP84 txs + silent-payment receipts, newest first. (SP
+  // receipts pay one-time taproot keys, never our BIP84 addresses, so no overlap.)
+  get history() {
+    const rows = [...this.txs, ...this.spTxRows()];
+    rows.sort((a, b) => {
+      if (a.confirmed !== b.confirmed) return a.confirmed ? 1 : -1; // pending first
+      if (a.confirmed) return (b.blockTime || 0) - (a.blockTime || 0);
+      return (b.firstSeen || 0) - (a.firstSeen || 0);
+    });
+    return rows;
+  }
+
+  // The taproot address for an x-only output key (for backend UTXO lookups).
+  _spAddress(xonly) {
+    return btc.Address(this.netCfg.net).encode(btc.OutScript.decode(btc.OutScript.encode({ type: 'tr', pubkey: hex.decode(xonly) })));
+  }
+
+  // Scan the configured SP indexer from the last-scanned height to the tip, find
+  // outputs paying our scan/spend keys, and verify each is unspent via the chain
+  // backend (the indexer only does discovery). Updates this.spUtxos.
+  async scanSilentPayments({ rescan = false, silent = false } = {}) {
+    const keys = this.silentPaymentKeys();
+    const indexer = spIndexerUrl(this.netName);
+    if (!keys || !indexer || this.offline) return { unavailable: true };
+    if (this._spScanBusy) return { busy: true };
+    // Fresh wallet, never scanned: set the watermark to the current tip instead of
+    // scanning all history (nothing predates the wallet). New blocks + mempool
+    // arrive via the live push from here on.
+    if (this._spFresh && !this.lastSpScan && !rescan) {
+      this._spFresh = false;
+      try { this.lastSpScan = (await (await fetch(`${indexer}/height`)).json()).height || 0; this.saveCache(); } catch {}
+      return { fresh: true };
+    }
+    this._spScanBusy = true;
+    // Only a manual scan shows the visible "Scanning…" state; auto-scans are
+    // invisible (setting spScanning for them left the card stuck on "Scanning…").
+    if (!silent) { this.spScanning = true; this.emit(); }
+    try {
+      if (rescan) { this.spUtxos = []; this.lastSpScan = 0; }
+      const from = (this.lastSpScan || 0) + 1;
+      // Catch-up: per block we get tweaks + a Bloom filter (no outputs). Derive a
+      // candidate key per tweak, test the filter, and only fetch the full block on
+      // a hit — so most blocks cost just the candidate math, no download/scan.
+      const res = await (await fetch(`${indexer}/scan/${from}?dustLimit=${SP_DUST_LIMIT}`)).json();
+      const tip = res.tip || 0;
+      const have = new Set(this.spUtxos.map((u) => `${u.txid}:${u.vout}`));
+      const found = [];
+      const hits = await this._spHitBlocks(res.blocks || []);
+      for (const block of res.blocks || []) {
+        if (!hits.has(block.height)) continue;
+        const blk = await (await fetch(`${indexer}/block/${block.height}`)).json();
+        for (const f of await this._spScanItems(blk.items || [])) {
+          const id = `${f.txid}:${f.vout}`;
+          if (have.has(id)) continue;
+          have.add(id);
+          found.push(f);
+        }
+      }
+      if (tip > this.lastSpScan) this.lastSpScan = tip;
+      // Verify newly-found outputs are unspent + get confirmation status.
+      for (const f of found) {
+        const address = this._spAddress(f.xonly);
+        try {
+          const us = await this.api.addressUtxos(address);
+          const u = us.find((x) => x.txid === f.txid && x.vout === f.vout);
+          if (u) this.spUtxos.push({ ...f, address, confirmed: !!(u.status && u.status.confirmed), firstSeen: Date.now() });
+        } catch {}
+      }
+      await this._refreshSpUtxos();
+      this._recomputeBalanceFromChains(); // fold found SP value into the displayed balance
+      this.saveCache();
+      return { found: found.length, scanned: tip };
+    } finally {
+      this._spScanBusy = false;
+      this.spScanning = false;
+      this.emit(); // always refresh (balance + clears any "Scanning…")
+    }
+  }
+
+  // Re-check tracked SP outputs against the backend: drop spent ones, refresh
+  // confirmation status.
+  async _refreshSpUtxos() {
+    const next = [];
+    for (const u of this.spUtxos) {
+      try {
+        const us = await this.api.addressUtxos(u.address);
+        const live = us.find((x) => x.txid === u.txid && x.vout === u.vout);
+        if (live) next.push({ ...u, confirmed: !!(live.status && live.status.confirmed) });
+      } catch { next.push(u); } // backend hiccup: keep as-is
+    }
+    this.spUtxos = next;
+  }
+
+  // Live silent-payment push: subscribe to the indexer's WebSocket so each new
+  // block's SP items are scanned on arrival instead of polling. Catches up via a
+  // /scan on connect (covers anything missed while disconnected) and reconnects.
+  _spConnect() {
+    if (this.offline) return;
+    const base = spIndexerUrl(this.netName);
+    if (!base || !this.silentPaymentKeys()) return;
+    const url = base.replace(/^http/, 'ws') + '/ws';
+    if (this._spWs && this._spWsUrl === url) return;
+    this._spDisconnect();
+    this._spWsUrl = url;
+    let ws;
+    try { ws = new WebSocket(url); } catch { return; }
+    this._spWs = ws;
+    ws.onopen = () => {
+      this.spLive = true;
+      this.scanSilentPayments({ silent: true }).catch(() => {}); // confirmed catch-up
+      // Pending (mempool) catch-up.
+      fetch(`${base}/mempool`).then((r) => r.json()).then((d) => this._scanSpMempool(d.items || [])).catch(() => {});
+    };
+    ws.onmessage = (ev) => {
+      let msg;
+      try { msg = JSON.parse(typeof ev.data === 'string' ? ev.data : new TextDecoder().decode(ev.data)); } catch { return; }
+      if (!msg || !Array.isArray(msg.items)) return;
+      if (msg.type === 'block') this._scanSpItems(msg.items, msg.height).catch(() => {});
+      else if (msg.type === 'mempool') this._scanSpMempool(msg.items).catch(() => {});
+    };
+    ws.onerror = () => { try { ws.close(); } catch {} };
+    ws.onclose = () => {
+      if (this._spWs !== ws) return;
+      this.spLive = false; this._spWs = null;
+      if (!this.offline) this._spReconnect = setTimeout(() => this._spConnect(), 3000);
+    };
+  }
+
+  _spDisconnect() {
+    clearTimeout(this._spReconnect);
+    this.spLive = false;
+    const ws = this._spWs;
+    this._spWs = null; this._spWsUrl = null;
+    if (ws) { try { ws.onclose = null; ws.close(); } catch {} }
+  }
+
+  // Scan a confirmed block's pushed items and upsert ours into spUtxos as
+  // confirmed (a previously-pending mempool entry is promoted to confirmed).
+  async _scanSpItems(items, height) {
+    const keys = this.silentPaymentKeys();
+    if (!keys) return;
+    let changed = false;
+    for (const f of await this._spScanItems(items)) {
+      const existing = this.spUtxos.find((u) => u.txid === f.txid && u.vout === f.vout);
+      if (existing) { if (!existing.confirmed) { existing.confirmed = true; changed = true; } }
+      else { this.spUtxos.push({ txid: f.txid, vout: f.vout, value: f.value, xonly: f.xonly, tweak: f.tweak, address: this._spAddress(f.xonly), confirmed: true, firstSeen: Date.now() }); changed = true; }
+    }
+    if (height && height > this.lastSpScan) this.lastSpScan = height;
+    if (changed) this._recomputeBalanceFromChains();
+    this.saveCache();
+    if (changed) this.emit();
+  }
+
+  // Scan the current mempool's pushed items and rebuild our pending (unconfirmed)
+  // SP set — so payments show the moment they're broadcast. Confirmed entries are
+  // kept; the unconfirmed set is replaced, which also drops vanished/RBF'd ones.
+  async _scanSpMempool(items) {
+    // Coalesce: pushes arrive faster than a cold (mainnet) scan completes, so
+    // keep only the latest set and never run two scans at once.
+    this._spMempoolLatest = items;
+    if (this._spMempoolBusy) return;
+    this._spMempoolBusy = true;
+    try {
+      if (!this.silentPaymentKeys()) return;
+      while (this._spMempoolLatest) {
+        const cur = this._spMempoolLatest;
+        this._spMempoolLatest = null;
+        const priorSeen = new Map(this.spUtxos.map((u) => [`${u.txid}:${u.vout}`, u.firstSeen]));
+        const confirmedIds = new Set(this.spUtxos.filter((u) => u.confirmed).map((u) => `${u.txid}:${u.vout}`));
+        const pending = [];
+        for (const f of await this._spScanItems(cur)) {
+          const id = `${f.txid}:${f.vout}`;
+          if (confirmedIds.has(id)) continue;
+          pending.push({ txid: f.txid, vout: f.vout, value: f.value, xonly: f.xonly, tweak: f.tweak, address: this._spAddress(f.xonly), confirmed: false, firstSeen: priorSeen.get(id) || Date.now() });
+        }
+        // Re-read confirmed (a block push may have landed during a yield) and drop
+        // any pending that just confirmed, so an outpoint never appears twice.
+        const confNow = this.spUtxos.filter((u) => u.confirmed);
+        const confNowIds = new Set(confNow.map((u) => `${u.txid}:${u.vout}`));
+        const oldPendingIds = new Set(this.spUtxos.filter((u) => !u.confirmed).map((u) => `${u.txid}:${u.vout}`));
+        const freshPending = pending.filter((p) => !confNowIds.has(`${p.txid}:${p.vout}`));
+        // Only emit when our pending set actually changed — the mempool churns
+        // constantly, and a no-op emit would re-render and steal input focus.
+        const changed = freshPending.length !== oldPendingIds.size || freshPending.some((p) => !oldPendingIds.has(`${p.txid}:${p.vout}`));
+        this.spUtxos = [...confNow, ...freshPending];
+        if (changed) { this._recomputeBalanceFromChains(); this.saveCache(); this.emit(); }
+      }
+    } finally {
+      this._spMempoolBusy = false;
+    }
   }
 
   node(chain, index) {
@@ -616,6 +976,7 @@ export class Wallet {
       }
       this.loaded = true;
       this.saveCache();
+      this.scanSilentPayments({ silent: true }).catch(() => {}); // fold in any silent-payment receipts
     } finally {
       this._refreshing = false;
       this.historyLoading = false; // clear even if an earlier step threw
@@ -769,13 +1130,14 @@ export class Wallet {
       if (res.has(utxoId(u))) return s;
       if (u.confirmed || u.chain === 1) return s + u.value;
       return s;
-    }, 0);
+    }, 0) + this.spBalance().confirmed; // confirmed silent-payment receipts are spendable
   }
   // Unconfirmed incoming receives (not our change, not gift-locked) — shown as a
-  // separate pending line, kept out of the spendable headline.
+  // separate pending line, kept out of the spendable headline. Includes pending
+  // (mempool) silent-payment receipts.
   get pendingIncoming() {
     const res = this.reservedSet();
-    return this.utxos.reduce((s, u) => s + ((!u.confirmed && u.chain === 0 && !res.has(utxoId(u))) ? u.value : 0), 0);
+    return this.utxos.reduce((s, u) => s + ((!u.confirmed && u.chain === 0 && !res.has(utxoId(u))) ? u.value : 0), 0) + this.spBalance().pending;
   }
 
   _recomputeBalanceFromChains() {
@@ -785,13 +1147,15 @@ export class Wallet {
       c += a.confirmed || 0;
       p += a.pending || 0;
     }
-    this.confirmed = c;
-    this.pending = p;
+    const sp = this.spBalance();
+    this.confirmed = c + sp.confirmed;
+    this.pending = p + sp.pending;
   }
 
   _recomputeBalanceFromUtxos() {
-    this.confirmed = this.utxos.reduce((s, u) => s + (u.confirmed ? u.value : 0), 0);
-    this.pending = this.utxos.reduce((s, u) => s + (u.confirmed ? 0 : u.value), 0);
+    const sp = this.spBalance();
+    this.confirmed = this.utxos.reduce((s, u) => s + (u.confirmed ? u.value : 0), 0) + sp.confirmed;
+    this.pending = this.utxos.reduce((s, u) => s + (u.confirmed ? 0 : u.value), 0) + sp.pending;
   }
 
   freshReceive() {
@@ -809,19 +1173,39 @@ export class Wallet {
     const pool_ = coinIds
       ? this.utxos.filter((u) => coinIds.includes(utxoId(u)))
       : this.utxos.filter((u) => !this.isReserved(utxoId(u))); // skip coins set aside for gifts
-    if (!pool_.length) throw new Error('No spendable coins selected.');
+    // Received silent-payment outputs are spendable too — one-time taproot keys,
+    // signed by sign() with the per-output key. Excluded when paying an sp1…
+    // recipient (funding an SP send from a taproot input needs BIP-352 even-Y
+    // key handling we don't do yet), so those sends use BIP84 coins.
+    // Confirmed SP coins are spendable like any other coin — including to fund a
+    // silent payment. Unconfirmed ones are excluded (the sender's tx could be
+    // replaced, invalidating our spend).
+    const confirmedSp = this.spUtxos.filter((u) => u.confirmed);
+    const spPool = coinIds ? confirmedSp.filter((u) => coinIds.includes(utxoId(u))) : confirmedSp.slice();
+    if (!pool_.length && !spPool.length) throw new Error('No spendable coins selected.');
 
-    const inputs = pool_.map((u) => {
-      const { script, pubkey } = this.derive(u.chain, u.index);
-      const pay = p2wpkh(pubkey, this.netCfg.net);
-      return {
-        ...pay,
+    const inputs = [
+      ...pool_.map((u) => {
+        const { pubkey } = this.derive(u.chain, u.index);
+        const pay = p2wpkh(pubkey, this.netCfg.net);
+        return {
+          ...pay,
+          txid: u.txid,
+          index: u.vout,
+          sequence: 0xfffffffd, // signal opt-in RBF (BIP125) so sends are bumpable
+          witnessUtxo: { script: pay.script, amount: BigInt(u.value) },
+        };
+      }),
+      ...spPool.map((u) => ({
         txid: u.txid,
         index: u.vout,
-        sequence: 0xfffffffd, // signal opt-in RBF (BIP125) so sends are bumpable
-        witnessUtxo: { script: pay.script, amount: BigInt(u.value) },
-      };
-    });
+        sequence: 0xfffffffd,
+        witnessUtxo: { script: btc.OutScript.encode({ type: 'tr', pubkey: hex.decode(u.xonly) }), amount: BigInt(u.value) },
+        // Present so the fee estimator sizes a key-path (64-byte) witness; the
+        // value is unused (SP outputs are signed raw in sign(), via tapKeySig).
+        tapInternalKey: hex.decode(u.xonly),
+      })),
+    ];
 
     const changeAddress = this.freshChange().address;
     const feePerByte = BigInt(Math.max(1, Math.round(feeRate)));
@@ -852,6 +1236,7 @@ export class Wallet {
         network: this.netCfg.net,
         createTx: true,
         bip69: true,
+        disableScriptCheck: true,
       });
       if (!sel || !sel.tx) throw new Error('Fee exceeds balance.');
       if (spOuts.length) this._applySilentPayments(sel.tx, spOuts);
@@ -875,7 +1260,8 @@ export class Wallet {
       feePerByte,
       network: this.netCfg.net,
       createTx: true,
-      bip69: true,
+        bip69: true,
+        disableScriptCheck: true,
     });
     if (!sel || !sel.tx)
       throw new Error('Insufficient funds for amount + fee.');
@@ -900,13 +1286,22 @@ export class Wallet {
   // actual inputs per BIP-352.
   _applySilentPayments(tx, spOuts) {
     const byOutpoint = new Map();
-    for (const u of this.utxos) byOutpoint.set(utxoId(u), u);
+    for (const u of this.utxos) byOutpoint.set(utxoId(u), { u, sp: false });
+    for (const u of this.spUtxos) byOutpoint.set(utxoId(u), { u, sp: true });
+    const spKeys = this.silentPaymentKeys();
     const inputs = [];
     for (let i = 0; i < tx.inputsLength; i++) {
       const inp = tx.getInput(i);
-      const u = byOutpoint.get(`${hex.encode(inp.txid)}:${inp.index}`);
-      if (!u) throw new Error('Missing key for a silent payment input.');
-      inputs.push({ txid: u.txid, vout: u.vout, priv: this.node(u.chain, u.index).privateKey });
+      const e = byOutpoint.get(`${hex.encode(inp.txid)}:${inp.index}`);
+      if (!e) throw new Error('Missing key for a silent payment input.');
+      // Our own SP coins can fund a silent payment too — they're taproot inputs
+      // whose key is d = spend_priv + t_k (committed to with even Y by the script).
+      if (e.sp) {
+        if (!spKeys) throw new Error('Missing keys for a silent payment input.');
+        inputs.push({ txid: e.u.txid, vout: e.u.vout, priv: silentPaymentOutputPrivKey(spKeys.spendPriv, hex.decode(e.u.tweak)), taproot: true });
+      } else {
+        inputs.push({ txid: e.u.txid, vout: e.u.vout, priv: this.node(e.u.chain, e.u.index).privateKey });
+      }
     }
     const scripts = silentPaymentScripts(inputs, spOuts.map((s) => ({ scan: s.scan, spend: s.spend })));
     spOuts.forEach((s, k) => {
@@ -930,18 +1325,39 @@ export class Wallet {
     return false;
   }
 
-  // Sign every input of an already-built Transaction with the matching HD key.
+  // Sign every input of an already-built Transaction. BIP84 inputs sign with the
+  // matching HD key; received silent-payment outputs are taproot key-path spends
+  // signed manually with d = spend_priv + t_k (the output key is used raw, with
+  // no BIP-341 tweak, so btc-signer's auto key-path signing doesn't apply).
   sign(tx) {
     if (this.watchOnly) throw new Error('Watch-only wallet — no keys to sign with.');
-    const byOutpoint = new Map();
-    for (const u of this.utxos) byOutpoint.set(utxoId(u), u);
+    const bip84 = new Map();
+    for (const u of this.utxos) bip84.set(utxoId(u), u);
+    const sp = new Map();
+    for (const u of this.spUtxos) sp.set(utxoId(u), u);
+    // Prevout scripts + amounts for any taproot (SP) sighash.
+    const prevScripts = [];
+    const amounts = [];
+    for (let i = 0; i < tx.inputsLength; i++) {
+      const w = tx.getInput(i).witnessUtxo;
+      prevScripts.push(w.script);
+      amounts.push(w.amount);
+    }
+    const spKeys = sp.size ? this.silentPaymentKeys() : null;
     for (let i = 0; i < tx.inputsLength; i++) {
       const inp = tx.getInput(i);
       const id = `${hex.encode(inp.txid)}:${inp.index}`;
-      const u = byOutpoint.get(id);
-      if (!u) throw new Error(`Cannot find key for input ${id}`);
-      const node = this.node(u.chain, u.index);
-      tx.signIdx(node.privateKey, i);
+      if (bip84.has(id)) {
+        const u = bip84.get(id);
+        tx.signIdx(this.node(u.chain, u.index).privateKey, i);
+      } else if (sp.has(id)) {
+        const u = sp.get(id);
+        const d = silentPaymentOutputPrivKey(spKeys.spendPriv, hex.decode(u.tweak));
+        const hash = tx.preimageWitnessV1(i, prevScripts, btc.SigHash.DEFAULT, amounts);
+        tx.updateInput(i, { tapKeySig: schnorr.sign(hash, d) }, true);
+      } else {
+        throw new Error(`Cannot find key for input ${id}`);
+      }
     }
     tx.finalize();
     return tx.hex;
@@ -1153,6 +1569,32 @@ export class Wallet {
     }));
   }
 
+  // Persistent gift records (per account): the shareable link/code + amount, so a
+  // gift's link/QR can be re-viewed later and a claimed one identified in history.
+  _giftRecordsKey() { return this._cacheKey() + ':giftrec'; }
+  giftRecords() {
+    if (!this._giftRecords) { try { this._giftRecords = JSON.parse(localStorage.getItem(this._giftRecordsKey()) || '{}'); } catch { this._giftRecords = {}; } }
+    return this._giftRecords;
+  }
+  _saveGiftRecords() { try { localStorage.setItem(this._giftRecordsKey(), JSON.stringify(this.giftRecords())); } catch {} }
+  recordGift({ code, locked, amount, claimCode, outpoints }) {
+    if (!outpoints || !outpoints.length) return;
+    this.giftRecords()[outpoints[0]] = { id: outpoints[0], code, locked: !!locked, amount, claimCode: claimCode || null, outpoints, created: Date.now(), revoked: false };
+    this._saveGiftRecords();
+  }
+  giftLink(id) { return this.giftRecords()[id] || null; }
+  markGiftRevoked(id) { const r = this.giftRecords()[id]; if (r) { r.revoked = true; this._saveGiftRecords(); } }
+  // Gifts whose coin has been spent and weren't revoked by us → claimed. (Only
+  // once scanned, so an un-synced wallet doesn't mislabel everything as claimed.)
+  claimedGifts() {
+    if (!this.loaded) return [];
+    const live = new Set(this.utxos.map((u) => utxoId(u)));
+    return Object.values(this.giftRecords())
+      .filter((r) => !r.revoked && r.outpoints && !r.outpoints.some((o) => live.has(o)))
+      .map((r) => ({ id: r.id, amount: r.amount, locked: r.locked, created: r.created }))
+      .sort((a, b) => (b.created || 0) - (a.created || 0));
+  }
+
   // Best-fit coin selection for a gift of `gift` sats (needs gift + a dust
   // change): the smallest single confirmed coin that covers it — one input and
   // the least value locked until claim — else the fewest large coins. Returns
@@ -1179,6 +1621,29 @@ export class Wallet {
   giftLockPreview(amountSats) {
     const sel = this._selectGiftCoins(BigInt(Math.round(amountSats)));
     return sel ? sel.reduce((s, u) => s + u.value, 0) : null;
+  }
+
+  // The coins a gift of this amount would lock: total value + how many inputs.
+  // A high input count means a costly-to-claim gift (each input adds to the
+  // claimer's fee) — the UI uses it to recommend splitting/consolidating first.
+  giftCoinSummary(amountSats) {
+    const sel = this._selectGiftCoins(BigInt(Math.round(amountSats)));
+    return sel ? { lock: sel.reduce((s, u) => s + u.value, 0), count: sel.length } : null;
+  }
+
+  // Number of unreserved spendable coins (for the consolidate prompt/action).
+  spendableCoinCount() {
+    return this.utxos.filter((u) => !this.isReserved(utxoId(u)) && (u.confirmed || u.chain === 1)).length;
+  }
+
+  // Merge all unreserved spendable coins into one, via a max self-send. Leaves
+  // the wallet with a single coin so future sends/gifts use one input.
+  async consolidate(feeRate) {
+    const rate = Math.max(1, Math.round(feeRate));
+    const draft = this.buildTx({ recipients: [{ address: this.freshReceive().address }], feeRate: rate, sendMax: true });
+    const hex = this.sign(draft.tx);
+    await this.broadcast(hex);
+    return { txid: draft.tx.id, inputs: draft.inputsCount };
   }
 
   // Build a signed gift from already-chosen coins. If the gift leaves a viable
@@ -1230,6 +1695,14 @@ export class Wallet {
     const sel = this._selectGiftCoins(gift);
     if (!sel) throw new Error('Not enough confirmed funds for that gift amount.');
     return this._buildGiftPsbt(sel, gift);
+  }
+
+  // Our nostr identity (used to DM a locked gift's claim code to the recipient).
+  nostrPubkey() { return (this.nostr && this.nostr.pk) || null; }
+  nostrNpub() { const pk = this.nostrPubkey(); return pk ? npubOf(pk) : null; }
+  // Send a nostr DM (e.g. a locked gift's claim code) to a recipient pubkey.
+  async sendNostrDM(recipientPkHex, text) {
+    return this.nostr && this.nostr.sk ? this.nostr.sendDM(recipientPkHex, text) : false;
   }
 
   // Split + gift in one shot, with no confirmation wait: broadcast a self-send
@@ -1494,7 +1967,11 @@ export class Wallet {
       if (Date.now() - (this._lastPoll || 0) < due) return;
       this._lastPoll = Date.now();
       this.refreshLive();
+      // SP receipts arrive via the indexer WebSocket (_spConnect); only poll for
+      // them as a fallback when that socket isn't live.
+      if (!this.spLive) this.scanSilentPayments({ silent: true }).catch(() => {});
     }, 1000);
+    this._spConnect(); // live push of silent-payment receipts
     // No periodic full re-scan: the WS (and the frontier poll above) keep the
     // balance current, and refreshLive's _reconcileHeld catches spends of held
     // coins. The only thing neither covers is a deposit to a reused old address,
@@ -1757,6 +2234,7 @@ export class Wallet {
   stopRealtime() {
     this._wsWant = false;
     this.live = false;
+    this._spDisconnect();
     this._rejectPending('realtime stopped'); // fail any in-flight Electrum data calls
     this._callQueue = [];
     clearTimeout(this._wsRetry);
@@ -1816,6 +2294,8 @@ export class Wallet {
       nextReceiveIndex: this.nextReceiveIndex,
       nextChangeIndex: this.nextChangeIndex,
       feeRates: this.feeRates,
+      spUtxos: this.spUtxos,
+      lastSpScan: this.lastSpScan,
     };
   }
 
@@ -1828,6 +2308,8 @@ export class Wallet {
     this.nextReceiveIndex = d.nextReceiveIndex || 0;
     this.nextChangeIndex = d.nextChangeIndex || 0;
     this.feeRates = d.feeRates || this.feeRates;
+    this.spUtxos = d.spUtxos || [];
+    this.lastSpScan = d.lastSpScan || 0;
     this.addrMap = new Map();
     for (const a of [...this.receive, ...this.change]) {
       this.addrMap.set(a.address, { chain: a.chain, index: a.index });
@@ -2155,6 +2637,28 @@ export function buildClaimTx(code, toAddress, feeRate, net) {
   tx.addOutputAddress(toAddress, out, net);
   tx.finalize();
   return { hex: tx.hex, txid: tx.id, amount: Number(out), fee: Number(fee) };
+}
+
+// A gift locked to a recipient's nostr key. The amount + recipient pubkey are
+// public (anyone can see what it is and who it's for), but the claim payload (the
+// gift code) is NIP-44-encrypted to the recipient via an ephemeral key — so the
+// link can be shared openly yet only the recipient's nostr key can claim it.
+const LOCKED_GIFT_VERSION = 1;
+// Encrypt the gift's claim payload under a one-time code. The code is delivered
+// to the recipient via a nostr DM; the public link carries only the ciphertext.
+// Returns { blob (for the /lg/ link), claimCode (to DM) }.
+export function lockGift(code, amount, recipientPkHex) {
+  const { code: claimCode, ctCode, eph, ctKey } = encryptGiftPayload(code, recipientPkHex);
+  const blob = base64urlnopad.encode(new TextEncoder().encode(JSON.stringify({ v: LOCKED_GIFT_VERSION, amount, to: recipientPkHex, ct: ctCode, eph, ctKey })));
+  return { blob, claimCode };
+}
+// The public fields of a locked-gift blob (or null). Decryption needs the code.
+export function previewLockedGift(blob) {
+  try {
+    const o = JSON.parse(new TextDecoder().decode(base64urlnopad.decode(blob)));
+    if (o.v === LOCKED_GIFT_VERSION && typeof o.amount === 'number' && o.to && o.ct) return o;
+  } catch {}
+  return null;
 }
 
 function firstUnused(chain) {
