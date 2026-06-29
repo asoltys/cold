@@ -2540,7 +2540,7 @@ async function doReverse() {
   const lim = ui.swapLimits || (ui.swapLimits = await swaps.reverseLimits());
   if (!amt || amt < lim.min || amt > lim.max) { ui.swapError = `Enter ${lim.min.toLocaleString()}–${lim.max.toLocaleString()} sats`; return render(); }
   ui.swapError = ''; ui.swapBusy = true; render();
-  try { await swaps.startReverse(amt); ui.swapReverseAmt = ''; }
+  try { const rec = await swaps.startReverse(amt); ui.lnReceiveId = rec.id; ui.swapReverseAmt = ''; }
   catch (e) { ui.swapError = e.message; }
   ui.swapBusy = false; render();
 }
@@ -2595,33 +2595,18 @@ function swapListView() {
 }
 
 function swapTab() {
-  // Pull the selected provider's real reverse-swap limits (min/max) once, to bound
-  // the amount instead of guessing — providers + networks differ.
-  if (!ui.swapLimits && !ui._swapLimitsLoading && !wallet.watchOnly) {
-    ui._swapLimitsLoading = true;
-    swaps.reverseLimits().then((l) => { ui.swapLimits = l; ui._swapLimitsLoading = false; render(); }).catch(() => { ui._swapLimitsLoading = false; });
-  }
-  const lim = ui.swapLimits;
+  // Receiving over Lightning now lives under Receive → Lightning; this tab keeps
+  // paying an invoice (a submarine swap) + the in-flight swap list for now.
   return h('div', { class: 'col', style: 'gap:12px' },
-    // Swaps need the private key (to derive the preimage and claim on-chain), so a
-    // watch-only wallet can't do them — prompt to re-enter the seed instead.
     wallet.watchOnly
       ? h('div', { class: 'card col' },
-          h('h3', {}, '⚡ Lightning swaps'),
-          h('p', { class: 'small muted', style: 'margin:0' }, 'Re-enter your recovery phrase to send or receive over Lightning — swaps need your keys to claim on-chain.'))
+          h('h3', {}, '⚡ Pay over Lightning'),
+          h('p', { class: 'small muted', style: 'margin:0' }, 'Re-enter your recovery phrase to pay over Lightning — swaps need your keys to claim on-chain.'))
       : h('div', { class: 'card col' },
-        h('h3', {}, '⚡ Receive over Lightning'),
-        h('p', { class: 'small muted', style: 'margin:0' }, 'Get a Lightning invoice; when paid, the sats are swapped on-chain into this wallet — non-custodial (you hold the preimage and claim on-chain).'),
-        h('label', { class: 'field' },
-          h('span', { class: 'lab' }, 'Amount (sats)'),
-          h('input', { type: 'number', inputmode: 'numeric', placeholder: lim ? String(lim.min) : '100000', value: ui.swapReverseAmt || '', onInput: (e) => { ui.swapReverseAmt = e.target.value; } }),
-          lim ? h('span', { class: 'small muted' }, `Min ${lim.min.toLocaleString()} · max ${lim.max.toLocaleString()} sats`) : null),
-        h('button', { disabled: !!ui.swapBusy, onClick: doReverse }, ui.swapBusy ? '…' : 'Create invoice')),
-    wallet.watchOnly ? null : h('div', { class: 'card col' },
-      h('h3', {}, '⚡ Pay a Lightning invoice'),
-      h('p', { class: 'small muted', style: 'margin:0' }, 'Pay a bolt11 from your on-chain balance: funds a swap that Boltz pays over Lightning.'),
-      h('textarea', { rows: 3, class: 'mono-input', placeholder: 'lnbcrt1…', value: ui.swapInvoice || '', onInput: (e) => { ui.swapInvoice = e.target.value; } }),
-      h('button', { disabled: !!ui.swapBusy, onClick: doSubmarine }, ui.swapBusy ? '…' : 'Pay invoice')),
+        h('h3', {}, '⚡ Pay a Lightning invoice'),
+        h('p', { class: 'small muted', style: 'margin:0' }, 'Pay a bolt11 from your on-chain balance: funds a swap that Boltz pays over Lightning.'),
+        h('textarea', { rows: 3, class: 'mono-input', placeholder: 'lnbcrt1…', value: ui.swapInvoice || '', onInput: (e) => { ui.swapInvoice = e.target.value; } }),
+        h('button', { disabled: !!ui.swapBusy, onClick: doSubmarine }, ui.swapBusy ? '…' : 'Pay invoice')),
     ui.swapError ? h('div', { class: 'notice err' }, ui.swapError) : null,
     swapListView()
   );
@@ -2703,25 +2688,74 @@ function receiveTab() {
     );
   }
 
-  // One card with a toggle between the standard address and the silent-payment
-  // address (shown only when SP is available).
+  // One card with a toggle: on-chain address, Lightning (a Boltz reverse swap),
+  // and the silent-payment address — each shown only when available.
   const fresh = wallet.freshReceive();
   const spAddr = wallet.silentPaymentsAvailable() ? wallet.silentPaymentAddress() : null;
-  const sp = spAddr && ui.receiveType === 'sp';
-  const addr = sp ? spAddr : fresh.address;
+  const canLn = !wallet.watchOnly; // a reverse swap needs our keys to claim on-chain
+  let mode = ui.receiveType || 'address';
+  if (mode === 'sp' && !spAddr) mode = 'address';
+  if (mode === 'ln' && !canLn) mode = 'address';
+  const seg = (spAddr || canLn)
+    ? h('div', { class: 'seg', style: 'display:flex;width:100%' },
+        h('button', { type: 'button', class: (mode === 'address' ? 'active ' : '') + 'grow', onClick: () => { ui.receiveType = 'address'; render(); } }, t('receiveAddressTab')),
+        canLn ? h('button', { type: 'button', class: (mode === 'ln' ? 'active ' : '') + 'grow', onClick: () => { ui.receiveType = 'ln'; render(); } }, t('receiveLnTab')) : null,
+        spAddr ? h('button', { type: 'button', class: (mode === 'sp' ? 'active ' : '') + 'grow', onClick: () => { ui.receiveType = 'sp'; render(); } }, t('receiveSpTab')) : null
+      )
+    : null;
+  if (mode === 'ln') {
+    return h('div', { class: 'card col', style: 'align-items:center;gap:14px' }, seg, ...lnReceiveContent());
+  }
+  const addr = mode === 'sp' ? spAddr : fresh.address;
   return h(
     'div',
     { class: 'card col', style: 'align-items:center;gap:14px' },
-    spAddr
-      ? h('div', { class: 'seg', style: 'display:flex;width:100%' },
-          h('button', { type: 'button', class: (!sp ? 'active ' : '') + 'grow', onClick: () => { ui.receiveType = 'address'; render(); } }, t('receiveAddressTab')),
-          h('button', { type: 'button', class: (sp ? 'active ' : '') + 'grow', onClick: () => { ui.receiveType = 'sp'; render(); } }, t('receiveSpTab'))
-        )
-      : null,
+    seg,
     h('div', { html: qrSvg(addr) }),
-    h('div', { class: 'addr-box' + (sp ? ' break' : ''), style: 'width:100%' + (sp ? ';font-size:12px' : '') }, addr),
+    h('div', { class: 'addr-box' + (mode === 'sp' ? ' break' : ''), style: 'width:100%' + (mode === 'sp' ? ';font-size:12px' : '') }, addr),
     copyBtn(addr, t('copyAddress'))
   );
+}
+
+// Lightning receive = a Boltz reverse swap: show a bolt11 the user shares; when
+// it's paid, Boltz locks up on-chain and the SwapManager claims it into this
+// wallet automatically. Returns the card's inner children.
+function lnReceiveContent() {
+  if (!ui.swapLimits && !ui._swapLimitsLoading) {
+    ui._swapLimitsLoading = true;
+    swaps.reverseLimits().then((l) => { ui.swapLimits = l; ui._swapLimitsLoading = false; render(); }).catch(() => { ui._swapLimitsLoading = false; });
+  }
+  const lim = ui.swapLimits;
+  const rec = ui.lnReceiveId ? swaps.list().find((s) => s.id === ui.lnReceiveId) : null;
+  if (rec && ['claimed', 'success'].includes(rec.status)) {
+    return [
+      h('div', { class: 'check-badge' }, '✓'),
+      h('h3', { style: 'margin:0' }, t('lnReceived')),
+      rec.received ? h('div', { class: 'amount-pos', style: 'font-size:18px' }, '+' + fmtAmount(rec.received) + ' ' + unitLabel()) : null,
+      h('button', { class: 'btn-block', onClick: () => { ui.lnReceiveId = null; ui.swapReverseAmt = ''; render(); } }, t('done')),
+    ];
+  }
+  if (rec) {
+    let svg = null;
+    try { svg = qrSvg(rec.invoice.toUpperCase(), { ec: 'L', mode: 'Alphanumeric' }); } catch {}
+    return [
+      h('p', { class: 'small muted', style: 'margin:0;text-align:center' }, t('lnReceiveAwaiting')),
+      svg ? h('div', { html: svg }) : null,
+      h('div', { class: 'addr-box break', style: 'width:100%;font-size:11px' }, rec.invoice),
+      copyBtn(rec.invoice, t('copyInvoice')),
+      h('div', { class: 'row gap6', style: 'align-items:center' }, h('span', { class: 'spinner sm' }), h('span', { class: 'small muted' }, t('lnReceiveWatching'))),
+      h('button', { class: 'btn-ghost btn-block', onClick: () => { ui.lnReceiveId = null; ui.swapReverseAmt = ''; ui.swapError = ''; render(); } }, t('back')),
+    ];
+  }
+  return [
+    h('p', { class: 'small muted', style: 'margin:0;text-align:center' }, t('lnReceiveIntro')),
+    h('label', { class: 'field', style: 'width:100%' },
+      h('span', { class: 'lab' }, t('amountSatsLabel')),
+      h('input', { type: 'number', inputmode: 'numeric', placeholder: lim ? String(lim.min) : '100000', value: ui.swapReverseAmt || '', onInput: (e) => { ui.swapReverseAmt = e.target.value; } }),
+      lim ? h('span', { class: 'small muted' }, `Min ${lim.min.toLocaleString()} · max ${lim.max.toLocaleString()} sats`) : null),
+    ui.swapError ? h('div', { class: 'notice err' }, ui.swapError) : null,
+    h('button', { class: 'btn-primary btn-block', disabled: !!ui.swapBusy, onClick: doReverse }, ui.swapBusy ? h('span', { class: 'spinner' }) : t('lnCreateInvoice')),
+  ];
 }
 
 // Silent-payment tweak indexer picker (per network) — the endpoint used to scan
