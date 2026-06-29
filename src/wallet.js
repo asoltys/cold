@@ -401,6 +401,11 @@ export class Wallet {
     return k ? encodeSilentPaymentAddress(k.scanPub, k.spendPub, { testnet: this.netName !== 'mainnet' }) : null;
   }
 
+  // True if addr is a valid on-chain address for this wallet's network.
+  isOnchainAddress(addr) {
+    try { btc.Address(this.netCfg.net).decode((addr || '').trim()); return true; } catch { return false; }
+  }
+
   // Is SP receiving available here? (we can derive keys AND an indexer is set)
   silentPaymentsAvailable() {
     return !!(this.silentPaymentKeys() && spIndexerUrl(this.netName));

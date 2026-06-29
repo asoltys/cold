@@ -356,6 +356,7 @@ const STR = {
     lnCreateInvoice: 'Create invoice',
     copyInvoice: 'Copy invoice',
     amountSatsLabel: 'Amount (sats)',
+    destPlaceholder: 'Address or Lightning invoice',
     lnQuoting: 'Getting a quote…',
     lnPayTitle: 'Pay over Lightning',
     lnPayAmount: 'Amount',

@@ -2552,39 +2552,6 @@ async function doRefund(id) {
   ui.swapBusy = false; render();
 }
 
-function swapListView() {
-  const list = swaps.list().slice().reverse();
-  if (!list.length) return null;
-  return h('div', { class: 'card col' },
-    h('h3', {}, 'Swaps'),
-    ...list.map((s) => h('div', { class: 'col', style: 'gap:6px;border-top:1px solid #2a2a2a;padding-top:8px' },
-      h('div', { class: 'row', style: 'justify-content:space-between' },
-        h('span', {}, s.kind === 'reverse' ? 'Receive ⚡→⛓' : 'Pay ⛓→⚡'),
-        h('span', { class: 'small muted' }, s.status + (s.boltzStatus ? ` (${s.boltzStatus})` : ''))
-      ),
-      (s.kind === 'reverse' && s.status === 'awaiting-payment')
-        ? h('div', { class: 'col', style: 'gap:6px' },
-            h('div', { class: 'small faint' }, `Pay this ${s.onchainAmount ? '' : ''}invoice from any Lightning wallet:`),
-            h('div', { html: qrSvg(s.invoice.toUpperCase(), { ec: 'L', mode: 'Alphanumeric' }) }),
-            h('div', { class: 'addr-box break', style: 'font-size:11px' }, s.invoice))
-        : null,
-      (s.kind === 'reverse' && s.status === 'claimed')
-        ? h('div', { class: 'small', style: 'color:#36d36b' }, `Received ${s.received} sats on-chain ✓`) : null,
-      (s.kind === 'submarine' && s.status === 'success')
-        ? h('div', { class: 'small', style: 'color:#36d36b' }, 'Invoice paid ✓') : null,
-      (s.kind === 'submarine' && ['funding', 'paying'].includes(s.status))
-        ? h('div', { class: 'small faint' }, 'Funding lockup / waiting for the swap to settle…') : null,
-      (s.kind === 'submarine' && s.status === 'refundable')
-        ? h('div', { class: 'col', style: 'gap:4px' },
-            h('div', { class: 'small', style: 'color:#e0a13a' }, 'Payment failed — refundable after timeout block ' + s.timeoutBlockHeight),
-            h('button', { disabled: !!ui.swapBusy, onClick: () => doRefund(s.id) }, 'Refund on-chain'))
-        : null,
-      (s.status === 'refunded') ? h('div', { class: 'small', style: 'color:#36d36b' }, 'Refunded ✓') : null,
-      s.lastError ? h('div', { class: 'small', style: 'color:#e06a6a' }, s.lastError) : null
-    ))
-  );
-}
-
 function tabsBar() {
   const tabs = [
     ['receive', t('tabReceive')],
@@ -2724,7 +2691,7 @@ function lnReceiveContent() {
     h('p', { class: 'small muted', style: 'margin:0;text-align:center' }, t('lnReceiveIntro')),
     h('label', { class: 'field', style: 'width:100%' },
       h('span', { class: 'lab' }, t('amountSatsLabel')),
-      h('input', { type: 'number', inputmode: 'numeric', placeholder: lim ? String(lim.min) : '100000', value: ui.swapReverseAmt || '', onInput: (e) => { ui.swapReverseAmt = e.target.value; } }),
+      h('input', { type: 'number', inputmode: 'numeric', placeholder: '', value: ui.swapReverseAmt || '', onInput: (e) => { ui.swapReverseAmt = e.target.value; } }),
       lim ? h('span', { class: 'small muted' }, `Min ${lim.min.toLocaleString()} · max ${lim.max.toLocaleString()} sats`) : null),
     ui.swapError ? h('div', { class: 'notice err' }, ui.swapError) : null,
     h('button', { class: 'btn-primary btn-block', disabled: !!ui.swapBusy, onClick: doReverse }, ui.swapBusy ? h('span', { class: 'spinner' }) : t('lnCreateInvoice')),
@@ -3063,10 +3030,19 @@ function addrVerifyNodes(a) {
   ];
 }
 
+// True once the destination is a real on-chain or silent-payment address — used to
+// progressively reveal the amount/fee/coin controls. A Lightning invoice instead
+// auto-advances to its own confirmation, so it never needs them.
+function destReady(a) {
+  a = (a || '').trim();
+  return !!a && (wallet.isOnchainAddress(a) || isSilentPaymentAddress(a));
+}
+
 // One recipient: address + amount. Max is only offered for a single recipient.
 function recipientRow(s, r, i) {
   const single = s.recipients.length === 1;
   const maxOn = single && s.max;
+  r._ready = destReady(r.address); // reflected each render; onInput re-renders on a flip
 
   // Updated imperatively on input (and on render) so paste, typing, and scan
   // all reflect immediately without disrupting the input's focus/cursor.
@@ -3086,16 +3062,21 @@ function recipientRow(s, r, i) {
     return false;
   };
   const addrInput = h('input', {
-    type: 'text', class: 'mono-input grow', placeholder: 'bc1q…',
+    type: 'text', class: 'mono-input grow', placeholder: i === 0 ? t('destPlaceholder') : 'bc1q…',
     autocapitalize: 'none', autocomplete: 'off', spellcheck: 'false', value: r.address,
-    onInput: (e) => { r.address = e.target.value; syncCheck(); tryLn(e.target.value); },
+    onInput: (e) => {
+      const v = e.target.value;
+      r.address = v; syncCheck();
+      if (tryLn(v)) return;                    // a bolt11 advances to its own confirmation
+      if (destReady(v) !== r._ready) render();  // reveal/hide amount + controls as validity flips
+    },
   });
   const row = h(
     'div',
     { class: 'col gap6' },
     h('div', { class: 'input-group' },
       addrInput,
-      pasteBtn((text) => { addrInput.value = text; r.address = text; syncCheck(); tryLn(text); }),
+      pasteBtn((text) => { addrInput.value = text; r.address = text; syncCheck(); if (!tryLn(text) && destReady(text) !== r._ready) render(); }),
       i === 0 && canScan() && h('button', {
         type: 'button', class: 'btn-sm', title: t('scanQr'), onClick: scanIntoSend,
         html: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3"/></svg>',
@@ -3103,7 +3084,7 @@ function recipientRow(s, r, i) {
       !single && h('button', { type: 'button', class: 'btn-sm', title: t('remove'), onClick: () => { s.recipients.splice(i, 1); render(); } }, '✕')
     ),
     check,
-    h('div', { class: 'input-group' },
+    r._ready ? h('div', { class: 'input-group' },
       h('input', {
         type: 'number', step: unit === 'sats' ? '1' : '0.00000001', min: '0',
         placeholder: unit === 'sats' ? '0' : '0.00000000',
@@ -3126,7 +3107,7 @@ function recipientRow(s, r, i) {
       }),
       h('button', { type: 'button', title: t('switchUnit'), onClick: toggleUnit }, unitLabel()),
       single && h('button', { type: 'button', class: s.max ? 'btn-primary' : '', onClick: () => { s.max = !s.max; render(); } }, t('max'))
-    )
+    ) : null
   );
   syncCheck();
   return row;
@@ -3134,6 +3115,9 @@ function recipientRow(s, r, i) {
 
 function sendForm() {
   const s = ui.send;
+  // Progressive disclosure: until the destination is a valid on-chain/SP address,
+  // show only the destination input (a Lightning invoice auto-advances instead).
+  const ready = destReady((s.recipients[0] || {}).address);
   const feeOpts = [
     ['economyFee', t('feeEconomy')],
     ['halfHourFee', t('feeNormal')],
@@ -3150,13 +3134,13 @@ function sendForm() {
       h('div', { class: 'col', style: 'gap:14px' },
         s.recipients.map((r, i) => recipientRow(s, r, i))
       ),
-      s.recipients.length < 10 &&
+      ready && s.recipients.length < 10 &&
         h('button', {
           type: 'button', class: 'linklike small mt8',
           onClick: () => { s.recipients.push({ address: '', amount: '' }); s.max = false; render(); },
         }, t('addRecipient'))
     ),
-    h(
+    ready && h(
       'div',
       { class: 'field' },
       h('span', { class: 'lab' }, t('feeRate')),
@@ -3184,9 +3168,9 @@ function sendForm() {
       s.feeChoice !== 'custom' &&
         h('div', { class: 'small faint mt8' }, t('selectedRate', { n: currentFeeRate() }))
     ),
-    coinControl(),
+    ready ? coinControl() : null,
     ui.sendError && h('div', { class: 'notice err' }, ui.sendError),
-    h('button', { class: 'btn-primary btn-block', onClick: reviewSend }, t('reviewTx')),
+    ready && h('button', { class: 'btn-primary btn-block', onClick: reviewSend }, t('reviewTx')),
     h('button', { class: 'linklike small', style: 'align-self:center;margin-top:2px', onClick: () => { ui.giftMode = true; ui.sendError = ''; render(); } }, '🎁 ' + t('giftLink'))
   );
 }
@@ -3585,10 +3569,8 @@ function historyTab() {
     ? [...wallet.outstandingGifts(), ...wallet.claimedGifts().map((c) => ({ ...c, claimed: true }))]
     : [];
   if (ui.giftsAll && gifts.length) return giftsAllView(gifts);
-  // In-flight / recent Lightning swaps (formerly the Swap tab) sit above history.
-  const swapsCard = swapListView();
   if (!txs.length && !gifts.length)
-    return swapsCard || h('div', { class: 'card' }, h('p', { class: 'muted center', style: 'margin:0' }, t('noTxYet')));
+    return h('div', { class: 'card' }, h('p', { class: 'muted center', style: 'margin:0' }, t('noTxYet')));
 
   // Show at most 3 gifts inline; the rest live behind "View all". Transactions
   // paginate 10 at a time.
@@ -3596,7 +3578,7 @@ function historyTab() {
   const txPages = Math.ceil(txs.length / PAGE_SIZE);
   const txPage = Math.min(ui.txPage, Math.max(0, txPages - 1));
   const txSlice = txs.slice(txPage * PAGE_SIZE, txPage * PAGE_SIZE + PAGE_SIZE);
-  const historyCard = h(
+  return h(
     'div',
     { class: 'card' },
     h('div', { class: 'list' },
@@ -3616,7 +3598,6 @@ function historyTab() {
         )
       : null
   );
-  return swapsCard ? h('div', { class: 'col', style: 'gap:12px' }, swapsCard, historyCard) : historyCard;
 }
 
 // Open a tx's detail view, lazily fetching its fee/details if we don't have them
@@ -3643,8 +3624,37 @@ async function openTx(txid) {
   } catch {}
 }
 
+// Lightning-swap context shown inside a tx's detail screen (the on-chain tx is the
+// swap's lockup funding, claim, or refund). Replaces the old standalone Swap list.
+function swapTxDetailSection(swap, tx) {
+  const u = ' ' + unitLabel();
+  const line = (k, v) => h('div', { class: 'line' }, h('span', { class: 'k' }, k), h('span', { class: 'v' }, v));
+  const head = (txt) => h('div', { style: 'font-weight:600;margin:12px 0 2px' }, txt);
+  if (swap.refundTxid === tx.txid)
+    return h('div', { class: 'summary col', style: 'gap:0' }, head('↩ Lightning swap refund'), line(t('status'), 'Refunded ✓'));
+  if (swap.kind === 'submarine') {
+    const fee = (swap.expectedAmount || 0) - (swap.invoiceAmount || 0);
+    const st = swap.status === 'success' ? 'Invoice paid ✓'
+      : swap.status === 'refundable' ? 'Payment failed — refundable'
+      : swap.status === 'refunded' ? 'Refunded' : 'Paying…';
+    return h('div', { class: 'summary col', style: 'gap:0' },
+      head('⚡ Paid over Lightning'),
+      swap.invoiceAmount != null ? line('Invoice', fmtAmount(swap.invoiceAmount) + u) : null,
+      fee > 0 ? line('Swap fee', fmtAmount(fee) + u) : null,
+      line(t('status'), st),
+      swap.status === 'refundable'
+        ? h('button', { class: 'btn-sm btn-block', style: 'margin-top:8px', disabled: !!ui.swapBusy, onClick: () => doRefund(swap.id) }, 'Refund on-chain')
+        : null);
+  }
+  // reverse swap claim
+  return h('div', { class: 'summary col', style: 'gap:0' },
+    head('⚡ Received over Lightning'),
+    line(t('status'), swap.status === 'claimed' ? 'Settled ✓' : swap.status));
+}
+
 function txDetailView(tx) {
   const incoming = tx.net >= 0;
+  const swap = swaps.findByTxid(tx.txid); // this tx's swap (Lightning), if any
   const line = (k, v) => h('div', { class: 'line' }, h('span', { class: 'k' }, k), h('span', { class: 'v' }, v));
   return h(
     'div',
@@ -3663,6 +3673,7 @@ function txDetailView(tx) {
       tx.confirmed && tx.blockTime ? line(t('date'), new Date(tx.blockTime * 1000).toLocaleString()) : null,
       tx.fee ? line(t('networkFee'), fmtAmount(tx.fee) + ' ' + unitLabel()) : null
     ),
+    swap ? swapTxDetailSection(swap, tx) : null,
     !tx.confirmed && wallet.isStuck(tx)
       ? h('div', { class: 'warn-box' }, incoming ? t('stuckIncomingNote') : t('stuckOutgoingNote'))
       : null,

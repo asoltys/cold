@@ -239,6 +239,9 @@ export class SwapManager {
   }
 
   list() { return this.wallet.loadSwaps(); }
+  // The swap (if any) an on-chain tx belongs to — its lockup funding (submarine),
+  // claim (reverse), or refund. Lets the tx detail screen show the swap context.
+  findByTxid(txid) { return this.list().find((s) => s.fundTxid === txid || s.claimTxid === txid || s.refundTxid === txid) || null; }
   _get(id) { return this.wallet.loadSwaps().find((s) => s.id === id); }
   _save(rec) {
     const list = this.wallet.loadSwaps();
