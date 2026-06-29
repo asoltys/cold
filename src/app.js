@@ -731,7 +731,7 @@ async function openWallet(input, opts = {}) {
   ui.unlockError = '';
   const raw = (input || '').trim();
   const m = raw.replace(/\s+/g, ' ');
-  if (isValidMnemonic(m)) { await enterWallet(m, ui.passphrase, { generated: opts.generated }); return; }
+  if (isValidMnemonic(m)) { await enterWallet(m, ui.passphrase, { generated: opts.generated }); ui.draftMnemonic = ''; return; } // discard the used draft so the next "Add wallet" generates a fresh seed
   let pk;
   try { pk = parseExtendedKey(raw); } catch { ui.unlockError = t('invalidImport'); render(); return; }
   const acc = pk.kind === 'xpub'
@@ -2278,7 +2278,7 @@ function accountsScreen() {
           );
         })
       ),
-      h('button', { class: 'btn-block', onClick: () => { ui.screen = 'unlock'; ui.unlockTab = 'create'; ui.fromWallet = true; ui.unlockError = ''; render(); } }, t('addWallet')),
+      h('button', { class: 'btn-block', onClick: () => { ui.draftMnemonic = ''; ui.createStep = 'gen'; ui.confirm = []; ui.screen = 'unlock'; ui.unlockTab = 'create'; ui.fromWallet = true; ui.unlockError = ''; render(); } }, t('addWallet')),
       hasVault() ? h('button', { class: 'btn-ghost btn-block', onClick: startChangePw }, t('changePassword')) : null,
       h('button', { class: 'btn-ghost btn-block', onClick: () => { ui.confirmClear = true; render(); } }, t('clearAll'))
     ),
