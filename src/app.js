@@ -2673,10 +2673,8 @@ function receiveTab() {
   if (canLn) opts.push(['ln', t('receiveLnTab')]);
   if (spAddr) opts.push(['sp', t('receiveSpTab')]);
   const seg = opts.length > 1
-    ? h('label', { class: 'field', style: 'width:100%' },
-        h('span', { class: 'lab' }, t('receiveOver')),
-        h('select', { onChange: (e) => { ui.receiveType = e.target.value; render(); } },
-          opts.map(([id, label]) => h('option', { value: id, selected: mode === id }, label))))
+    ? h('select', { style: 'width:100%', onChange: (e) => { ui.receiveType = e.target.value; render(); } },
+        opts.map(([id, label]) => h('option', { value: id, selected: mode === id }, label)))
     : null;
   if (mode === 'ln') {
     return h('div', { class: 'card col', style: 'align-items:center;gap:14px' }, seg, ...lnReceiveContent());
