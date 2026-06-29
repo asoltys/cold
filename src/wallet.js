@@ -27,6 +27,17 @@ import { NostrSync, getSyncConfig, encryptGiftPayload, npubOf } from './nostr.js
 import { isSilentPaymentAddress, decodeSilentPaymentAddress, silentPaymentScripts, silentPaymentPlaceholder, deriveSilentPaymentKeys, encodeSilentPaymentAddress, silentPaymentScan, silentPaymentOutputPrivKey, silentPaymentCandidate, bloomHas } from './silentpay.js';
 import { schnorr } from '@noble/curves/secp256k1';
 
+// Resolve a same-origin '/path' WebSocket URL to an absolute ws(s):// URL against
+// the page. The regtest backends are proxied through the dev server as relative
+// paths (e.g. '/electrum') so the app works from a phone over the LAN/Tailscale;
+// absolute URLs (real deployments, tests) pass through untouched.
+function absWsUrl(u) {
+  if (u && u[0] === '/' && typeof location !== 'undefined') {
+    return (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + u;
+  }
+  return u;
+}
+
 // No look-ahead: stop scanning a chain at the first unused address. This wallet
 // only ever exposes ONE unused address at a time (freshReceive = first unused;
 // there is no "generate another address" button), so used addresses stay
@@ -528,7 +539,7 @@ export class Wallet {
     this._spDisconnect();
     this._spWsUrl = url;
     let ws;
-    try { ws = new WebSocket(url); } catch { return; }
+    try { ws = new WebSocket(absWsUrl(url)); } catch { return; }
     this._spWs = ws;
     ws.onopen = () => {
       this.spLive = true;
@@ -1772,7 +1783,7 @@ export class Wallet {
     if (getBackend() === 'electrum') {
       if (!this._wsCandidates || !this._wsCandidates.length) { this._wsCandidates = electrumCandidates(this.netName); this._wsCandIdx = 0; }
       const list = this._wsCandidates;
-      return list.length ? list[(this._wsCandIdx || 0) % list.length] : null;
+      return list.length ? absWsUrl(list[(this._wsCandIdx || 0) % list.length]) : null;
     }
     return null;
   }

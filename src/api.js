@@ -76,8 +76,8 @@ const DATA_SOURCES_BY_NET = {
     { id: 'custom', label: 'Custom', type: 'auto', url: '' },
   ],
   regtest: [
-    { id: 'local', label: 'Local Fulcrum', type: 'electrum', url: 'ws://localhost:50003' },
-    { id: 'localesplora', label: 'Local Esplora', type: 'esplora', base: 'http://localhost:3000', web: 'http://localhost:3000', kind: 'esplora' },
+    { id: 'local', label: 'Local Fulcrum', type: 'electrum', url: '/electrum' },
+    { id: 'localesplora', label: 'Local Esplora', type: 'esplora', base: '/esplora', web: 'http://localhost:3000', kind: 'esplora' },
     { id: 'custom', label: 'Custom', type: 'auto', url: '' },
   ],
 };
@@ -185,7 +185,7 @@ const SP_INDEXER_PRESETS_BY_NET = {
   mainnet: [{ id: 'coinos', label: 'coinos', url: 'https://sp.coinos.io' }, { id: 'custom', label: 'Custom', url: '' }],
   testnet: [{ id: 'custom', label: 'Custom', url: '' }],
   mutinynet: [{ id: 'custom', label: 'Custom', url: '' }],
-  regtest: [{ id: 'local', label: 'Local (localhost:8888)', url: 'http://localhost:8888' }, { id: 'custom', label: 'Custom', url: '' }],
+  regtest: [{ id: 'local', label: 'Local (proxied)', url: '/sp' }, { id: 'custom', label: 'Custom', url: '' }],
 };
 const SP_INDEXER_DEFAULT = { mainnet: 'coinos', testnet: 'custom', mutinynet: 'custom', regtest: 'local' };
 const SP_INDEXER_KEY = 'btc-wallet-sp-indexer';

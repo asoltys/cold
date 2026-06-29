@@ -1,31 +1,44 @@
 // Dev server: rebuilds the inlined bundle on every request so you just refresh
 // the browser to see changes. Same output as `bun run build`, unminified.
+//
+// It also proxies the regtest backends (which bind to localhost on this machine)
+// through the same origin, so the app works unchanged whether you load it on
+// localhost or from a phone over the LAN/Tailscale — no per-device config, no
+// CORS. HTTP backends by path prefix; WebSocket backends by exact path.
 
 import { buildHtml, buildJsQr } from './build.js';
 
 const port = Number(process.env.PORT || 5173);
 
+const HTTP_PROXY = { '/boltz': 'http://localhost:9001', '/esplora': 'http://localhost:3000', '/sp': 'http://localhost:8888' };
+const WS_PROXY = { '/electrum': 'ws://localhost:50003', '/sp/ws': 'ws://localhost:8888/ws' };
+const CORS = { 'access-control-allow-origin': '*', 'access-control-allow-methods': 'GET,POST,OPTIONS', 'access-control-allow-headers': 'content-type' };
+
 Bun.serve({
   port,
-  async fetch(req) {
-    // Never let the browser cache (or bfcache) dev assets — every load rebuilds
-    // from source, so a stale HTTP cache or restored tab can't pin old code.
+  hostname: '0.0.0.0', // listen on all interfaces so the LAN/Tailscale can reach it
+  async fetch(req, server) {
     const NO_STORE = 'no-store, must-revalidate';
     try {
-      const path = new URL(req.url).pathname;
-      // The regtest boltz API (localhost:9001) sends no CORS headers, so the
-      // browser can't fetch it cross-origin. Proxy /boltz/* to it (adding CORS)
-      // so Lightning swaps work same-origin in dev.
-      if (path === '/boltz' || path.startsWith('/boltz/')) {
-        const CORS = { 'access-control-allow-origin': '*', 'access-control-allow-methods': 'GET,POST,OPTIONS', 'access-control-allow-headers': 'content-type' };
-        if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS });
-        const target = 'http://localhost:9001' + path.replace(/^\/boltz/, '') + new URL(req.url).search;
-        const r = await fetch(target, {
-          method: req.method,
-          headers: req.headers.get('content-type') ? { 'content-type': req.headers.get('content-type') } : {},
-          body: ['GET', 'HEAD'].includes(req.method) ? undefined : await req.text(),
-        });
-        return new Response(await r.text(), { status: r.status, headers: { 'content-type': r.headers.get('content-type') || 'application/json', ...CORS } });
+      const url = new URL(req.url);
+      const path = url.pathname;
+      // WebSocket proxies (Fulcrum electrum, SP-indexer push) — upgrade + relay.
+      if (WS_PROXY[path]) {
+        if (server.upgrade(req, { data: { target: WS_PROXY[path] } })) return;
+        return new Response('expected websocket', { status: 426 });
+      }
+      // HTTP proxies (boltz, esplora, SP indexer) — same-origin, CORS for cross-origin loads.
+      for (const prefix in HTTP_PROXY) {
+        if (path === prefix || path.startsWith(prefix + '/')) {
+          if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS });
+          const target = HTTP_PROXY[prefix] + path.slice(prefix.length) + url.search;
+          const r = await fetch(target, {
+            method: req.method,
+            headers: req.headers.get('content-type') ? { 'content-type': req.headers.get('content-type') } : {},
+            body: ['GET', 'HEAD'].includes(req.method) ? undefined : await req.arrayBuffer(),
+          });
+          return new Response(await r.arrayBuffer(), { status: r.status, headers: { 'content-type': r.headers.get('content-type') || 'application/json', ...CORS } });
+        }
       }
       if (path === '/jsqr.js') {
         return new Response(await buildJsQr({ minify: false }), {
@@ -50,6 +63,26 @@ Bun.serve({
       });
     }
   },
+  // Relay each browser WebSocket to its localhost backend, buffering until the
+  // upstream connection opens.
+  websocket: {
+    open(ws) {
+      const up = new WebSocket(ws.data.target);
+      ws.data.up = up;
+      ws.data.q = [];
+      up.onopen = () => { const q = ws.data.q; ws.data.q = null; for (const m of q) up.send(m); };
+      up.onmessage = (e) => { try { ws.send(e.data); } catch {} };
+      up.onclose = () => { try { ws.close(); } catch {} };
+      up.onerror = () => { try { ws.close(); } catch {} };
+    },
+    message(ws, msg) {
+      const up = ws.data.up;
+      if (!up) return;
+      if (up.readyState === 1) up.send(msg);
+      else if (ws.data.q) ws.data.q.push(msg);
+    },
+    close(ws) { try { ws.data.up && ws.data.up.close(); } catch {} },
+  },
 });
 
-console.log(`dev server → http://localhost:${port}`);
+console.log(`dev server → http://localhost:${port}  (also on 0.0.0.0:${port} for LAN/Tailscale)`);
