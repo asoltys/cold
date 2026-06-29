@@ -13,6 +13,20 @@ Bun.serve({
     const NO_STORE = 'no-store, must-revalidate';
     try {
       const path = new URL(req.url).pathname;
+      // The regtest boltz API (localhost:9001) sends no CORS headers, so the
+      // browser can't fetch it cross-origin. Proxy /boltz/* to it (adding CORS)
+      // so Lightning swaps work same-origin in dev.
+      if (path === '/boltz' || path.startsWith('/boltz/')) {
+        const CORS = { 'access-control-allow-origin': '*', 'access-control-allow-methods': 'GET,POST,OPTIONS', 'access-control-allow-headers': 'content-type' };
+        if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS });
+        const target = 'http://localhost:9001' + path.replace(/^\/boltz/, '') + new URL(req.url).search;
+        const r = await fetch(target, {
+          method: req.method,
+          headers: req.headers.get('content-type') ? { 'content-type': req.headers.get('content-type') } : {},
+          body: ['GET', 'HEAD'].includes(req.method) ? undefined : await req.text(),
+        });
+        return new Response(await r.text(), { status: r.status, headers: { 'content-type': r.headers.get('content-type') || 'application/json', ...CORS } });
+      }
       if (path === '/jsqr.js') {
         return new Response(await buildJsQr({ minify: false }), {
           headers: { 'content-type': 'text/javascript; charset=utf-8', 'cache-control': NO_STORE },

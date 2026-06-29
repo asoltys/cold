@@ -144,7 +144,7 @@ function nk(base, net) { return net === 'mainnet' ? base : `${base}:${net}`; }
 // (swapmarket.github.io); `local` is the regtest stack. Non-custodial either
 // way: a provider can fail a swap but never steal (we claim/refund on-chain).
 export const BOLTZ_PRESETS = [
-  { id: 'local', label: 'Local (regtest)', api: 'http://localhost:9001', ws: 'ws://localhost:9004/v2/ws' },
+  { id: 'local', label: 'Local (regtest)', api: '/boltz', ws: 'ws://localhost:9004/v2/ws' },
   { id: 'boltz', label: 'Boltz Exchange', api: 'https://api.boltz.exchange' },
   { id: 'middleway', label: 'Middle Way', api: 'https://api.middle-way.space' },
   { id: 'zeus', label: 'ZEUS Swaps', api: 'https://swaps.zeuslsp.com/api' },
