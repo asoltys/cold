@@ -58,6 +58,7 @@ const ui = {
   claimCodeInput: '', // the claim code the recipient pastes from their nostr DM
   consolidateError: null, // error from a coin-consolidation attempt
   viewGift: null, // re-viewing a previously created gift's link/QR { code, locked, amount, claimCode }
+  claimChoose: null, // opening a gift with existing wallets present: { code } — pick a target
   giftCode: null, // last-created gift PSBT code
   giftError: '',
   giftMax: false, // gift the whole spendable balance (no-change sweep)
@@ -264,6 +265,8 @@ function render() {
       ? lockedGiftClaimView()
     : ui.viewGift
       ? viewGiftView()
+    : ui.claimChoose
+      ? claimChooseView()
     : ui.screen === 'wallet'
       ? walletScreen()
       : ui.screen === 'accounts'
@@ -756,7 +759,7 @@ async function activateAccount(acc, opts = {}) {
   // A gift link generates this wallet only to claim into. Keep it provisional
   // until the user commits (claims, or chooses to keep it / enters the wallet),
   // so bailing from an already-claimed gift doesn't leave an empty account.
-  if (opts.gift) acc.provisional = true;
+  if (opts.gift && !opts.existingClaim) acc.provisional = true;
   const netName = getNetwork();
   if (acc.type === 'watch') wallet.load({ xpub: acc.xpub, netName, offline: false });
   else if (acc.xprv) wallet.load({ xprv: acc.xprv, netName, offline: false });
@@ -1951,7 +1954,7 @@ async function claimViaExtension() {
     const payload = await ext.nip44.decrypt(ui.claimLocked.eph, ui.claimLocked.ctKey);
     if (!payload || !previewGift(payload)) { ui.claimError = t('extDecryptFailed'); ui.busy = false; render(); return; }
     ui.busy = false; ui.claimLocked = null; ui.claimCodeInput = ''; ui.claimError = '';
-    enterWallet(newMnemonic(), '', { gift: payload }); // fresh-wallet claim
+    claimGift(payload); // claim into an existing wallet or a fresh one
   } catch {
     ui.busy = false; ui.claimError = t('extDecryptFailed'); render();
   }
@@ -1963,7 +1966,7 @@ function submitLockedCode() {
   try { payload = decryptWithCode(code, ui.claimLocked.ct); } catch {}
   if (!payload || !previewGift(payload)) { ui.claimError = t('claimCodeWrong'); render(); return; }
   ui.claimLocked = null; ui.claimCodeInput = ''; ui.claimError = '';
-  enterWallet(newMnemonic(), '', { gift: payload }); // fresh-wallet claim, like a normal gift
+  claimGift(payload); // claim into an existing wallet or a fresh one
 }
 
 // Has this gift already been claimed? Its funding coin being spent — even by an
@@ -1996,8 +1999,15 @@ async function doClaim() {
     const claim = buildClaimTx(ui.claimCode, to, rate, wallet.netCfg.net);
     await wallet.broadcast(claim.hex);
     ui.claimedAmount = claim.amount;
-    ui.claimStep = 'backup';
-    commitAccount(); // claimed — this wallet now holds funds, keep it
+    const wasProvisional = !!(activeAccount() && activeAccount().provisional);
+    commitAccount(); // claimed — keep a fresh gift wallet (no-op for an existing one)
+    if (wasProvisional) {
+      ui.claimStep = 'backup'; // fresh wallet — show the new seed to back up
+    } else {
+      ui.screen = 'wallet'; // existing wallet — straight into it, no new seed to back up
+      ui.claimStep = null;
+      toast(t('giftClaimedToast'));
+    }
     wallet.scan().catch(() => {});
   } catch (e) {
     // Broadcast failed — most likely someone claimed it in the race window.
@@ -2013,6 +2023,61 @@ async function doClaim() {
   }
   ui.busy = false;
   render();
+}
+
+// Wallets a gift could be claimed into: full accounts open this session plus the
+// durable directory (every wallet's xpub, watch-only), deduped by xpub. Claiming
+// sends the gift to the wallet's address; a watch-only one then needs the seed
+// re-entered to spend. Empty for a first-time recipient.
+function claimTargets() {
+  let sess = null;
+  try { sess = JSON.parse(sessionStorage.getItem(ACCOUNTS_KEY) || 'null'); } catch {}
+  const open = ((sess && Array.isArray(sess.accounts)) ? sess.accounts : []).filter((a) => !a.provisional);
+  const seen = new Set(open.map((a) => a.xpub).filter(Boolean));
+  return [...open, ...loadWatchAccounts().filter((w) => !seen.has(w.xpub))];
+}
+
+// Entry point for claiming a gift code. If the recipient already has wallet(s),
+// offer to claim into one or make a new one; otherwise go straight to a fresh
+// wallet (the original first-timer flow).
+function claimGift(code) {
+  ui.claimLocked = null;
+  const targets = claimTargets();
+  if (targets.length) { accounts = targets; ui.claimChoose = { code }; render(); }
+  else enterWallet(newMnemonic(), '', { gift: code });
+}
+
+// Claim a gift into an existing wallet (no new seed). activateAccount loads it and
+// opens the claim screen; existingClaim keeps it committed and, in doClaim, skips
+// the seed-backup step.
+function claimIntoAccount(acc, code) {
+  ui.claimChoose = null;
+  activateAccount(acc, { gift: code, existingClaim: true, fresh: true });
+}
+
+// Pick where to receive a gift: an existing wallet, or a brand-new one.
+function claimChooseView() {
+  const code = ui.claimChoose.code;
+  const pv = previewGift(code);
+  return h(
+    'div',
+    { class: 'col', style: 'gap:16px' },
+    brandHeader(false),
+    h('div', { class: 'card col', style: 'align-items:center;text-align:center;gap:12px' },
+      h('div', { class: 'check-badge', style: 'background:var(--accent)' }, '🎁'),
+      h('h2', { style: 'margin:0' }, t('giftWelcome')),
+      pv ? h('div', { class: 'amt', style: 'font-size:30px' }, h('span', { class: 'amount-pos' }, fmtAmount(pv.room)), ' ', unitTag('unit')) : null,
+      h('p', { class: 'muted', style: 'margin:0' }, t('claimIntoPrompt'))
+    ),
+    h('div', { class: 'card col gap6' },
+      ...accounts.map((a) =>
+        h('button', { class: 'btn-block', style: 'text-align:left', onClick: () => claimIntoAccount(a, code) },
+          a.label,
+          a.type === 'watch' ? h('span', { class: 'small faint', style: 'margin-left:6px' }, '(' + t('watchOnly') + ')') : null)
+      ),
+      h('button', { class: 'btn-primary btn-block', onClick: () => { ui.claimChoose = null; enterWallet(newMnemonic(), '', { gift: code }); } }, t('claimNewWallet'))
+    )
+  );
 }
 
 // Gift-claim flow: a fresh wallet only the claimer controls. Step 'welcome'
@@ -2108,7 +2173,12 @@ function claimScreen() {
       ),
       // A fresh wallet was already generated for the claim — offer to keep it,
       // view the claim on a block explorer, or head back to the home screen.
-      h('button', { class: 'btn-primary btn-block', onClick: () => { ui.claimTaken = null; ui.claimedAmount = 0; ui.claimStep = 'backup'; commitAccount(); render(); } }, t('createWalletAnyway')),
+      h('button', { class: 'btn-primary btn-block', onClick: () => {
+          ui.claimTaken = null; ui.claimedAmount = 0;
+          if (activeAccount() && activeAccount().provisional) { ui.claimStep = 'backup'; commitAccount(); }
+          else { ui.screen = 'wallet'; ui.claimStep = null; }
+          render();
+        } }, activeAccount() && activeAccount().provisional ? t('createWalletAnyway') : t('goToWallet')),
       ui.claimTaken.txid
         ? h('a', { class: 'btn btn-block', href: wallet.api.explorerTx(ui.claimTaken.txid), target: '_blank', rel: 'noopener', onClick: (e) => { e.preventDefault(); openExternal(wallet.api.explorerTx(ui.claimTaken.txid)); } }, t('viewOnMempool'))
         : null,
@@ -3456,10 +3526,10 @@ document.addEventListener('visibilitychange', () => {
   else onAppVisible();
 });
 loadLocale(getLang()).finally(() => {
+  applyBootAutoLogout(); // clear an overdue session before we read it for claim targets
   const code = readGiftHash();
-  if (code) { enterWallet(newMnemonic(), '', { gift: code }); return; }
+  if (code) { claimGift(code); return; } // bearer gift → claim into an existing wallet or a new one
   ui.claimLocked = readLockedGiftHash(); // locked gift → claim with your own wallet
-  applyBootAutoLogout(); // clear an overdue session before it's restored
   if (!restoreAccountsState()) render();
 });
 
