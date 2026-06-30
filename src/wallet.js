@@ -1922,6 +1922,36 @@ export class Wallet {
     return true;
   }
 
+  // Credit an on-chain receive we produced ourselves (a reverse-swap claim) the
+  // instant we broadcast it — so the balance + generic "payment received" fire
+  // without waiting for the next scan, exactly like the watcher does for inbound
+  // payments. `address` must be one of our receive (chain-0) addresses; returns
+  // false (caller relies on the scan) if it isn't known or the coin already exists.
+  creditReceive({ txid, vout, value, address }) {
+    let entry = this.receive.find((e) => e.address === address);
+    if (!entry) {
+      const info = this.addrMap.get(address);
+      if (info && info.chain === 0) entry = this.receive.find((e) => e.index === info.index);
+    }
+    if (!entry) return false;
+    if (this.utxos.find((u) => utxoId(u) === `${txid}:${vout}`)) return false;
+    this.utxos.push({ txid, vout, value, address, chain: 0, index: entry.index, confirmed: false });
+    entry.used = true;
+    entry.pending = (entry.pending || 0) + value;
+    if (!this.txs.find((t) => t.txid === txid)) {
+      this.txs.push({ txid, net: value, fee: 0, vsize: 0, confirmed: false, blockTime: 0, blockHeight: 0, firstSeen: Date.now() });
+    }
+    this.nextReceiveIndex = firstUnused(this.receive);
+    this.utxos.sort((a, b) => b.value - a.value);
+    this._sortTxs();
+    this._recomputeBalanceFromUtxos();
+    this.loaded = true;
+    this.saveCache();
+    this.retrack();
+    this.emit();
+    return true;
+  }
+
   // Optimistically reflect a just-broadcast outgoing tx so the balance and
   // history update instantly instead of waiting for the post-send rescan: drop
   // the spent coins, credit our change as pending, and add a pending history

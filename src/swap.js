@@ -318,10 +318,14 @@ export class SwapManager {
         const preimage = sha256(node.privateKey);
         const d = swapP2TR({ kind: 'reverse', preimageHash160: hash160(preimage), boltzPub33: hexToBytes(rec.refundPublicKey), halPub33: node.publicKey, lockTime: rec.timeoutBlockHeight, network: net });
         const fee = this._spendFee();
-        const hex = buildSwapSpend({ pay: d.pay, leaf: d.claimLeaf, halPriv: node.privateKey, preimage, lockupTxid: u.txid, lockupVout: u.vout, lockupValue: u.value, destAddress: w.freshReceive().address, fee, network: net });
+        const destAddress = w.freshReceive().address;
+        const hex = buildSwapSpend({ pay: d.pay, leaf: d.claimLeaf, halPriv: node.privateKey, preimage, lockupTxid: u.txid, lockupVout: u.vout, lockupValue: u.value, destAddress, fee, network: net });
         const txid = await w.api.broadcast(hex);
         rec.status = 'claimed'; rec.claimTxid = txid; rec.received = u.value - fee;
         this._save(rec); this._stop(id);
+        // Credit the claimed coin (single output → destAddress) now, so the balance
+        // + generic "payment received" fire instantly instead of waiting for a scan.
+        if (w.creditReceive) w.creditReceive({ txid, vout: 0, value: rec.received, address: destAddress });
       } catch (e) { rec.lastError = String(e?.message || e); this.onUpdate(rec); }
     };
     this.timers.set(id, setInterval(tick, 3000)); tick();

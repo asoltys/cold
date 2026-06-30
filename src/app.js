@@ -2602,11 +2602,7 @@ function receiveTab() {
   // Until receiveSeenIndex has been baselined (post-scan, in enterWallet) it
   // stays null and we never celebrate. The recency guard additionally ensures an
   // already-old payment never celebrates when a wallet is opened.
-  // While the Lightning "Received!" card is up (a reverse-swap claim is also an
-  // on-chain receive that advances the index), suppress this generic celebration
-  // so the two don't stack — its Done dismisses both.
-  const lnClaimShown = !!(ui.lnReceiveId && (() => { const r = swaps.list().find((s) => s.id === ui.lnReceiveId); return r && ['claimed', 'success'].includes(r.status); })());
-  if (!lnClaimShown && ui.receiveSeenIndex != null && wallet.nextReceiveIndex > ui.receiveSeenIndex && hasRecentIncoming()) {
+  if (ui.receiveSeenIndex != null && wallet.nextReceiveIndex > ui.receiveSeenIndex && hasRecentIncoming()) {
     // Mark it acknowledged as soon as it's shown — so a refresh or navigating
     // away (without tapping) won't bring the celebration back. It stays visible
     // this session (ui.receiveSeenIndex is unchanged) until the tap below.
@@ -2670,14 +2666,13 @@ function lnReceiveContent() {
     swaps.reverseLimits().then((l) => { ui.swapLimits = l; ui._swapLimitsLoading = false; render(); }).catch(() => { ui._swapLimitsLoading = false; });
   }
   const lim = ui.swapLimits;
-  const rec = ui.lnReceiveId ? swaps.list().find((s) => s.id === ui.lnReceiveId) : null;
+  let rec = ui.lnReceiveId ? swaps.list().find((s) => s.id === ui.lnReceiveId) : null;
   if (rec && ['claimed', 'success'].includes(rec.status)) {
-    return [
-      h('div', { class: 'check-badge' }, '✓'),
-      h('h3', { style: 'margin:0' }, t('lnReceived')),
-      rec.received ? h('div', { class: 'amount-pos', style: 'font-size:18px' }, '+' + fmtAmount(rec.received) + ' ' + unitLabel()) : null,
-      h('button', { class: 'btn-block', onClick: () => { ui.lnReceiveId = null; ui.swapReverseAmt = ''; ui.receiveSeenIndex = wallet.nextReceiveIndex; wallet.setReceiveAck(wallet.nextReceiveIndex); render(); } }, t('done')),
-    ];
+    // Claimed — the coin is credited on-chain (swap.js → creditReceive), so the
+    // generic "Payment received!" celebration shows it like any receive. Just
+    // reset the Lightning flow back to its form.
+    ui.lnReceiveId = null;
+    rec = null;
   }
   if (rec) {
     let svg = null;
