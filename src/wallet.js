@@ -1051,15 +1051,21 @@ export class Wallet {
     const confirmed = !!(tx.status && tx.status.confirmed);
     // Preserve when we first saw it pending, so we can later judge a stuck tx.
     const prior = this.txs.find((t) => t.txid === tx.txid);
+    // A tx we built + broadcast (local) already has the true net + fee from
+    // applySentTx; don't recompute them — a rescan can under-count inputs whose
+    // address isn't on the scanned frontier (e.g. a swap-claim coin), which would
+    // understate the amount sent. Only the confirmation status changes.
+    const local = !!(prior && prior.local);
     return {
       txid: tx.txid,
-      net: received - sent, // >0 incoming, <0 outgoing
-      fee: tx.fee || 0,
+      net: local ? prior.net : received - sent, // >0 incoming, <0 outgoing
+      fee: local && prior.fee ? prior.fee : tx.fee || 0,
       vsize: tx.weight ? Math.ceil(tx.weight / 4) : (prior && prior.vsize) || 0,
       confirmed,
       blockTime: (tx.status && tx.status.block_time) || 0,
       blockHeight: (tx.status && tx.status.block_height) || 0,
       firstSeen: confirmed ? 0 : (prior && prior.firstSeen) || Date.now(),
+      local,
     };
   }
 
@@ -1934,7 +1940,13 @@ export class Wallet {
       const inp = tx.getInput(i);
       const id = `${hex.encode(inp.txid)}:${inp.index}`;
       const u = byOutpoint.get(id);
-      if (!u) continue;
+      if (!u) {
+        // Not in our current utxo set (e.g. dropped by a concurrent rescan), but
+        // we built + signed this tx so the input is ours — count its value from
+        // the witness utxo so the spend total isn't undercounted.
+        if (inp.witnessUtxo) inSum += Number(inp.witnessUtxo.amount);
+        continue;
+      }
       inSum += u.value;
       spent.add(id);
       const e = (u.chain === 0 ? this.receive : this.change).find((a) => a.index === u.index);
@@ -1956,7 +1968,7 @@ export class Wallet {
       change += Number(o.amount);
     }
 
-    this.txs.unshift({ txid, net: change - inSum, fee: inSum - outSum, vsize: tx.weight ? Math.ceil(tx.weight / 4) : 0, confirmed: false, blockTime: 0, blockHeight: 0, firstSeen: Date.now() });
+    this.txs.unshift({ txid, net: change - inSum, fee: inSum - outSum, vsize: tx.weight ? Math.ceil(tx.weight / 4) : 0, confirmed: false, blockTime: 0, blockHeight: 0, firstSeen: Date.now(), local: true });
     this.nextReceiveIndex = firstUnused(this.receive);
     this.nextChangeIndex = firstUnused(this.change);
     this.utxos.sort((a, b) => b.value - a.value);
